@@ -42,12 +42,9 @@ else
     info "All system packages already installed."
 fi
 
-# Docker (may be docker.io or docker-ce)
+# Docker (optional — only needed if you plan to use Docker-based MCP servers)
 if ! command -v docker &>/dev/null; then
-    info "Installing docker.io..."
-    sudo apt install -y docker.io
-    sudo usermod -aG docker "$USER"
-    warn "Added $USER to docker group. You may need to log out/in for group to take effect."
+    info "Docker not installed. Skipping (install later with 'sudo apt install docker.io' if needed)."
 fi
 
 # Claude Code
@@ -153,7 +150,7 @@ else
 fi
 
 # ============================================================
-phase "F — Docker MCP"
+phase "F — Docker MCP Support (Optional)"
 # ============================================================
 
 if command -v docker &>/dev/null; then
@@ -163,9 +160,9 @@ if command -v docker &>/dev/null; then
         info "Starting Docker service..."
         sudo systemctl start docker
     fi
-    info "Docker MCP config is in ~/.claude.json — containers will start on first use."
+    info "Docker is available for any MCP servers that require containers."
 else
-    warn "Docker not available. Notion + Context7 MCPs won't work until Docker is installed."
+    info "Docker not installed. Install later with 'sudo apt install docker.io' if you need Docker-based MCP servers."
 fi
 
 # ============================================================
@@ -237,7 +234,7 @@ info "Manual checks remaining (run inside Claude Code):"
 echo "  - /checkin (Gmail MCP)"
 echo "  - toggl_get_me (Toggl MCP)"
 echo "  - square_list_locations (Square MCP)"
-echo "  - Notion search (Docker MCP)"
+echo "  - Notion search (Notion MCP)"
 echo "  - /start-timer + /stop-timer"
 echo ""
 info "Migration setup complete."
