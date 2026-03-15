@@ -3,8 +3,8 @@
 # SCOPE: Read-only instance listing + snapshot creation ONLY. No deletes, no modifications.
 #
 # Usage: bash lightsail_snapshot.sh <instance-name> [optional-label]
-# Example: bash lightsail_snapshot.sh CMF_Milton_2025
-# Example: bash lightsail_snapshot.sh CMF_Milton_2025 theme-update
+# Example: bash lightsail_snapshot.sh Acme_Corp_2025
+# Example: bash lightsail_snapshot.sh Acme_Corp_2025 theme-update
 #
 # Snapshot naming: {instance}-pre-work-YYYY-MM-DD-HHMM[-label]
 
