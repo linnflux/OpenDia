@@ -120,9 +120,9 @@ The entire OpenDia environment can be rebuilt on a new server from a single scri
 
 ## Persistent Memory
 
-Claude Code maintains a memory directory that persists across conversations. It stores learned patterns, client-specific knowledge, operational rules, and corrections from the Operator. A core memory file is loaded into every conversation, with topic-specific files holding deeper notes.
+Claude Code maintains a memory directory that persists across conversations. A lean index file (`MEMORY.md`) is loaded at session start, pointing to topic-specific files that hold deeper notes — client-specific knowledge, operational rules, workflow corrections, and reference data. Topic files load on demand, keeping the context window efficient.
 
-This gives Claude institutional knowledge that accumulates over time rather than resetting each session. When a mistake is corrected, the correction is saved so it never happens again.
+This gives Claude institutional knowledge that accumulates over time rather than resetting each session. When a mistake is corrected, the correction is saved so it never happens again. When the index grows past ~120 lines, Claude proactively refactors it — moving detail into topic files and keeping the index as a slim directory of pointers.
 
 ## Divisions
 
