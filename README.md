@@ -161,9 +161,16 @@ Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk)
 
 ## Installation
 
-Starting from a fresh Linux Mint installation:
+> **Note:** This has only been tested on a fresh [Linux Mint](https://linuxmint.com/) server (LMDE). These steps set up the **remote server** that runs Claude Code persistently. Once the server is running, install [Tailscale](https://tailscale.com/) on both the server and your devices (laptop, desktop, phone), then SSH into the server from anywhere to work.
 
 ### 1. Prerequisites
+
+Install [Tailscale](https://tailscale.com/download) on the server and connect it to your tailnet:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
 
 ```bash
 sudo apt update
