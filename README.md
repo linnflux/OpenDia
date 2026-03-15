@@ -172,6 +172,8 @@ curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
 ```
 
+A terminal multiplexer like [tmux](https://github.com/tmux/tmux) is highly recommended — it lets you maintain separate sessions per client or project, survive SSH disconnects, and switch contexts without losing state.
+
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-pip nodejs npm git curl tmux
