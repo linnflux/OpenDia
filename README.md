@@ -154,7 +154,7 @@ The name OpenDia means "Open Day" — your day is open because OpenDia handles t
 <p align="center">
   <img src="opendia_mark.svg" alt="OpenDia Mark" width="240">
   <br>
-  <sub><b>Open</b>Dia — Set in <a href="https://fonts.google.com/specimen/Space+Grotesk">Space Grotesk</a> Light 300 / Bold 700</sub>
+  <sub>Open<b>Dia</b> — Set in <a href="https://fonts.google.com/specimen/Space+Grotesk">Space Grotesk</a> Light 300 / Bold 700</sub>
 </p>
 
 Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) for the wordmark — a geometric typeface with just enough humanist character to feel approachable without losing its technical edge. "Open" is set in Light (300) and "Dia" in Bold (700), letting the weight contrast carry the emphasis rather than color or size. The typeface's distinctive letterforms — particularly the "O" and "D" — complement the organic geometry of the mark.
