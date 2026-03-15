@@ -112,19 +112,11 @@ Email from client
 
 The system is designed to be portable. Two scripts handle migration:
 
-- `migrate-export.sh` — Backs up `~/.claude/` configs and `~/OpenDia/` (scripts, time entries, database, static site) to Google Drive via rclone. Runs automatically every night via cron.
+- `migrate-export.sh` — Backs up `~/.claude/` configs and `~/OpenDia/` (scripts, time entries, database) to Google Drive via rclone. Runs automatically every night via cron.
 - `migrate-setup.sh` — Bootstraps a fresh machine: installs packages, pulls configs from Drive, builds MCP servers, creates the Python environment, and runs 8 verification phases.
-- `cron` — Runs `migrate-export.sh` daily at 2:00 AM ET, automatically backing up all configs, time entries, the database, and site files to Google Drive. Logs to `~/OpenDia/logs/backup.log`.
+- `cron` — Runs `migrate-export.sh` daily at 2:00 AM ET, automatically backing up all configs, time entries, and the database to Google Drive. Logs to `~/OpenDia/logs/backup.log`.
 
 The entire OpenDia environment can be rebuilt on a new server from a single script. The database, time entries, commands, memory files, and all configs travel with it.
-
-### Hosting
-
-This page is hosted on [Cloudflare Pages](https://pages.cloudflare.com/) and deployed from the OpenDia server with a single command:
-
-```
-npx wrangler pages deploy ~/OpenDia/www --project-name=opendia
-```
 
 ## Persistent Memory
 
