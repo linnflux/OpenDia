@@ -1,0 +1,10 @@
+{
+  "client": "ACME Corp",
+  "project": "ACME Website",
+  "division": "WordFlux",
+  "task": "WooCommerce product updates",
+  "estimated_minutes": 60,
+  "start": "2026-03-12T09:15",
+  "billable": true,
+  "file": "~/OpenDia/Time/2026/03/2026-03-12.md"
+}
