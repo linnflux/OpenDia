@@ -6,6 +6,8 @@ OpenDia is [Linnflux's](https://linnflux.com) internal operations platform — a
 
 > The system is designed so that Claude Code acts as the orchestration layer — reading from and writing to multiple services — while humans continue using Notion, Gmail, and Toggl through their native interfaces. Neither side is the sole source of truth; they complement each other.
 
+**[Installation instructions](#installation)** are at the bottom of this document.
+
 ## Architecture
 
 ### Remote Server + tmux
@@ -156,6 +158,111 @@ The name OpenDia means "Open Day" — your day is open because OpenDia handles t
 </p>
 
 Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) for the wordmark — a geometric typeface with just enough humanist character to feel approachable without losing its technical edge. "Open" is set in Light (300) and "Dia" in Bold (700), letting the weight contrast carry the emphasis rather than color or size. The typeface's distinctive letterforms — particularly the "O" and "D" — complement the organic geometry of the mark.
+
+## Installation
+
+Starting from a fresh Linux Mint installation:
+
+### 1. Prerequisites
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip nodejs npm git curl tmux
+```
+
+Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
+
+```bash
+sudo npm install -g @anthropic-ai/claude-code
+```
+
+### 2. Clone and set up
+
+```bash
+git clone https://github.com/linnflux/OpenDia.git ~/OpenDia/repo
+cd ~/OpenDia
+```
+
+Create the runtime directories (these hold live data and are not tracked in git):
+
+```bash
+mkdir -p ~/OpenDia/{Time,Projects,Debug,logs,scripts}
+```
+
+Copy the scripts into the live location:
+
+```bash
+cp ~/OpenDia/repo/scripts/* ~/OpenDia/scripts/
+```
+
+### 3. Initialize the database
+
+```bash
+python3 -m venv ~/OpenDia/venv
+source ~/OpenDia/venv/bin/activate
+python3 ~/OpenDia/scripts/init_db.py
+```
+
+This creates `~/OpenDia/opendia.db` with the schema and seeds the divisions table.
+
+Verify it works:
+
+```bash
+python3 ~/OpenDia/scripts/db_helper.py list-divisions
+```
+
+### 4. Configure Claude Code
+
+Launch Claude Code and authenticate:
+
+```bash
+claude
+```
+
+Create a project-level `CLAUDE.md` at `~/.claude/projects/-home-$USER-OpenDia/CLAUDE.md` with your operational instructions — this is what tells Claude about your directory structure, tools, and workflows.
+
+### 5. MCP servers (optional)
+
+Connect external services by configuring MCP servers in `~/.claude.json`. OpenDia is designed to work with:
+
+- **Notion** — task management
+- **Toggl Track** — client-facing time tracking
+- **Google Workspace** — Gmail, Drive, Calendar
+- **Square** — payments and invoicing
+
+Each is optional. The core system (database, time tracking, scripts) works without any MCP servers.
+
+### 6. Backups (optional)
+
+If you use Google Drive for backups, install and configure [rclone](https://rclone.org/):
+
+```bash
+sudo apt install -y rclone
+rclone config  # set up a remote named "gdrive"
+```
+
+Then use `migrate-export.sh` to back up configs and data:
+
+```bash
+bash ~/OpenDia/scripts/migrate-export.sh
+```
+
+To automate nightly backups:
+
+```bash
+crontab -e
+# Add: 0 2 * * * /home/$USER/OpenDia/scripts/migrate-export.sh >> /home/$USER/OpenDia/logs/backup.log 2>&1
+```
+
+### Full bootstrap
+
+If you're migrating from an existing OpenDia instance that has already run `migrate-export.sh`, you can bootstrap everything at once:
+
+```bash
+bash ~/OpenDia/scripts/migrate-setup.sh
+```
+
+This installs all packages, pulls configs and data from Google Drive, builds MCP servers, creates the Python environment, and runs verification checks.
 
 ---
 
