@@ -263,6 +263,36 @@ crontab -e
 # Add: 0 2 * * * /home/$USER/OpenDia/scripts/migrate-export.sh >> /home/$USER/OpenDia/logs/backup.log 2>&1
 ```
 
+### 7. Client machine aliases (recommended)
+
+Add these to `~/.bashrc` on any machine you SSH from:
+
+```bash
+# Quick SSH into the OpenDia server
+alias od='ssh youruser@opendia -t'
+
+# SSH in, start a new tmux session in ~/OpenDia, and launch Claude Code
+odt() {
+  ssh youruser@opendia -t 'tmux new-session -c ~/OpenDia \; send-keys claude Enter'
+}
+
+# Send a screenshot from clipboard to the server for Claude to analyze
+odscreen() {
+  local file="/tmp/screenshot-$(date +%s).png"
+  xclip -selection clipboard -t image/png -o > "$file" 2>/dev/null
+  if [ ! -s "$file" ]; then
+    echo "No image in clipboard"
+    rm -f "$file"
+    return 1
+  fi
+  scp "$file" youruser@opendia:~/OpenDia/Debug/
+  echo "Uploaded: ~/OpenDia/Debug/$(basename "$file")"
+  rm -f "$file"
+}
+```
+
+Replace `youruser@opendia` with your username and server's Tailscale hostname.
+
 ### Full bootstrap
 
 If you're migrating from an existing OpenDia instance that has already run `migrate-export.sh`, you can bootstrap everything at once:
