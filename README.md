@@ -2,9 +2,9 @@
 
 ![Active](https://img.shields.io/badge/status-active-brightgreen) ![CLI-First](https://img.shields.io/badge/CLI--first-blue) ![AI-Orchestrated](https://img.shields.io/badge/AI--orchestrated-purple)
 
-OpenDia is [Linnflux's](https://linnflux.com) internal operations platform — a CLI-first system built around [Claude Code](https://docs.anthropic.com/en/docs/claude-code) running on a dedicated Linux server. It bridges local tooling with external services to create a unified workflow for managing clients, projects, tasks, and time across all Linnflux divisions. This information was published in its initial state on March 12, 2026.
+OpenDia is a business orchestration framework that connects your existing tools into a unified, AI-driven workflow. Your email, calendars, task management, billing, and time tracking all working together. It doesn't replace your systems. It makes them work together.
 
-> The system is designed so that Claude Code acts as the orchestration layer — reading from and writing to multiple services — while humans continue using Notion, Gmail, and Toggl through their native interfaces. Neither side is the sole source of truth; they complement each other.
+OpenDia is designed to be run by an **Operator**: a trained professional inside your organization who understands your processes, your clients, and your goals. The Operator directs OpenDia, not the other way around. This information was published in its initial state on March 12, 2026.
 
 **[Installation instructions](#installation)** are at the bottom of this document.
 
