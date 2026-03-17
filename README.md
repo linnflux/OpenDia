@@ -8,6 +8,13 @@ OpenDia is designed to be run by an **Operator**: a trained professional inside 
 
 **[Installation instructions](#installation)** are at the bottom of this document.
 
+## What OpenDia says about itself
+
+- **Not a SaaS product you hand logins to.** OpenDia runs on your infrastructure, with your data, under your control. No third-party dashboards where your business lives on someone else's server.
+- **No rip-and-replace.** You keep Google Workspace, Notion, Toggl, Square, whatever you already use. OpenDia is the layer that ties them together.
+- **Human-in-the-loop by design.** AI handles the tedious coordination. The Operator makes the decisions. This isn't "set it and forget it" automation. It's augmented operations.
+- **Built for service businesses.** Agencies, consultancies, MSPs, and anyone juggling multiple clients, tools, and workflows.
+
 ## Architecture
 
 ### Remote Server + tmux
