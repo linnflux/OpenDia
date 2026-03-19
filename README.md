@@ -84,9 +84,9 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/hello` | Morning routine. Creates daily log, carries over unchecked items from the prior day. |
 | `/checkin` | Hourly check-in. Loads today's log, scans recent Gmail, numbers tasks for quick selection. |
 | `/zero` | Inbox Zero. Scans primary inbox, groups by thread, extracts action items. |
-| `/start-timer` | Start an internal time entry with client, task, division, and billable prompts. |
-| `/stop-timer` | Stop a running timer, prompt for notes, calculate duration, finalize the entry. |
-| `/pause-timer` | Pause with auto-generated notes and project summary. |
+| `/timer-start` | Start an internal time entry with client, task, division, and billable prompts. |
+| `/timer-end` | End a running timer, prompt for notes, calculate duration, finalize the entry. |
+| `/timer-pause` | Pause with auto-generated notes and project summary. |
 | `/timer-status` | Show all active timers across all sessions. |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
 | `/notion-new` | Creates a Notion task and starts a Toggl timer in one flow. |
