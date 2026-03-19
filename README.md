@@ -91,6 +91,7 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
 | `/run` | Client workflow launcher. Searches Notion, opens browser, starts Toggl timer. |
 | `/newtask` | Creates a Notion task and starts a Toggl timer in one flow. |
+| `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
 
 ## Data Flow
