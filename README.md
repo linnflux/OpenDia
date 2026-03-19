@@ -89,7 +89,7 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/pause-timer` | Pause with auto-generated notes and project summary. |
 | `/timer-status` | Show all active timers across all sessions. |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
-| `/newtask` | Creates a Notion task and starts a Toggl timer in one flow. |
+| `/notion-new` | Creates a Notion task and starts a Toggl timer in one flow. |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
 
