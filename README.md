@@ -11,7 +11,7 @@ OpenDia is designed to be run by an **Operator**: a trained professional inside 
 ## What OpenDia says about itself
 
 - **Not a SaaS product you hand logins to.** OpenDia runs on your infrastructure, with your data, under your control. No third-party dashboards where your business lives on someone else's server.
-- **No rip-and-replace.** You keep Google Workspace, Notion, Toggl, Square, whatever you already use. OpenDia is the layer that ties them together.
+- **No rip-and-replace.** You keep your existing email, project management, time tracking, and invoicing tools. OpenDia is the layer that ties them together.
 - **Human-in-the-loop by design.** AI handles the tedious coordination. The Operator makes the decisions. This isn't "set it and forget it" automation. It's augmented operations.
 - **Built for service businesses.** Agencies, consultancies, MSPs, and anyone juggling multiple clients, tools, and workflows.
 
@@ -44,7 +44,7 @@ A local SQLite database stores the canonical list of companies, people, projects
 
 Time entries live in daily markdown files with YAML frontmatter. Each running timer has a companion `.json` state file that persists until the work is complete — timers represent open engagements, not stopwatch sessions. A timer might stay open for hours, days, or weeks as work progresses across multiple sessions.
 
-Every entry records: client, project, division, task, estimated minutes, start/end, duration, billable flag, and notes. The `estimated_minutes` field drives billing — it captures how long the task *should* take a professional developer, not the wall-clock time. Actual elapsed time is tracked for internal reference. If a second timer is started for the same client, Claude flags it as a potential duplicate. This runs alongside Toggl, not instead of it — it's Linnflux's own internal record with fields Toggl doesn't track.
+Every entry records: client, project, division, task, estimated minutes, start/end, duration, billable flag, and notes. The `estimated_minutes` field drives billing — it captures how long the task *should* take a professional developer, not the wall-clock time. Actual elapsed time is tracked for internal reference. If a second timer is started for the same client, Claude flags it as a potential duplicate. This runs alongside your external time tracker, not instead of it — it's your own internal record with fields external tools don't track.
 
 ```yaml
 ~/OpenDia/Time/2026/03/2026-03-12.md
@@ -70,33 +70,15 @@ OpenDia connects to external services through three patterns, chosen based on sc
 
 #### MCP Servers (structured tools)
 
-Services Claude interacts with frequently get a dedicated [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server — a lightweight API bridge that exposes typed tool functions Claude can call directly. Credentials live in `~/.claude.json` alongside the server config, never in memory or source files.
-
-| Service | Scope | Access |
-|---------|-------|--------|
-| **Notion** | Task management, company pages, meeting notes | Full CRUD |
-| **Toggl Track** | Client-facing time tracking, timers, entries | Full CRUD |
-| **Google Workspace** | Gmail, Drive, Calendar, Sheets | Full CRUD |
-| **Square** | Payments, invoices, customer data | Read-only |
-
-Humans keep using Notion, Gmail, and Toggl through their normal UIs. Claude participates in those same systems via MCP without replacing them.
+Services Claude interacts with frequently get a dedicated [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server — a lightweight API bridge that exposes typed tool functions Claude can call directly. This covers things like task management, time tracking, email, and invoicing. Humans keep using their normal UIs; Claude participates in those same systems via MCP without replacing them.
 
 #### CLI Tools (scoped commands)
 
-Services with narrow, infrequent use run through their native CLI. Credentials are managed by the CLI's own auth mechanism or scoped IAM policies — not stored in OpenDia.
-
-| Service | Tool | Scope |
-|---------|------|-------|
-| **AWS Lightsail** | `aws lightsail` | Snapshots only (scoped IAM: `get-instances`, `create-instance-snapshot`, `get-instance-snapshot`) |
-| **Cloudflare** | `wrangler` / `curl` | Pages deploys, DNS. API key sourced from a single external file at runtime — never stored in memory |
+Services with narrow, infrequent use run through their native CLI — things like cloud snapshots and DNS management. Credentials are managed by the CLI's own auth mechanism or scoped IAM policies, not stored in OpenDia.
 
 #### Raw API (env var auth)
 
-Services used occasionally via direct API calls. Tokens are stored as environment variables in `~/.bashrc`, referenced at runtime — never hardcoded in memory files or source code.
-
-| Service | Env Var | Scope |
-|---------|---------|-------|
-| **Make.com** | `$MAKE_API_TOKEN` | Scenario management, webhooks, automation triggers |
+Services used occasionally via direct API calls. Tokens are stored as environment variables, referenced at runtime — never hardcoded in memory files or source code.
 
 ### Credential Security
 
@@ -105,10 +87,7 @@ No API tokens, keys, or secrets are stored in:
 - Source code or the git repository
 - Plaintext config files within `~/OpenDia/`
 
-Credentials live in one of three places depending on the integration pattern:
-1. **MCP server config** (`~/.claude.json`) — for MCP integrations
-2. **Environment variables** (`~/.bashrc`) — for raw API calls
-3. **External tooling** (AWS IAM, CLI auth, runtime file reads) — for CLI tools
+Credentials live outside the project directory, managed by MCP server configs, environment variables, or external tooling (IAM, CLI auth) depending on the integration pattern.
 
 ## Custom Commands
 
@@ -132,11 +111,11 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 
 The SQLite database acts as the local index that ties external systems together. A company record might have:
 
-- A `notion_id` linking to its Notion company page
-- A `toggl_client_id` linking to its Toggl client entry
+- An external ID linking to its project management page
+- A client ID linking to its time tracking entry
 - Internal time entries referencing it by name in the markdown files
 
-When Claude resolves a client context — from an email sender, a task description, or a spoken name — it looks up the company in SQLite, finds related Notion tasks, checks Toggl for active timers, and starts an internal time entry. All in one flow. No single service owns the data; SQLite is the glue.
+When Claude resolves a client context — from an email sender, a task description, or a spoken name — it looks up the company in SQLite, finds related tasks, checks for running timers, and starts an internal time entry. All in one flow. No single service owns the data; SQLite is the glue.
 
 ```
 Email from client
@@ -144,8 +123,8 @@ Email from client
       v
   SQLite lookup (fuzzy match company name)
       |
-      +---> Notion: find open tasks for this client
-      +---> Toggl: check for running timers
+      +---> Project manager: find open tasks for this client
+      +---> Time tracker: check for running timers
       +---> Internal: start time entry
       |
       v
@@ -292,14 +271,7 @@ Create a project-level `CLAUDE.md` at `~/.claude/projects/-home-$USER-OpenDia/CL
 
 ### 5. MCP servers (optional)
 
-Connect external services by configuring MCP servers in `~/.claude.json`. OpenDia is designed to work with:
-
-- **Notion** — task management
-- **Toggl Track** — client-facing time tracking
-- **Google Workspace** — Gmail, Drive, Calendar
-- **Square** — payments and invoicing
-
-Each is optional. The core system (database, time tracking, scripts) works without any MCP servers.
+Connect external services by configuring MCP servers in `~/.claude.json`. OpenDia is designed to work with any combination of project management, time tracking, email, and invoicing services that have MCP server implementations. Each is optional. The core system (database, time tracking, scripts) works without any MCP servers.
 
 ### 6. Backups (optional)
 
