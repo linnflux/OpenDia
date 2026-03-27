@@ -133,6 +133,24 @@ Claude Code maintains a memory directory that persists across conversations. A l
 
 This gives Claude institutional knowledge that accumulates over time rather than resetting each session. When a mistake is corrected, the correction is saved so it never happens again. When the index grows past ~120 lines, Claude proactively refactors it — moving detail into topic files and keeping the index as a slim directory of pointers.
 
+## SSH Write Guard
+
+OpenDia manages remote servers via SSH — WordPress instances, infrastructure, client environments. A belt-and-suspenders approach prevents accidental destructive operations:
+
+**Hard gate (PreToolUse hook):** A Bash hook (`~/.claude/hooks/ssh-write-guard.sh`) intercepts every shell command before execution. If the command contains SSH, scp, or rsync combined with a writable operation, it prompts the Operator for confirmation before proceeding. This catches:
+
+- File modifications: `sed -i`, `rm`, `mv`, `cp`, `chmod`, `chown`, `tee`, `truncate`, `dd`, `shred`
+- Output redirects: `>`, `>>`, `2>`, `&>`
+- System operations: `systemctl restart`, `kill`, package managers, user management, firewall rules
+- Dangerous flags: `--force`, `--hard`, `-rf`, `--delete`
+- WordPress writes: `wp ... delete|update|install|deactivate|activate|create|drop`
+
+Read-only commands (`ls`, `cat`, `grep`, `wp option get`, etc.) pass through without interruption.
+
+**Soft gate (CLAUDE.md rules):** In Plan Mode, Claude is instructed to never execute writable SSH commands at all — not even with confirmation. The Operator must exit Plan Mode first and explicitly approve the action. This ensures planning stays read-only and execution is always intentional.
+
+The hook returns `{"decision": "ask"}` rather than `{"decision": "block"}`, so the Operator can always override. The goal is verification, not obstruction.
+
 ## Divisions
 
 | Division | Focus |
@@ -149,7 +167,7 @@ This gives Claude institutional knowledge that accumulates over time rather than
 2. **No single source of truth.** SQLite bridges services but doesn't replace them. Each system holds its own authoritative data; SQLite holds the cross-references.
 3. **Portable and rebuildable.** Everything syncs to Google Drive. A new server can be fully provisioned from a single bootstrap script.
 4. **Concurrent by default.** Multiple tmux sessions, multiple timers, multiple client contexts — all running simultaneously on one server.
-5. **Safety guardrails.** No emails sent without explicit confirmation. No destructive AWS operations. No force pushes. Claude asks before acting on anything irreversible.
+5. **Safety guardrails.** No emails sent without explicit confirmation. No destructive AWS operations. No force pushes. Claude asks before acting on anything irreversible. SSH write operations require explicit Operator confirmation via a PreToolUse hook (see below).
 6. **Accumulating intelligence.** Memory files capture corrections, patterns, and client-specific knowledge. Claude gets smarter about Linnflux operations with every session.
 
 ## The Mark
