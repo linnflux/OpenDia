@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # migrate-setup.sh — Bootstrap OpenDia on a new LMDE7 machine
 # Pulls everything from Google Drive (populated by migrate-export.sh)
-# Run as your regular user (linnflux), NOT as root.
+# Run as your regular user ($USER), NOT as root.
 
 set -euo pipefail
 

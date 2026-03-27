@@ -22,7 +22,7 @@ OpenDia is designed to be run by an **Operator**: a trained professional inside 
 Claude Code runs on a persistent Linux Mint server (`opendia`) on a [Tailscale](https://tailscale.com) mesh network. The Operator SSHs in from any machine — desktop, laptop, or mobile — and attaches to long-running `tmux` sessions, one per project or client context. Sessions survive disconnects, sleep, and machine switches. The server is the single point of execution; client machines are just terminals.
 
 ```
-laptop ~$ ssh linnflux@opendia
+laptop ~$ ssh youruser@opendia
 opendia ~$ tmux attach -t acme
 ```
 
