@@ -64,16 +64,51 @@ notes: Updated variable product attributes via WP-CLI
 ---
 ```
 
-### MCP Servers
+### External Integrations
 
-Claude Code connects to external services via [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers — lightweight API bridges that expose tool functions Claude can call directly:
+OpenDia connects to external services through three patterns, chosen based on scope and frequency of use:
 
-- **Notion** — Task management, company pages, meeting notes. Claude reads, creates, and updates tasks and appends content to pages.
-- **Toggl Track** — Client-facing time tracking. Start/stop timers, list entries, cross-reference with internal time data.
-- **Google Workspace** — Gmail (inbox scanning, email review), Drive (file sync, backups), Calendar, and Sheets.
-- **Square** — Read-only access to payments, invoices, and customer data for billing context.
+#### MCP Servers (structured tools)
 
-The key principle: humans keep using Notion, Gmail, and Toggl through their normal UIs. Claude participates in those same systems via MCP without replacing them.
+Services Claude interacts with frequently get a dedicated [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server — a lightweight API bridge that exposes typed tool functions Claude can call directly. Credentials live in `~/.claude.json` alongside the server config, never in memory or source files.
+
+| Service | Scope | Access |
+|---------|-------|--------|
+| **Notion** | Task management, company pages, meeting notes | Full CRUD |
+| **Toggl Track** | Client-facing time tracking, timers, entries | Full CRUD |
+| **Google Workspace** | Gmail, Drive, Calendar, Sheets | Full CRUD |
+| **Square** | Payments, invoices, customer data | Read-only |
+
+Humans keep using Notion, Gmail, and Toggl through their normal UIs. Claude participates in those same systems via MCP without replacing them.
+
+#### CLI Tools (scoped commands)
+
+Services with narrow, infrequent use run through their native CLI. Credentials are managed by the CLI's own auth mechanism or scoped IAM policies — not stored in OpenDia.
+
+| Service | Tool | Scope |
+|---------|------|-------|
+| **AWS Lightsail** | `aws lightsail` | Snapshots only (scoped IAM: `get-instances`, `create-instance-snapshot`, `get-instance-snapshot`) |
+| **Cloudflare** | `wrangler` / `curl` | Pages deploys, DNS. API key sourced from a single external file at runtime — never stored in memory |
+
+#### Raw API (env var auth)
+
+Services used occasionally via direct API calls. Tokens are stored as environment variables in `~/.bashrc`, referenced at runtime — never hardcoded in memory files or source code.
+
+| Service | Env Var | Scope |
+|---------|---------|-------|
+| **Make.com** | `$MAKE_API_TOKEN` | Scenario management, webhooks, automation triggers |
+
+### Credential Security
+
+No API tokens, keys, or secrets are stored in:
+- Memory files (loaded into AI context every session)
+- Source code or the git repository
+- Plaintext config files within `~/OpenDia/`
+
+Credentials live in one of three places depending on the integration pattern:
+1. **MCP server config** (`~/.claude.json`) — for MCP integrations
+2. **Environment variables** (`~/.bashrc`) — for raw API calls
+3. **External tooling** (AWS IAM, CLI auth, runtime file reads) — for CLI tools
 
 ## Custom Commands
 
