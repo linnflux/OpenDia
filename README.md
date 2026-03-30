@@ -325,6 +325,53 @@ odscreen() {
 
 Replace `youruser@opendia` with your username and server's Tailscale hostname.
 
+### 8. Terminal bell notification (recommended)
+
+Claude Code uses a `Stop` hook to send a terminal bell character (`\a`) whenever it finishes responding. The bell travels back through the SSH+tmux chain to your local terminal, so you hear a sound when Claude is done — useful when you step away or switch windows.
+
+The hook is already configured in `~/.claude/settings.json` on the server:
+
+```json
+"Stop": [
+  {
+    "matcher": "",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "printf '\\a' > /dev/tty"
+      }
+    ]
+  }
+]
+```
+
+**Client machine setup (Linux Mint / Cinnamon):**
+
+Enable audible bell in the Cinnamon window manager — this is the setting that actually routes the bell character to your sound system:
+
+```bash
+gsettings set org.cinnamon.desktop.wm.preferences audible-bell true
+```
+
+Also ensure event sounds are enabled:
+
+```bash
+gsettings set org.cinnamon.desktop.sound event-sounds true
+```
+
+**GNOME Terminal** must have audible bell enabled in its profile settings (Edit > Preferences > Profile > "Terminal bell").
+
+**tmux** on the server must pass bells through (these are the defaults):
+
+```bash
+tmux set-option -g visual-bell off
+tmux set-option -g bell-action any
+```
+
+**Verify:** Run `printf '\a'` on your local machine. If you hear a sound, the full chain will work.
+
+> **Note:** The `org.gnome.desktop.wm.preferences audible-bell` setting does **not** work on Cinnamon — you must use the `org.cinnamon.desktop.wm.preferences` schema. The `printf '\a' > /dev/tty` redirect is required in the hook because Claude Code captures stdout from hook subprocesses; writing directly to `/dev/tty` bypasses that and reaches the terminal.
+
 ### Full bootstrap
 
 If you're migrating from an existing OpenDia instance that has already run `migrate-export.sh`, you can bootstrap everything at once:
