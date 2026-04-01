@@ -328,11 +328,25 @@ Replace `youruser@opendia` with your username and server's Tailscale hostname.
 
 ### 8. Terminal bell notification (recommended)
 
-Claude Code uses a `Stop` hook to send a terminal bell character (`\a`) whenever it finishes responding. The bell travels back through the SSH+tmux chain to your local terminal, so you hear a sound when Claude is done — useful when you step away or switch windows.
+Claude Code uses hooks to send a terminal bell character (`\a`) through the SSH+tmux chain to your local terminal — useful when you step away or switch windows. Two events trigger a bell:
 
-The hook is already configured in `~/.claude/settings.json` on the server:
+- **`Stop`** — fires when Claude finishes responding
+- **`PermissionRequest`** — fires when Claude pauses for tool approval (e.g., allowing access to a URL or running a command)
+
+Both are configured in `~/.claude/settings.json` on the server:
 
 ```json
+"PermissionRequest": [
+  {
+    "matcher": "",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "printf '\\a' > /dev/tty"
+      }
+    ]
+  }
+],
 "Stop": [
   {
     "matcher": "",
