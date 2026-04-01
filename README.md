@@ -101,6 +101,7 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
+| `/roundup` | Project priority roundup. Scores and ranks open projects by urgency, lets you pick one to start via `/od-go`. |
 | `/timer-end` | End a running timer, prompt for notes, calculate duration, finalize the entry. |
 | `/timer-pause` | Pause with auto-generated notes and project summary. |
 | `/timer-start` | Start an internal time entry with client, task, division, and billable prompts. |
