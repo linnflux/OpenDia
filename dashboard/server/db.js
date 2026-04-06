@@ -29,7 +29,15 @@ export function getAllProjects() {
 }
 
 export function getProjectById(id) {
-  return getDb().prepare(`${GET_ALL_PROJECTS.replace("ORDER BY p.updated_at DESC", "WHERE p.id = ?")}`).get(id);
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id,
+           c.name AS company_name, c.short_name AS company_short,
+           d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE p.id = ?
+  `).get(id);
 }
 
 const UPDATABLE_FIELDS = new Set(["status", "notes", "tmux_session"]);
