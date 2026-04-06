@@ -13,7 +13,7 @@ function getDb() {
 }
 
 const GET_ALL_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id,
          c.name AS company_name, c.short_name AS company_short,
          d.name AS division
   FROM projects p

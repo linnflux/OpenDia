@@ -7,6 +7,15 @@ const STATUSES = [
   { key: "ice", label: "Ice", color: "#6b7280" },
 ];
 
+function NotionIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6.017 4.313l55.333-4.087c6.797-.583 8.543-.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277-1.553 6.807-6.99 7.193L24.467 99.967c-4.08.193-6.023-.39-8.16-3.113L3.3 79.94c-2.333-3.113-3.3-5.443-3.3-8.167V11.113c0-3.497 1.553-6.413 6.017-6.8z" fill="#fff"/>
+      <path d="M61.35.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.723.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257-3.89c5.433-.387 6.99-2.917 6.99-7.193V20.64c0-2.21-.873-2.847-3.443-4.733L75.24 3.57C71.1-.26 69.36-.56 61.35.227zM25.33 19.2c-5.2.33-6.38.407-9.34-1.95L8.88 11.5c-.78-.78-.39-1.75 1.75-1.95l51.25-3.69c4.47-.39 6.8 1.17 8.54 2.53l8.54 6.22c.39.2.97 1.36 0 1.36l-52.87 3.11-.76.12zM19.7 88.42V33.6c0-2.53.78-3.7 3.11-3.89l58.47-3.3c2.14-.2 3.11 1.17 3.11 3.7v54.43c0 2.53-1.37 4.86-4.47 5.05L26.5 92.1c-3.11.2-6.8-1.17-6.8-3.7zm52.07-51.34c.39 1.75 0 3.5-1.75 3.7l-2.72.58v40.14c-2.33 1.17-4.47 1.95-6.21 1.95-2.92 0-3.7-.97-5.83-3.5L38.17 52.63v24.27l5.63 1.36s0 3.3-4.67 3.3l-12.83.78c-.39-.78 0-2.73 1.36-3.11l3.3-.97V44.6l-4.67-.39c-.39-1.75.58-4.28 3.3-4.47l13.8-.97 18.33 28.14V44.8l-4.67-.58c-.39-2.14 1.17-3.7 3.11-3.89l13.03-.78z" fill="#000"/>
+    </svg>
+  );
+}
+
 const DIVISION_COLORS = {
   WordFlux: "#3b82f6",
   WatchThreat: "#ef4444",
@@ -117,6 +126,17 @@ export default function CardModal({ project, onClose, onUpdate }) {
               {project.division}
             </span>
           )}
+          {project.notion_id && (
+            <a
+              className="modal-notion-link"
+              href={`https://www.notion.so/${project.notion_id.replace(/-/g, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in Notion"
+            >
+              <NotionIcon size={18} />
+            </a>
+          )}
         </div>
 
         <div className="modal-section">
@@ -208,6 +228,19 @@ export default function CardModal({ project, onClose, onUpdate }) {
 
         <div className="modal-footer">
           <span className="modal-id">ID: {project.id}</span>
+          {project.notion_id && (
+            <a
+              className="modal-notion-link"
+              href={`https://www.notion.so/${project.notion_id.replace(/-/g, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in Notion"
+              style={{ marginLeft: "auto" }}
+            >
+              <NotionIcon size={14} />
+              <span style={{ marginLeft: "0.25rem", fontSize: "0.7rem", color: "#64748b" }}>Notion</span>
+            </a>
+          )}
         </div>
       </div>
     </div>
