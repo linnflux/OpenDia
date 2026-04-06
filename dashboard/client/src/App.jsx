@@ -24,7 +24,10 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>OpenDia</h1>
+        <div className="app-logo">
+          <img src="/opendia_mark.svg" alt="OpenDia" className="app-mark" />
+          <h1 className="app-wordmark"><span className="wm-open">Open</span><span className="wm-dia">Dia</span></h1>
+        </div>
       </header>
       {loading ? (
         <div className="loading">Loading projects...</div>

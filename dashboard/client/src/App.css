@@ -24,10 +24,30 @@ body {
   padding: 0 0.5rem;
 }
 
-.app-header h1 {
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.app-mark {
+  height: 32px;
+  width: auto;
+}
+
+.app-wordmark {
+  font-family: "Space Grotesk", sans-serif;
   font-size: 1.5rem;
-  font-weight: 700;
+  line-height: 1;
   color: #f1f5f9;
+}
+
+.wm-open {
+  font-weight: 300;
+}
+
+.wm-dia {
+  font-weight: 700;
 }
 
 .loading {
