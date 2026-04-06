@@ -2,7 +2,8 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProjectStatus } from "./db.js";
+import { getAllProjects, updateProject, getProjectById } from "./db.js";
+import { getTimerEntriesForProject } from "./timers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -23,11 +24,11 @@ app.get("/api/projects", (_req, res) => {
 app.patch("/api/projects/:id", (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { status } = req.body;
-    if (!status) {
-      return res.status(400).json({ error: "status is required" });
+    const fields = req.body;
+    if (!fields || Object.keys(fields).length === 0) {
+      return res.status(400).json({ error: "No fields provided" });
     }
-    const updated = updateProjectStatus(id, status);
+    const updated = updateProject(id, fields);
     if (!updated) {
       return res.status(404).json({ error: "project not found" });
     }
@@ -35,6 +36,22 @@ app.patch("/api/projects/:id", (req, res) => {
   } catch (err) {
     console.error("PATCH /api/projects/:id error:", err.message);
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.get("/api/projects/:id/timers", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) {
+      return res.status(404).json({ error: "project not found" });
+    }
+    const limit = parseInt(req.query.limit || "20", 10);
+    const entries = await getTimerEntriesForProject(project, limit);
+    res.json(entries);
+  } catch (err) {
+    console.error("GET /api/projects/:id/timers error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

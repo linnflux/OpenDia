@@ -28,14 +28,28 @@ export function getAllProjects() {
   return getDb().prepare(GET_ALL_PROJECTS).all();
 }
 
-export function updateProjectStatus(id, status) {
-  if (!VALID_STATUSES.has(status)) {
-    throw new Error(`Invalid status: ${status}`);
+export function getProjectById(id) {
+  return getDb().prepare(`${GET_ALL_PROJECTS.replace("ORDER BY p.updated_at DESC", "WHERE p.id = ?")}`).get(id);
+}
+
+const UPDATABLE_FIELDS = new Set(["status", "notes", "tmux_session"]);
+
+export function updateProject(id, fields) {
+  const sets = [];
+  const vals = [];
+  for (const [key, val] of Object.entries(fields)) {
+    if (!UPDATABLE_FIELDS.has(key)) continue;
+    if (key === "status" && !VALID_STATUSES.has(val)) {
+      throw new Error(`Invalid status: ${val}`);
+    }
+    sets.push(`${key} = ?`);
+    vals.push(val);
   }
+  if (sets.length === 0) throw new Error("No valid fields to update");
+  sets.push("updated_at = datetime('now')");
+  vals.push(id);
   const result = getDb()
-    .prepare(
-      "UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?"
-    )
-    .run(status, id);
+    .prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`)
+    .run(...vals);
   return result.changes > 0;
 }

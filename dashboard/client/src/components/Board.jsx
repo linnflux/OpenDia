@@ -3,9 +3,9 @@ import { useState } from "react";
 import Column from "./Column.jsx";
 import Card from "./Card.jsx";
 
-const COLUMNS = ["in_progress", "wfhuman", "completed", "ice"];
+const COLUMNS = ["in_progress", "wfhuman", "ice", "completed"];
 
-export default function Board({ grouped, moveProject }) {
+export default function Board({ grouped, moveProject, onCardClick }) {
   const [activeProject, setActiveProject] = useState(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -52,7 +52,7 @@ export default function Board({ grouped, moveProject }) {
     >
       <div className="board">
         {COLUMNS.map((status) => (
-          <Column key={status} status={status} projects={grouped[status] || []} />
+          <Column key={status} status={status} projects={grouped[status] || []} onCardClick={onCardClick} />
         ))}
       </div>
       <DragOverlay>

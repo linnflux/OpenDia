@@ -9,7 +9,7 @@ const DIVISION_COLORS = {
   "ADA Web Work": "#f59e0b",
 };
 
-export default function Card({ project }) {
+export default function Card({ project, onClick }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: String(project.id), data: { project } });
 
@@ -21,8 +21,13 @@ export default function Card({ project }) {
 
   const divColor = DIVISION_COLORS[project.division] || "#6b7280";
 
+  function handleClick(e) {
+    // Only open modal on true click, not after a drag
+    if (onClick && !isDragging) onClick(project);
+  }
+
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="card">
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="card" onClick={handleClick}>
       <div className="card-name">{project.name}</div>
       <div className="card-company">
         {project.company_name || "No company"}

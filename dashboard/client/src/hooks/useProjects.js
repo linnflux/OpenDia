@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const COLUMNS = ["in_progress", "wfhuman", "completed", "ice"];
+const COLUMNS = ["in_progress", "wfhuman", "ice", "completed"];
 
 export function useProjects() {
   const [projects, setProjects] = useState([]);
@@ -48,5 +48,23 @@ export function useProjects() {
     }
   };
 
-  return { grouped, loading, moveProject, refresh: fetchProjects };
+  const updateProject = async (projectId, fields) => {
+    // Optimistic update
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? { ...p, ...fields } : p))
+    );
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+    } catch (err) {
+      console.error("update error:", err);
+      fetchProjects();
+    }
+  };
+
+  return { grouped, loading, moveProject, updateProject, refresh: fetchProjects };
 }
