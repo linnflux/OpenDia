@@ -89,6 +89,10 @@ No API tokens, keys, or secrets are stored in:
 
 Credentials live outside the project directory, managed by MCP server configs, environment variables, or external tooling (IAM, CLI auth) depending on the integration pattern.
 
+## Dashboard
+
+A lightweight Kanban board that provides a visual interface to the SQLite database. Projects appear as draggable cards organized into status columns, with detail modals showing editable fields and associated time entries pulled from the internal timer system. Built with React and Express, served on a single port, accessible from any machine on the Tailscale network. See [`dashboard/README.md`](dashboard/README.md) for setup and usage details.
+
 ## Custom Commands
 
 Custom commands are markdown prompt files that define repeatable workflows. The Operator types a slash command, and Claude executes the full routine.
