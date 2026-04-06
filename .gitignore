@@ -17,5 +17,13 @@ venv/
 # Node
 node_modules/
 
+# Dashboard
+dashboard/client/dist/
+dashboard/.env
+
+# Data
+*.db
+*.sqlite
+
 # Cloudflare
 .wrangler/
