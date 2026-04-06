@@ -66,5 +66,28 @@ export function useProjects() {
     }
   };
 
-  return { grouped, loading, moveProject, updateProject, refresh: fetchProjects };
+  const reorderColumn = async (status, orderedIds) => {
+    // Optimistic: reorder the projects array to match orderedIds
+    setProjects((prev) => {
+      const inCol = prev.filter((p) => p.status === status);
+      const rest = prev.filter((p) => p.status !== status);
+      const ordered = orderedIds
+        .map((id) => inCol.find((p) => p.id === id))
+        .filter(Boolean);
+      return [...rest, ...ordered];
+    });
+    try {
+      const res = await fetch("/api/projects/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, ids: orderedIds }),
+      });
+      if (!res.ok) throw new Error("Failed to reorder");
+    } catch (err) {
+      console.error("reorder error:", err);
+      fetchProjects();
+    }
+  };
+
+  return { grouped, loading, moveProject, updateProject, reorderColumn, refresh: fetchProjects };
 }

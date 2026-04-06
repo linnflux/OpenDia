@@ -19,7 +19,7 @@ const GET_ALL_PROJECTS = `
   FROM projects p
   LEFT JOIN companies c ON p.company_id = c.id
   LEFT JOIN divisions d ON p.division_id = d.id
-  ORDER BY p.updated_at DESC
+  ORDER BY p.sort_order ASC, p.updated_at DESC
 `;
 
 const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
@@ -52,4 +52,20 @@ export function updateProject(id, fields) {
     .prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`)
     .run(...vals);
   return result.changes > 0;
+}
+
+export function reorderProjects(status, ids) {
+  if (!VALID_STATUSES.has(status)) {
+    throw new Error(`Invalid status: ${status}`);
+  }
+  const db = getDb();
+  const stmt = db.prepare(
+    "UPDATE projects SET sort_order = ?, status = ?, updated_at = datetime('now') WHERE id = ?"
+  );
+  const run = db.transaction(() => {
+    for (let i = 0; i < ids.length; i++) {
+      stmt.run(i, status, ids[i]);
+    }
+  });
+  run();
 }

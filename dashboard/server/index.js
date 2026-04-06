@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +35,20 @@ app.patch("/api/projects/:id", (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("PATCH /api/projects/:id error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put("/api/projects/reorder", (req, res) => {
+  try {
+    const { status, ids } = req.body;
+    if (!status || !Array.isArray(ids)) {
+      return res.status(400).json({ error: "status and ids[] required" });
+    }
+    reorderProjects(status, ids);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("PUT /api/projects/reorder error:", err.message);
     res.status(400).json({ error: err.message });
   }
 });

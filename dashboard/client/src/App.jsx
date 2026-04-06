@@ -4,7 +4,7 @@ import Board from "./components/Board.jsx";
 import CardModal from "./components/CardModal.jsx";
 
 export default function App() {
-  const { grouped, loading, moveProject, updateProject } = useProjects();
+  const { grouped, loading, moveProject, updateProject, reorderColumn } = useProjects();
   const [selectedProject, setSelectedProject] = useState(null);
 
   function handleCardClick(project) {
@@ -29,7 +29,7 @@ export default function App() {
       {loading ? (
         <div className="loading">Loading projects...</div>
       ) : (
-        <Board grouped={grouped} moveProject={moveProject} onCardClick={handleCardClick} />
+        <Board grouped={grouped} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} />
       )}
       {selectedProject && (
         <CardModal
