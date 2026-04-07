@@ -53,6 +53,19 @@ function TimerEntry({ entry }) {
   );
 }
 
+const IMG_RE = /(~\/OpenDia\/[^\s]+\.(?:png|jpg|jpeg|gif|webp|svg))/gi;
+
+function extractImagePaths(...fields) {
+  const paths = [];
+  for (const text of fields) {
+    if (!text) continue;
+    for (const match of text.matchAll(IMG_RE)) {
+      if (!paths.includes(match[1])) paths.push(match[1]);
+    }
+  }
+  return paths;
+}
+
 export default function CardModal({ project, onClose, onUpdate }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
@@ -396,6 +409,29 @@ export default function CardModal({ project, onClose, onUpdate }) {
             </div>
           )}
         </div>
+
+        {extractImagePaths(project.notes, project.next_step).length > 0 && (
+          <div className="modal-section">
+            <label className="modal-label">Attachments</label>
+            <div className="attachment-grid">
+              {extractImagePaths(project.notes, project.next_step).map((path) => (
+                <a
+                  key={path}
+                  className="attachment-preview"
+                  href={`/api/file?path=${encodeURIComponent(path)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    src={`/api/file?path=${encodeURIComponent(path)}`}
+                    alt={path.split("/").pop()}
+                  />
+                  <span className="attachment-name">{path.split("/").pop()}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="modal-section">
           <label className="modal-label">

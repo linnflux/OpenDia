@@ -178,6 +178,23 @@ app.get("/api/projects/:id/notion-title", async (req, res) => {
   }
 });
 
+// Serve OpenDia files (images/attachments) — scoped to ~/OpenDia/
+app.get("/api/file", (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).json({ error: "path required" });
+
+  // Resolve ~ to home dir, then ensure it's under ~/OpenDia/
+  const resolved = resolve(filePath.replace(/^~/, process.env.HOME));
+  const openDiaRoot = resolve(process.env.HOME, "OpenDia");
+  if (!resolved.startsWith(openDiaRoot)) {
+    return res.status(403).json({ error: "path must be under ~/OpenDia/" });
+  }
+
+  res.sendFile(resolved, (err) => {
+    if (err) res.status(404).json({ error: "file not found" });
+  });
+});
+
 // Serve static files in production
 const distPath = resolve(__dirname, "..", "client", "dist");
 app.use(express.static(distPath));

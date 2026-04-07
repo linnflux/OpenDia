@@ -720,6 +720,46 @@ body.has-bg::before {
   vertical-align: middle;
 }
 
+.attachment-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.attachment-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  text-decoration: none;
+  transition: border-color 0.15s;
+  max-width: 160px;
+}
+
+.attachment-preview:hover {
+  border-color: var(--accent);
+}
+
+.attachment-preview img {
+  max-width: 140px;
+  max-height: 100px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.attachment-name {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
 .timer-list {
   display: flex;
   flex-direction: column;
