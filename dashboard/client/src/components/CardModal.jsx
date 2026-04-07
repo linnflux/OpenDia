@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from "react";
 const STATUSES = [
   { key: "in_progress", label: "In Progress", color: "#3b82f6" },
   { key: "wfhuman", label: "WFHuman", color: "#f59e0b" },
-  { key: "completed", label: "Completed", color: "#22c55e" },
   { key: "ice", label: "Ice", color: "#6b7280" },
+  { key: "completed", label: "Completed", color: "#22c55e" },
 ];
 
 function NotionIcon({ size = 16 }) {
