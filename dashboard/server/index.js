@@ -3,7 +3,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject } from "./db.js";
-import { getTimerEntriesForProject } from "./timers.js";
+import { getTimerEntriesForProject, getActiveTimers } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
 import { analyzeSync } from "./ai.js";
@@ -145,6 +145,21 @@ app.post("/api/projects/:id/sync", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("POST /api/projects/:id/sync error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/timers/active", async (req, res) => {
+  try {
+    const timers = await getActiveTimers();
+    const projectIds = new Set();
+    for (const timer of timers) {
+      const project = matchProject(timer.client, timer.division, timer.task);
+      if (project) projectIds.add(project.id);
+    }
+    res.json([...projectIds]);
+  } catch (err) {
+    console.error("GET /api/timers/active error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

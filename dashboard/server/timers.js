@@ -5,6 +5,34 @@ import { existsSync } from "fs";
 const TIME_DIR = resolve(process.env.HOME, "OpenDia", "Time");
 
 /**
+ * Scan .timer-*.json state files and return active (no end field) timers.
+ */
+export async function getActiveTimers() {
+  const files = await readdir(TIME_DIR).catch(() => []);
+  const timerFiles = files.filter((f) => f.startsWith(".timer-") && f.endsWith(".json"));
+
+  const active = [];
+  for (const file of timerFiles) {
+    try {
+      const content = await readFile(join(TIME_DIR, file), "utf-8");
+      const timer = JSON.parse(content);
+      if (!timer.end) {
+        active.push({
+          client: timer.client || null,
+          project: timer.project || null,
+          division: timer.division || null,
+          task: timer.task || null,
+          start: timer.start || null,
+        });
+      }
+    } catch {
+      // skip malformed files
+    }
+  }
+  return active;
+}
+
+/**
  * Parse a single daily time entry file into an array of entry objects.
  */
 function parseEntries(content, filePath) {

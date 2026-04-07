@@ -283,6 +283,10 @@ body.has-bg::before {
   transition: border-color 0.15s;
 }
 
+.card-timer-active {
+  box-shadow: 0 0 0 2px #54af4d;
+}
+
 .card:hover {
   border-color: var(--border-hover);
 }

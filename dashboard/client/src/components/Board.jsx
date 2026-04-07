@@ -1,6 +1,6 @@
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Column from "./Column.jsx";
 import Card from "./Card.jsx";
 
@@ -15,6 +15,22 @@ function findColumn(grouped, cardId) {
 
 export default function Board({ grouped, moveProject, reorderColumn, onCardClick }) {
   const [activeProject, setActiveProject] = useState(null);
+  const [activeTimerIds, setActiveTimerIds] = useState(new Set());
+
+  const fetchActiveTimers = useCallback(() => {
+    fetch("/api/timers/active")
+      .then((r) => r.ok ? r.json() : [])
+      .then((ids) => setActiveTimerIds(new Set(ids)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchActiveTimers();
+    const onFocus = () => fetchActiveTimers();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchActiveTimers]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
@@ -68,7 +84,7 @@ export default function Board({ grouped, moveProject, reorderColumn, onCardClick
     >
       <div className="board">
         {COLUMNS.map((status) => (
-          <Column key={status} status={status} projects={grouped[status] || []} onCardClick={onCardClick} />
+          <Column key={status} status={status} projects={grouped[status] || []} onCardClick={onCardClick} activeTimerIds={activeTimerIds} />
         ))}
       </div>
       <DragOverlay>

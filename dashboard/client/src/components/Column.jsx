@@ -9,7 +9,7 @@ const COLUMN_META = {
   ice: { label: "Ice", color: "#6b7280" },
 };
 
-export default function Column({ status, projects, onCardClick }) {
+export default function Column({ status, projects, onCardClick, activeTimerIds }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const meta = COLUMN_META[status];
   const ids = projects.map((p) => String(p.id));
@@ -26,7 +26,7 @@ export default function Column({ status, projects, onCardClick }) {
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className="column-cards">
           {projects.map((p) => (
-            <Card key={p.id} project={p} onClick={onCardClick} />
+            <Card key={p.id} project={p} onClick={onCardClick} hasActiveTimer={activeTimerIds?.has(p.id)} />
           ))}
         </div>
       </SortableContext>

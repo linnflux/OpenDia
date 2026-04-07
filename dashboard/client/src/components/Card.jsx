@@ -10,7 +10,7 @@ const DIVISION_COLORS = {
   Linnflux: { bg: "#54af4d", text: "#fff" },
 };
 
-export default function Card({ project, onClick }) {
+export default function Card({ project, onClick, hasActiveTimer }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: String(project.id), data: { project } });
 
@@ -28,7 +28,7 @@ export default function Card({ project, onClick }) {
   }
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="card" onClick={handleClick}>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={`card${hasActiveTimer ? " card-timer-active" : ""}`} onClick={handleClick}>
       <div className="card-name">{project.name}</div>
       <div className="card-company">
         {project.company_name || "No company"}
