@@ -31,7 +31,6 @@ export default function Card({ project, onClick }) {
       <div className="card-name">{project.name}</div>
       <div className="card-company">
         {project.company_name || "No company"}
-        {project.company_short ? ` (${project.company_short})` : ""}
       </div>
       {project.division && (
         <span className="card-division" style={{ backgroundColor: divColor }}>
@@ -43,9 +42,6 @@ export default function Card({ project, onClick }) {
           <span className="card-next-arrow">&rarr;</span>
           {project.next_step.slice(0, 80)}{project.next_step.length > 80 ? "..." : ""}
         </div>
-      )}
-      {project.notes && (
-        <div className="card-notes">{project.notes.slice(0, 80)}{project.notes.length > 80 ? "..." : ""}</div>
       )}
       {project.tmux_session && (
         <div className="card-tmux">{project.tmux_session}</div>
