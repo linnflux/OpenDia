@@ -116,6 +116,7 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/notion-new` | Creates a Notion task and starts a Toggl timer in one flow. |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
+| `/card-update` | Update a project card from the CLI. Auto-detects project from the current tmux session, shows card state, accepts freeform updates ("next step is X, status wfhuman"). Optional `--sync` flag triggers full AI-powered sync (Gmail + Notion + analysis) before prompting. |
 | `/od-next-steps` | Research and set a project's next step from timers, Notion, and notes. Accepts a project name/ID, or `--all` for a full scan. |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
 | `/roundup` | Project priority roundup. Scores and ranks open projects by urgency, refreshes next steps for top picks, lets you start via `/od-go`. |
@@ -149,6 +150,29 @@ Email from client
       v
   Ready to work
 ```
+
+### Card Sync
+
+The dashboard's per-card sync button (or `/card-update --sync`) triggers an AI-powered refresh that pulls from multiple sources, analyzes the context, and pushes updates back:
+
+```
+  Sync triggered (per card)
+      |
+      +---> Notion API: fetch task status, todos, comments
+      +---> Gmail API: search recent emails (company name + sender domain,
+      |     scoped to inbox and ~Linnflux Cloud Solutions label)
+      |
+      v
+  Claude Haiku: analyze project context + emails + Notion
+      |
+      +---> Update next_step in SQLite if AI recommends a change
+      +---> Append change requests to Notion task as dated toggle blocks
+      |
+      v
+  Return results to dashboard (email links, change requests, reasoning)
+```
+
+The Gmail search uses a multi-query strategy to maximize recall: full company name, short name (if 5+ characters), and a derived sender domain pattern. All queries are scoped to `{in:inbox label:~linnflux-cloud-solutions}` to match the Operator's email workflow. OAuth credentials are shared with the Google Workspace MCP server — no separate auth setup required.
 
 ## Infrastructure
 
