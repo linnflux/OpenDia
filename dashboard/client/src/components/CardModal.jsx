@@ -42,7 +42,13 @@ function TimerEntry({ entry }) {
         {entry.billable && <span className="timer-billable">$</span>}
       </div>
       {entry.task && <div className="timer-task">{entry.task}</div>}
-      {expanded && entry.notes && <div className="timer-notes">{entry.notes}</div>}
+      {expanded && entry.notes && (
+        <ul className="timer-notes-list">
+          {entry.notes.split("\n").filter(Boolean).map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
