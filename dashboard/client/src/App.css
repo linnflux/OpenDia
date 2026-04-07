@@ -368,6 +368,25 @@ body.has-bg::before {
   padding: 1.5rem;
   position: relative;
   box-shadow: 0 25px 50px var(--shadow-modal);
+  scrollbar-color: var(--bg-card) var(--bg-main);
+}
+
+.modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal::-webkit-scrollbar-track {
+  background: var(--bg-main);
+  border-radius: 4px;
+}
+
+.modal::-webkit-scrollbar-thumb {
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+.modal::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .modal-top-actions {
@@ -707,6 +726,25 @@ body.has-bg::before {
   gap: 0.5rem;
   max-height: 320px;
   overflow-y: auto;
+  scrollbar-color: var(--bg-card) var(--bg-main);
+}
+
+.timer-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.timer-list::-webkit-scrollbar-track {
+  background: var(--bg-main);
+  border-radius: 4px;
+}
+
+.timer-list::-webkit-scrollbar-thumb {
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+.timer-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .timer-entry {
