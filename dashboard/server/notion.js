@@ -66,6 +66,42 @@ function extractDate(page) {
 }
 
 /**
+ * Search Notion for a page matching the project name or company name.
+ * Returns the first matching page ID or null.
+ */
+export async function searchNotionForProject(projectName, companyName) {
+  if (!notionToken) return null;
+
+  // Try project name first, then company name as fallback
+  for (const query of [projectName, companyName].filter(Boolean)) {
+    const data = await notionFetch("/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        filter: { value: "page", property: "object" },
+        page_size: 5,
+      }),
+    });
+    if (data?.results?.length > 0) {
+      return data.results[0].id;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Fetch just the title of a Notion page (lightweight).
+ */
+export async function fetchNotionTitle(notionId) {
+  if (!notionToken || !notionId) return null;
+  const page = await notionFetch(`/pages/${notionId}`);
+  if (!page) return null;
+  return extractTitle(page);
+}
+
+/**
  * Fetch a Notion page and extract useful info for a project refresh.
  */
 export async function fetchNotionPage(notionId) {

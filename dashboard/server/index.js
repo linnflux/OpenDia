@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
-import { fetchNotionPage, appendToggleBlocks } from "./notion.js";
+import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
 import { analyzeSync } from "./ai.js";
 
@@ -84,6 +84,16 @@ app.post("/api/projects/:id/sync", async (req, res) => {
 
     const result = { notion: null, emails: [], analysis: null, updated: {} };
 
+    // Auto-discover Notion task if not linked
+    if (!project.notion_id) {
+      const discovered = await searchNotionForProject(project.name, project.company_name);
+      if (discovered) {
+        updateProject(id, { notion_id: discovered });
+        project.notion_id = discovered;
+        result.updated.notion_id = discovered;
+      }
+    }
+
     // Fetch Notion data if linked
     if (project.notion_id) {
       result.notion = await fetchNotionPage(project.notion_id);
@@ -151,6 +161,19 @@ app.get("/api/projects/:id/timers", async (req, res) => {
     res.json(entries);
   } catch (err) {
     console.error("GET /api/projects/:id/timers error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/projects/:id/notion-title", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) return res.status(404).json({ error: "project not found" });
+    if (!project.notion_id) return res.json({ title: null });
+    const title = await fetchNotionTitle(project.notion_id);
+    res.json({ title });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

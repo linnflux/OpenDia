@@ -95,8 +95,8 @@ A lightweight Kanban board that provides a visual interface to the SQLite databa
 
 - **Board view:** Projects appear as draggable cards organized into status columns (`In Progress`, `WFHuman`, `Ice`, `Completed`). Cards show company, division, notes, tmux session, and next step at a glance.
 - **Next Step:** Each project carries a `next_step` field — a short, actionable description of what to do next. Auto-populated when timers are paused or stopped (via `NEXT:` convention in notes), and refreshable on demand with `/od-next-steps`. Displayed on cards with a purple arrow indicator.
-- **Card modal:** Click a card to open a detail modal with editable fields (status, notes, tmux session, next step) and a scrollable list of associated time entries pulled from the internal timer system.
-- **Card sync:** The refresh button in each card modal triggers an AI-powered sync that: fetches the linked Notion task (todos, comments, status), searches Gmail for recent client emails (scoped to inbox and client label), runs Claude Haiku to analyze the context, auto-updates the project's next step, and appends any detected change requests to the Notion task as dated toggle blocks. Email threads are shown as clickable links to Gmail.
+- **Card modal:** Click a card to open a detail modal with editable fields (name, status, notes, tmux session, next step) and a scrollable list of associated time entries pulled from the internal timer system. Company names link to their Notion page when available. Linked Notion tasks show an icon and title in the header.
+- **Card sync:** The refresh button in each card modal triggers an AI-powered sync that: auto-discovers and links a Notion task if none is set (searches by project name, then company name), fetches the linked Notion task (todos, comments, status), searches Gmail for recent client emails (exact phrase match, scoped to inbox and client label), runs Claude Haiku to analyze the context, auto-updates the project's next step, and appends any detected change requests to the Notion task as dated toggle blocks. Email threads are shown as clickable links to Gmail.
 - **Tmux Launch:** Cards with a tmux session show a "Launch" button in the modal. If the `opendia://` protocol handler is registered on the client machine, it opens a terminal and SSHs directly into the tmux session. Otherwise, it copies the SSH command to clipboard. See [installation step 9](#9-dashboard-tmux-launcher-recommended) for setup.
 - **Command palette (Ctrl+K):** Search projects by name, company, division, or next step — selecting a result opens the card modal. Also provides board actions like refresh and background image upload.
 - **Theme toggle:** Switch between dark and light mode via the header button. Preference persists in `localStorage`.
@@ -158,9 +158,14 @@ The dashboard's per-card sync button (or `/card-update --sync`) triggers an AI-p
 ```
   Sync triggered (per card)
       |
+      +---> If no notion_id: search Notion for matching task
+      |     (by project name, then company name as fallback)
+      |     Auto-link if found
+      |
       +---> Notion API: fetch task status, todos, comments
-      +---> Gmail API: search recent emails (company name + sender domain,
-      |     scoped to inbox and ~Linnflux Cloud Solutions label)
+      +---> Gmail API: search recent emails (exact phrase match on
+      |     company name + sender domain, scoped to inbox and
+      |     ~Linnflux Cloud Solutions label)
       |
       v
   Claude Haiku: analyze project context + emails + Notion
@@ -172,7 +177,7 @@ The dashboard's per-card sync button (or `/card-update --sync`) triggers an AI-p
   Return results to dashboard (email links, change requests, reasoning)
 ```
 
-The Gmail search uses a multi-query strategy to maximize recall: full company name, short name (if 5+ characters), and a derived sender domain pattern. All queries are scoped to `{in:inbox label:~linnflux-cloud-solutions}` to match the Operator's email workflow. OAuth credentials are shared with the Google Workspace MCP server — no separate auth setup required.
+The Gmail search uses a multi-query strategy with exact phrase matching: quoted company name, quoted short name (if 5+ characters), and a derived sender domain pattern. All queries are scoped to `{in:inbox label:~linnflux-cloud-solutions}` to match the Operator's email workflow. OAuth credentials are shared with the Google Workspace MCP server — no separate auth setup required.
 
 ## Infrastructure
 

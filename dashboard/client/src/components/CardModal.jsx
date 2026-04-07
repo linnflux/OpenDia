@@ -54,6 +54,8 @@ function TimerEntry({ entry }) {
 }
 
 export default function CardModal({ project, onClose, onUpdate }) {
+  const [name, setName] = useState(project.name || "");
+  const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
   const [tmux, setTmux] = useState(project.tmux_session || "");
   const [nextStep, setNextStep] = useState(project.next_step || "");
@@ -65,6 +67,7 @@ export default function CardModal({ project, onClose, onUpdate }) {
   const [toast, setToast] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncData, setSyncData] = useState(null);
+  const [notionTitle, setNotionTitle] = useState(null);
   const backdropRef = useRef(null);
   const notesRef = useRef(null);
 
@@ -94,8 +97,25 @@ export default function CardModal({ project, onClose, onUpdate }) {
     fetchTimers();
   }, [project.id]);
 
+  useEffect(() => {
+    if (!project.notion_id) return;
+    fetch(`/api/projects/${project.id}/notion-title`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => d?.title && setNotionTitle(d.title))
+      .catch(() => {});
+  }, [project.id, project.notion_id]);
+
   function handleBackdropClick(e) {
     if (e.target === backdropRef.current) onClose();
+  }
+
+  function saveName() {
+    setEditingName(false);
+    if (name.trim() && name !== (project.name || "")) {
+      onUpdate(project.id, { name: name.trim() });
+    } else {
+      setName(project.name || "");
+    }
   }
 
   function handleStatusChange(newStatus) {
@@ -178,6 +198,15 @@ export default function CardModal({ project, onClose, onUpdate }) {
           setNextStep(data.updated.next_step);
           onUpdate(project.id, { next_step: data.updated.next_step });
         }
+        // If Notion task was auto-discovered, update local state and refresh title
+        if (data.updated?.notion_id) {
+          project.notion_id = data.updated.notion_id;
+          onUpdate(project.id, { notion_id: data.updated.notion_id });
+          fetch(`/api/projects/${project.id}/notion-title`)
+            .then((r) => r.ok ? r.json() : null)
+            .then((d) => d?.title && setNotionTitle(d.title))
+            .catch(() => {});
+        }
         const parts = [];
         if (data.emails?.length) parts.push(`${data.emails.length} email(s)`);
         if (data.analysis?.changeRequests?.length) parts.push(`${data.analysis.changeRequests.length} change request(s)`);
@@ -215,13 +244,35 @@ export default function CardModal({ project, onClose, onUpdate }) {
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 
-        <h2 className="modal-title">{project.name}</h2>
+        {editingName ? (
+          <input
+            className="modal-title-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={(e) => e.key === "Enter" && saveName()}
+            autoFocus
+          />
+        ) : (
+          <h2 className="modal-title clickable" onClick={() => setEditingName(true)}>{name}</h2>
+        )}
 
         <div className="modal-meta">
-          <span className="modal-company">
-            {project.company_name || "No company"}
-            {project.company_short ? ` (${project.company_short})` : ""}
-          </span>
+          {project.company_notion_id ? (
+            <a
+              className="modal-company modal-company-link"
+              href={`https://www.notion.so/${project.company_notion_id.replace(/-/g, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open company in Notion"
+            >
+              {project.company_name || "No company"}
+            </a>
+          ) : (
+            <span className="modal-company">
+              {project.company_name || "No company"}
+            </span>
+          )}
           {project.division && (
             <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
               {project.division}
@@ -233,9 +284,10 @@ export default function CardModal({ project, onClose, onUpdate }) {
               href={`https://www.notion.so/${project.notion_id.replace(/-/g, "")}`}
               target="_blank"
               rel="noopener noreferrer"
-              title="Open in Notion"
+              title="Open task in Notion"
             >
-              <NotionIcon size={18} />
+              <NotionIcon size={16} />
+              {notionTitle && <span className="modal-notion-title">{notionTitle}</span>}
             </a>
           )}
         </div>
@@ -366,6 +418,12 @@ export default function CardModal({ project, onClose, onUpdate }) {
         {syncData && (
           <div className="modal-section sync-results">
             <label className="modal-label">Sync Results</label>
+
+            {syncData.updated?.notion_id && (
+              <div className="sync-meta" style={{ color: "#22c55e", fontWeight: 500, marginBottom: "0.5rem" }}>
+                Linked Notion task{syncData.notion?.title ? `: ${syncData.notion.title}` : ""}
+              </div>
+            )}
 
             {syncData.notion && (
               <div className="sync-notion">

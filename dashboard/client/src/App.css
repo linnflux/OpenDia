@@ -431,6 +431,25 @@ body.has-bg::before {
   font-weight: 700;
   color: var(--text-heading);
   margin-bottom: 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.modal-title:hover {
+  background: var(--bg-card);
+}
+
+.modal-title-input {
+  width: 100%;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  margin-bottom: 0.5rem;
   padding-right: 2rem;
 }
 
@@ -446,18 +465,42 @@ body.has-bg::before {
   color: var(--text-secondary);
 }
 
+.modal-company-link {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-muted);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.modal-company-link:hover {
+  color: var(--text-heading);
+  border-bottom-color: var(--text-heading);
+}
+
 .modal-notion-link {
   display: inline-flex;
   align-items: center;
+  gap: 0.35rem;
   padding: 0.25rem;
   border-radius: 4px;
   opacity: 0.6;
   transition: opacity 0.15s;
+  text-decoration: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  max-width: 280px;
 }
 
 .modal-notion-link:hover {
   opacity: 1;
   background: var(--bg-card);
+}
+
+.modal-notion-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-section {

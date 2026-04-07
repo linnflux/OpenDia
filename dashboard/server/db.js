@@ -15,6 +15,7 @@ function getDb() {
 const GET_ALL_PROJECTS = `
   SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
          c.name AS company_name, c.short_name AS company_short,
+         c.notion_id AS company_notion_id,
          d.name AS division
   FROM projects p
   LEFT JOIN companies c ON p.company_id = c.id
@@ -27,6 +28,7 @@ const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
 const GET_ACTIVE_PROJECTS = `
   SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
          c.name AS company_name, c.short_name AS company_short,
+         c.notion_id AS company_notion_id,
          d.name AS division
   FROM projects p
   LEFT JOIN companies c ON p.company_id = c.id
@@ -52,7 +54,7 @@ export function getProjectById(id) {
   `).get(id);
 }
 
-const UPDATABLE_FIELDS = new Set(["status", "notes", "tmux_session", "next_step"]);
+const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id"]);
 
 export function updateProject(id, fields) {
   const sets = [];

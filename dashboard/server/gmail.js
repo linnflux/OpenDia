@@ -96,11 +96,11 @@ export async function searchRecentEmails(companyName, { shortName, days = 7 } = 
   const SCOPE = "{in:inbox label:~linnflux-cloud-solutions}";
 
   // Build multiple search queries to cast a wider net
-  const queries = [`${companyName} ${SCOPE} newer_than:${days}d`];
+  const queries = [`"${companyName}" ${SCOPE} newer_than:${days}d`];
 
   // Search by short name if it's specific enough (5+ chars avoids generic matches)
   if (shortName && shortName.length >= 5 && shortName.toLowerCase() !== companyName.toLowerCase()) {
-    queries.push(`${shortName} ${SCOPE} newer_than:${days}d`);
+    queries.push(`"${shortName}" ${SCOPE} newer_than:${days}d`);
   }
 
   // Try to derive sender domain patterns from company name
