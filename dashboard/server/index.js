@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
+import { fetchNotionPage } from "./notion.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -67,6 +68,38 @@ app.get("/api/projects/match", (req, res) => {
     res.json(project);
   } catch (err) {
     console.error("GET /api/projects/match error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects/:id/sync", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) {
+      return res.status(404).json({ error: "project not found" });
+    }
+
+    const result = { notion: null, timers: null, gmail_query: null };
+
+    // Fetch Notion data if linked
+    if (project.notion_id) {
+      result.notion = await fetchNotionPage(project.notion_id);
+    }
+
+    // Fetch latest timer entries
+    const limit = 5;
+    result.timers = await getTimerEntriesForProject(project, limit);
+
+    // Build Gmail search query for the client
+    if (project.company_name && project.company_name !== "Linnflux") {
+      const q = encodeURIComponent(project.company_name);
+      result.gmail_query = `https://mail.google.com/mail/u/0/#search/${q}+newer_than%3A7d`;
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error("POST /api/projects/:id/sync error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

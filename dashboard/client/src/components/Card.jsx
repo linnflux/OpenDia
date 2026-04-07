@@ -2,11 +2,12 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 const DIVISION_COLORS = {
-  WordFlux: "#3b82f6",
-  WatchThreat: "#ef4444",
-  AmPen: "#8b5cf6",
-  "Bedford AI": "#06b6d4",
-  "ADA Web Work": "#f59e0b",
+  WordFlux: { bg: "#3b82f6", text: "#0a1628" },
+  WatchThreat: { bg: "#5e97f2", text: "#fff" },
+  AmPen: { bg: "#5a7a94", text: "#fff" },
+  "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
+  "ADA Web Work": { bg: "#15489f", text: "#fff" },
+  Linnflux: { bg: "#54af4d", text: "#fff" },
 };
 
 export default function Card({ project, onClick }) {
@@ -19,7 +20,7 @@ export default function Card({ project, onClick }) {
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const divColor = DIVISION_COLORS[project.division] || "#6b7280";
+  const div = DIVISION_COLORS[project.division] || { bg: "#6b7280", text: "#fff" };
 
   function handleClick(e) {
     // Only open modal on true click, not after a drag
@@ -33,7 +34,7 @@ export default function Card({ project, onClick }) {
         {project.company_name || "No company"}
       </div>
       {project.division && (
-        <span className="card-division" style={{ backgroundColor: divColor }}>
+        <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
           {project.division}
         </span>
       )}

@@ -17,11 +17,12 @@ function NotionIcon({ size = 16 }) {
 }
 
 const DIVISION_COLORS = {
-  WordFlux: "#3b82f6",
-  WatchThreat: "#ef4444",
-  AmPen: "#8b5cf6",
-  "Bedford AI": "#06b6d4",
-  "ADA Web Work": "#f59e0b",
+  WordFlux: { bg: "#3b82f6", text: "#0a1628" },
+  WatchThreat: { bg: "#5e97f2", text: "#fff" },
+  AmPen: { bg: "#5a7a94", text: "#fff" },
+  "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
+  "ADA Web Work": { bg: "#15489f", text: "#fff" },
+  Linnflux: { bg: "#54af4d", text: "#fff" },
 };
 
 function TimerEntry({ entry }) {
@@ -31,9 +32,8 @@ function TimerEntry({ entry }) {
   return (
     <div
       className={`timer-entry ${isRunning ? "timer-open" : ""} ${hasNotes ? "timer-expandable" : ""} ${expanded ? "timer-expanded" : ""}`}
-      onClick={() => hasNotes && setExpanded((v) => !v)}
     >
-      <div className="timer-header">
+      <div className="timer-header" onClick={() => hasNotes && setExpanded((v) => !v)}>
         {hasNotes && <span className="timer-chevron">{expanded ? "\u25BC" : "\u25B6"}</span>}
         <span className="timer-date">{entry.date}</span>
         <span className="timer-duration">
@@ -63,6 +63,8 @@ export default function CardModal({ project, onClose, onUpdate }) {
   const [timers, setTimers] = useState([]);
   const [timersLoading, setTimersLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncData, setSyncData] = useState(null);
   const backdropRef = useRef(null);
   const notesRef = useRef(null);
 
@@ -164,12 +166,45 @@ export default function CardModal({ project, onClose, onUpdate }) {
     }, 500);
   }
 
-  const divColor = DIVISION_COLORS[project.division] || "#6b7280";
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/sync`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setSyncData(data);
+        showToast("Refreshed");
+      } else {
+        showToast("Sync failed");
+      }
+    } catch (err) {
+      console.error("sync error:", err);
+      showToast("Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const div = DIVISION_COLORS[project.division] || { bg: "#6b7280", text: "#fff" };
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdropClick}>
       <div className="modal">
-        <button className="modal-close" onClick={onClose}>&times;</button>
+        <div className="modal-top-actions">
+          <button
+            className={`modal-sync-btn ${syncing ? "syncing" : ""}`}
+            onClick={handleSync}
+            disabled={syncing}
+            title="Refresh from Notion & email"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            </svg>
+          </button>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
 
         <h2 className="modal-title">{project.name}</h2>
 
@@ -179,7 +214,7 @@ export default function CardModal({ project, onClose, onUpdate }) {
             {project.company_short ? ` (${project.company_short})` : ""}
           </span>
           {project.division && (
-            <span className="card-division" style={{ backgroundColor: divColor }}>
+            <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
               {project.division}
             </span>
           )}
@@ -318,6 +353,71 @@ export default function CardModal({ project, onClose, onUpdate }) {
             </div>
           )}
         </div>
+
+        {syncData && (
+          <div className="modal-section sync-results">
+            <label className="modal-label">Sync Results</label>
+
+            {syncData.notion && (
+              <div className="sync-notion">
+                <div className="sync-notion-header">
+                  <NotionIcon size={14} />
+                  <span className="sync-notion-title">{syncData.notion.title || "Untitled"}</span>
+                  {syncData.notion.status && (
+                    <span className="sync-notion-status">{syncData.notion.status}</span>
+                  )}
+                </div>
+                {syncData.notion.last_edited && (
+                  <div className="sync-meta">
+                    Edited {new Date(syncData.notion.last_edited).toLocaleDateString()}
+                  </div>
+                )}
+                {syncData.notion.todos.length > 0 && (
+                  <ul className="sync-todos">
+                    {syncData.notion.todos.map((todo, i) => (
+                      <li key={i} className={todo.checked ? "todo-done" : ""}>
+                        <span className="todo-check">{todo.checked ? "\u2611" : "\u2610"}</span>
+                        {todo.text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {syncData.notion.comments.length > 0 && (
+                  <div className="sync-comments">
+                    <div className="sync-sub-label">Recent comments</div>
+                    {syncData.notion.comments.map((c, i) => (
+                      <div key={i} className="sync-comment">
+                        <span className="sync-comment-text">{c.text}</span>
+                        <span className="sync-comment-date">
+                          {new Date(c.created).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {syncData.notion.url && (
+                  <a className="sync-notion-link" href={syncData.notion.url} target="_blank" rel="noopener noreferrer">
+                    Open in Notion
+                  </a>
+                )}
+              </div>
+            )}
+
+            {syncData.gmail_query && (
+              <a className="sync-gmail-link" href={syncData.gmail_query} target="_blank" rel="noopener noreferrer">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                  <polyline points="22,6 12,13 2,6" />
+                </svg>
+                Search recent emails for {project.company_name}
+              </a>
+            )}
+
+            {!syncData.notion && !syncData.gmail_query && (
+              <div className="modal-empty">No Notion page or email data linked</div>
+            )}
+          </div>
+        )}
 
         <div className="modal-footer">
           <span className="modal-id">ID: {project.id}</span>
