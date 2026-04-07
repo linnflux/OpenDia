@@ -24,8 +24,20 @@ const GET_ALL_PROJECTS = `
 
 const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
 
-export function getAllProjects() {
-  return getDb().prepare(GET_ALL_PROJECTS).all();
+const GET_ACTIVE_PROJECTS = `
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
+         c.name AS company_name, c.short_name AS company_short,
+         d.name AS division
+  FROM projects p
+  LEFT JOIN companies c ON p.company_id = c.id
+  LEFT JOIN divisions d ON p.division_id = d.id
+  WHERE p.status != 'completed'
+  ORDER BY p.sort_order ASC, p.updated_at DESC
+`;
+
+export function getAllProjects({ includeCompleted = false } = {}) {
+  const query = includeCompleted ? GET_ALL_PROJECTS : GET_ACTIVE_PROJECTS;
+  return getDb().prepare(query).all();
 }
 
 export function getProjectById(id) {

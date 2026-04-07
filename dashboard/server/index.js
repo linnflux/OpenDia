@@ -11,9 +11,10 @@ const app = express();
 app.use(express.json());
 
 // API routes
-app.get("/api/projects", (_req, res) => {
+app.get("/api/projects", (req, res) => {
   try {
-    const projects = getAllProjects();
+    const includeCompleted = req.query.include_completed === "true";
+    const projects = getAllProjects({ includeCompleted });
     res.json(projects);
   } catch (err) {
     console.error("GET /api/projects error:", err.message);

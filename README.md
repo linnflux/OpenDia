@@ -37,7 +37,7 @@ A local SQLite database stores the canonical list of companies, people, projects
 | `divisions` | Linnflux business units | name, description |
 | `companies` | Client companies | name, short_name, notion_id, toggl_client_id |
 | `people` | Contacts at companies | name, email, role, company_id |
-| `projects` | Work projects per company | name, company_id, division_id, toggl_project_id |
+| `projects` | Work projects per company | name, company_id, division_id, status, sort_order, tmux_session, next_step |
 | `tasks` | Tasks per project | title, project_id, status, notion_url |
 
 ### Internal Time Tracking
@@ -91,7 +91,14 @@ Credentials live outside the project directory, managed by MCP server configs, e
 
 ## Dashboard
 
-A lightweight Kanban board that provides a visual interface to the SQLite database. Projects appear as draggable cards organized into status columns, with detail modals showing editable fields and associated time entries pulled from the internal timer system. Built with React and Express, served on a single port, accessible from any machine on the Tailscale network. See [`dashboard/README.md`](dashboard/README.md) for setup and usage details.
+A lightweight Kanban board that provides a visual interface to the SQLite database. Built with React and Express, served on a single port, accessible from any machine on the Tailscale network. See [`dashboard/README.md`](dashboard/README.md) for setup and usage details.
+
+- **Board view:** Projects appear as draggable cards organized into status columns (`In Progress`, `WFHuman`, `Ice`, `Completed`). Cards show company, division, notes, tmux session, and next step at a glance.
+- **Next Step:** Each project carries a `next_step` field — a short, actionable description of what to do next. Auto-populated when timers are paused or stopped (via `NEXT:` convention in notes), and refreshable on demand with `/od-next-steps`. Displayed on cards with a purple arrow indicator.
+- **Card modal:** Click a card to open a detail modal with editable fields (status, notes, tmux session, next step) and a scrollable list of associated time entries pulled from the internal timer system.
+- **Tmux Launch:** Cards with a tmux session show a "Launch" button in the modal for quick session access.
+- **Project matching API:** `GET /api/projects/match?client=X&division=Y` resolves timer fields to a dashboard project, enabling automatic next-step updates when timers end.
+- **Filtered responses:** The projects API excludes completed projects by default for performance at scale (`?include_completed=true` to override).
 
 ## Custom Commands
 
@@ -99,15 +106,18 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 
 | Command | What it does |
 |---------|-------------|
-| `/checkin` | Hourly check-in. Loads today's log, scans recent Gmail, numbers tasks for quick selection. |
+| `/checkin` | Hourly check-in. Loads today's log, scans recent Gmail, numbers tasks for quick selection. Refreshes the active project's next step. |
 | `/hello` | Morning routine. Creates daily log, carries over unchecked items from the prior day. |
+| `/monthly-billing` | Generate and push billing data for the previous month to the Billing Master sheet. |
 | `/notion-new` | Creates a Notion task and starts a Toggl timer in one flow. |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
+| `/od-next-steps` | Research and set a project's next step from timers, Notion, and notes. Accepts a project name/ID, or `--all` for a full scan. |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
-| `/roundup` | Project priority roundup. Scores and ranks open projects by urgency, lets you pick one to start via `/od-go`. |
-| `/timer-end` | End a running timer, prompt for notes, calculate duration, finalize the entry. |
-| `/timer-pause` | Pause with auto-generated notes and project summary. |
+| `/roundup` | Project priority roundup. Scores and ranks open projects by urgency, refreshes next steps for top picks, lets you start via `/od-go`. |
+| `/timer-end` | End a running timer, prompt for notes, calculate duration, finalize the entry. Auto-updates the project's next step. |
+| `/timer-merge` | Merge duplicate timers for the same client/project into one consolidated entry. |
+| `/timer-pause` | Pause with auto-generated notes and project summary. Auto-updates the project's next step. |
 | `/timer-start` | Start an internal time entry with client, task, division, and billable prompts. |
 | `/timer-status` | Show all active timers across all sessions. |
 | `/zero` | Inbox Zero. Scans primary inbox, groups by thread, extracts action items. |
