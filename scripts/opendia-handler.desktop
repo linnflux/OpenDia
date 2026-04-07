@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=OpenDia Protocol Handler
+Exec=bash /home/linnflux/OpenDia/scripts/opendia-handler.sh %u
+StartupNotify=false
+MimeType=x-scheme-handler/opendia;
+NoDisplay=true

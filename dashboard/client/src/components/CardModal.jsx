@@ -62,6 +62,7 @@ export default function CardModal({ project, onClose, onUpdate }) {
   const [editingNextStep, setEditingNextStep] = useState(false);
   const [timers, setTimers] = useState([]);
   const [timersLoading, setTimersLoading] = useState(true);
+  const [toast, setToast] = useState(null);
   const backdropRef = useRef(null);
   const notesRef = useRef(null);
 
@@ -120,6 +121,47 @@ export default function CardModal({ project, onClose, onUpdate }) {
     if (nextStep !== (project.next_step || "")) {
       onUpdate(project.id, { next_step: nextStep || null });
     }
+  }
+
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
+
+  function handleLaunch() {
+    const session = project.tmux_session;
+    if (!session) return;
+
+    // Try custom protocol first
+    const protoUrl = `opendia://tmux/${encodeURIComponent(session)}`;
+    window.location.href = protoUrl;
+
+    // After a short delay, copy the SSH command as fallback
+    // (if the protocol handler opened, the user won't need this)
+    setTimeout(() => {
+      const cmd = `ssh linnflux@opendia -t 'tmux attach -t ${session} || tmux new-session -s ${session}'`;
+      try {
+        // navigator.clipboard requires secure context (HTTPS/localhost)
+        // Fall back to execCommand for HTTP connections
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(cmd).then(() => {
+            showToast("Command copied to clipboard");
+          });
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = cmd;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+          showToast("Command copied to clipboard");
+        }
+      } catch {
+        showToast(cmd);
+      }
+    }, 500);
   }
 
   const divColor = DIVISION_COLORS[project.division] || "#6b7280";
@@ -197,7 +239,7 @@ export default function CardModal({ project, onClose, onUpdate }) {
                 )}
               </div>
               {project.tmux_session && (
-                <button className="modal-launch-btn" title="Launch tmux session">
+                <button className="modal-launch-btn" title="Launch tmux session" onClick={handleLaunch}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="4 17 10 11 4 5" />
                     <line x1="12" y1="19" x2="20" y2="19" />
@@ -293,6 +335,7 @@ export default function CardModal({ project, onClose, onUpdate }) {
             </a>
           )}
         </div>
+        {toast && <div className="modal-toast">{toast}</div>}
       </div>
     </div>
   );

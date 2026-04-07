@@ -401,6 +401,41 @@ tmux set-option -g bell-action any
 
 > **Note:** The `org.gnome.desktop.wm.preferences audible-bell` setting does **not** work on Cinnamon — you must use the `org.cinnamon.desktop.wm.preferences` schema. The `printf '\a' > /dev/tty` redirect is required in the hook because Claude Code captures stdout from hook subprocesses; writing directly to `/dev/tty` bypasses that and reaches the terminal.
 
+### 9. Dashboard tmux launcher (recommended)
+
+The dashboard's "Launch" button on project cards can open a terminal on your local machine and SSH directly into the project's tmux session. Without this setup, it falls back to copying the SSH command to your clipboard.
+
+**On each client machine:**
+
+1. Copy the handler script and desktop file from the repo:
+
+```bash
+# Copy the handler script to the live scripts directory
+cp ~/OpenDia/repo/scripts/opendia-handler.sh ~/OpenDia/scripts/
+chmod +x ~/OpenDia/scripts/opendia-handler.sh
+
+# Install the desktop file
+cp ~/OpenDia/repo/scripts/opendia-handler.desktop ~/.local/share/applications/
+```
+
+2. Edit `~/.local/share/applications/opendia-handler.desktop` and update the `Exec` path if your OpenDia directory differs from `/home/linnflux/OpenDia/`.
+
+3. Register the protocol handler:
+
+```bash
+xdg-mime default opendia-handler.desktop x-scheme-handler/opendia
+```
+
+4. Optionally set environment variables if your username or hostname differ from the defaults (`linnflux` / `opendia`):
+
+```bash
+# Add to ~/.bashrc or ~/.profile
+export OPENDIA_USER="youruser"
+export OPENDIA_HOST="opendia"
+```
+
+**Verify:** Open a browser and navigate to `opendia://tmux/test`. A terminal should open and attempt to SSH into the `test` tmux session. If no protocol handler is registered, the dashboard will copy the SSH command to your clipboard instead.
+
 ### Full bootstrap
 
 If you're migrating from an existing OpenDia instance that has already run `migrate-export.sh`, you can bootstrap everything at once:
