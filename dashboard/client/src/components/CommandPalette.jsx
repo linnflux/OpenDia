@@ -12,7 +12,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, hasBg }) {
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, onSelectProject }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -72,11 +72,33 @@ export default function CommandPalette({ open, onClose, onRefresh }) {
     [bgImage, onRefresh, onClose]
   );
 
-  const filtered = useMemo(() => {
+  const filteredActions = useMemo(() => {
     if (!query) return actions;
     const q = query.toLowerCase();
     return actions.filter((a) => a.label.toLowerCase().includes(q));
   }, [query, actions]);
+
+  const filteredProjects = useMemo(() => {
+    if (!query || !projects) return [];
+    const q = query.toLowerCase();
+    return projects.filter((p) =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.company_name || "").toLowerCase().includes(q) ||
+      (p.next_step || "").toLowerCase().includes(q) ||
+      (p.division || "").toLowerCase().includes(q)
+    ).slice(0, 8);
+  }, [query, projects]);
+
+  const filtered = useMemo(() => {
+    const projectItems = filteredProjects.map((p) => ({
+      id: `project-${p.id}`,
+      icon: "\u25A3",
+      label: p.name,
+      sublabel: p.company_name || "",
+      action: () => { onSelectProject(p); onClose(); },
+    }));
+    return [...filteredActions, ...projectItems];
+  }, [filteredActions, filteredProjects, onSelectProject, onClose]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -133,7 +155,7 @@ export default function CommandPalette({ open, onClose, onRefresh }) {
             <input
               ref={inputRef}
               className="cp-input"
-              placeholder="Type a command..."
+              placeholder="Search projects or type a command..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -151,7 +173,10 @@ export default function CommandPalette({ open, onClose, onRefresh }) {
                 onClick={() => action.action()}
               >
                 <span className="cp-item-icon">{action.icon}</span>
-                <span className="cp-item-label">{action.label}</span>
+                <span className="cp-item-label">
+                  {action.label}
+                  {action.sublabel && <span className="cp-item-sub"> — {action.sublabel}</span>}
+                </span>
                 {action.shortcut && (
                   <kbd className="cp-kbd">{action.shortcut}</kbd>
                 )}

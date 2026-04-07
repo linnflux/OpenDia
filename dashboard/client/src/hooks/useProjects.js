@@ -89,5 +89,5 @@ export function useProjects() {
     }
   };
 
-  return { grouped, loading, moveProject, updateProject, reorderColumn, refresh: fetchProjects };
+  return { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh: fetchProjects };
 }
