@@ -56,8 +56,10 @@ function TimerEntry({ entry }) {
 export default function CardModal({ project, onClose, onUpdate }) {
   const [notes, setNotes] = useState(project.notes || "");
   const [tmux, setTmux] = useState(project.tmux_session || "");
+  const [nextStep, setNextStep] = useState(project.next_step || "");
   const [editingNotes, setEditingNotes] = useState(false);
   const [editingTmux, setEditingTmux] = useState(false);
+  const [editingNextStep, setEditingNextStep] = useState(false);
   const [timers, setTimers] = useState([]);
   const [timersLoading, setTimersLoading] = useState(true);
   const backdropRef = useRef(null);
@@ -110,6 +112,13 @@ export default function CardModal({ project, onClose, onUpdate }) {
     setEditingTmux(false);
     if (tmux !== (project.tmux_session || "")) {
       onUpdate(project.id, { tmux_session: tmux || null });
+    }
+  }
+
+  function saveNextStep() {
+    setEditingNextStep(false);
+    if (nextStep !== (project.next_step || "")) {
+      onUpdate(project.id, { next_step: nextStep || null });
     }
   }
 
@@ -179,11 +188,22 @@ export default function CardModal({ project, onClose, onUpdate }) {
               />
             </div>
           ) : (
-            <div className="modal-value clickable" onClick={() => setEditingTmux(true)}>
-              {project.tmux_session ? (
-                <span className="card-tmux">{project.tmux_session}</span>
-              ) : (
-                <span className="modal-empty">Click to set</span>
+            <div className="modal-tmux-row">
+              <div className="modal-value clickable" onClick={() => setEditingTmux(true)} style={{ flex: 1 }}>
+                {project.tmux_session ? (
+                  <span className="card-tmux">{project.tmux_session}</span>
+                ) : (
+                  <span className="modal-empty">Click to set</span>
+                )}
+              </div>
+              {project.tmux_session && (
+                <button className="modal-launch-btn" title="Launch tmux session">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4 17 10 11 4 5" />
+                    <line x1="12" y1="19" x2="20" y2="19" />
+                  </svg>
+                  Launch
+                </button>
               )}
             </div>
           )}
@@ -209,6 +229,31 @@ export default function CardModal({ project, onClose, onUpdate }) {
                 <p className="modal-notes-text">{project.notes}</p>
               ) : (
                 <span className="modal-empty">Click to add notes</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-section">
+          <label className="modal-label">Next Step</label>
+          {editingNextStep ? (
+            <div className="modal-inline-edit">
+              <input
+                className="modal-input"
+                value={nextStep}
+                onChange={(e) => setNextStep(e.target.value)}
+                onBlur={saveNextStep}
+                onKeyDown={(e) => e.key === "Enter" && saveNextStep()}
+                placeholder="What's the next action?"
+                autoFocus
+              />
+            </div>
+          ) : (
+            <div className="modal-value clickable" onClick={() => setEditingNextStep(true)}>
+              {project.next_step ? (
+                <span className="modal-next-step">{project.next_step}</span>
+              ) : (
+                <span className="modal-empty">Click to set next step</span>
               )}
             </div>
           )}

@@ -13,7 +13,7 @@ function getDb() {
 }
 
 const GET_ALL_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
          c.name AS company_name, c.short_name AS company_short,
          d.name AS division
   FROM projects p
@@ -30,7 +30,7 @@ export function getAllProjects() {
 
 export function getProjectById(id) {
   return getDb().prepare(`
-    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id,
+    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
            c.name AS company_name, c.short_name AS company_short,
            d.name AS division
     FROM projects p
@@ -40,7 +40,7 @@ export function getProjectById(id) {
   `).get(id);
 }
 
-const UPDATABLE_FIELDS = new Set(["status", "notes", "tmux_session"]);
+const UPDATABLE_FIELDS = new Set(["status", "notes", "tmux_session", "next_step"]);
 
 export function updateProject(id, fields) {
   const sets = [];
@@ -60,6 +60,37 @@ export function updateProject(id, fields) {
     .prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`)
     .run(...vals);
   return result.changes > 0;
+}
+
+export function matchProject(client, division, task) {
+  const clientLower = (client || "").toLowerCase();
+  const divisionLower = (division || "").toLowerCase();
+  const taskLower = (task || "").toLowerCase();
+
+  const projects = getDb().prepare(`
+    SELECT p.id, p.name, p.status,
+           c.name AS company_name, c.short_name AS company_short,
+           d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+  `).all();
+
+  for (const p of projects) {
+    const companyLower = (p.company_name || "").toLowerCase();
+    const shortLower = (p.company_short || "").toLowerCase();
+    const pDivLower = (p.division || "").toLowerCase();
+    const nameLower = (p.name || "").toLowerCase();
+
+    const clientMatch = clientLower && (companyLower === clientLower || shortLower === clientLower);
+    const divMatch = divisionLower && pDivLower === divisionLower;
+    const taskMatch = taskLower && (nameLower.includes(taskLower) || taskLower.includes(nameLower));
+
+    if (clientMatch && divMatch) return p;
+    if (clientMatch && taskMatch) return p;
+  }
+
+  return null;
 }
 
 export function reorderProjects(status, ids) {

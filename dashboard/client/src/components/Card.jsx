@@ -38,6 +38,12 @@ export default function Card({ project, onClick }) {
           {project.division}
         </span>
       )}
+      {project.next_step && (
+        <div className="card-next-step">
+          <span className="card-next-arrow">&rarr;</span>
+          {project.next_step.slice(0, 80)}{project.next_step.length > 80 ? "..." : ""}
+        </div>
+      )}
       {project.notes && (
         <div className="card-notes">{project.notes.slice(0, 80)}{project.notes.length > 80 ? "..." : ""}</div>
       )}

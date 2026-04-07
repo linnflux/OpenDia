@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,6 +50,23 @@ app.put("/api/projects/reorder", (req, res) => {
   } catch (err) {
     console.error("PUT /api/projects/reorder error:", err.message);
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.get("/api/projects/match", (req, res) => {
+  try {
+    const { client, division, task } = req.query;
+    if (!client && !division && !task) {
+      return res.status(400).json({ error: "At least one of client, division, or task required" });
+    }
+    const project = matchProject(client, division, task);
+    if (!project) {
+      return res.status(404).json({ error: "No matching project found" });
+    }
+    res.json(project);
+  } catch (err) {
+    console.error("GET /api/projects/match error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
