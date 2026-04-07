@@ -407,23 +407,32 @@ The dashboard's "Launch" button on project cards can open a terminal on your loc
 
 **On each client machine:**
 
-1. Copy the handler script and desktop file from the repo:
+1. Copy the handler script from the server (or repo) and install the desktop file:
 
 ```bash
-# Copy the handler script to the live scripts directory
+# If your local machine has the repo cloned:
 cp ~/OpenDia/repo/scripts/opendia-handler.sh ~/OpenDia/scripts/
-chmod +x ~/OpenDia/scripts/opendia-handler.sh
-
-# Install the desktop file
 cp ~/OpenDia/repo/scripts/opendia-handler.desktop ~/.local/share/applications/
+
+# Or copy directly from the server:
+scp youruser@opendia:~/OpenDia/repo/scripts/opendia-handler.sh ~/OpenDia/scripts/
+scp youruser@opendia:~/OpenDia/repo/scripts/opendia-handler.desktop ~/.local/share/applications/
+
+chmod +x ~/OpenDia/scripts/opendia-handler.sh
 ```
 
-2. Edit `~/.local/share/applications/opendia-handler.desktop` and update the `Exec` path if your OpenDia directory differs from `/home/linnflux/OpenDia/`.
+2. Edit `~/.local/share/applications/opendia-handler.desktop` and update the `Exec` path if your OpenDia directory or username differs from the default:
 
-3. Register the protocol handler:
+```bash
+# Automatically fix the path for your user
+sed -i "s|/home/linnflux/OpenDia/scripts/|$HOME/OpenDia/scripts/|" ~/.local/share/applications/opendia-handler.desktop
+```
+
+3. Register the protocol handler and rebuild the MIME database:
 
 ```bash
 xdg-mime default opendia-handler.desktop x-scheme-handler/opendia
+update-desktop-database ~/.local/share/applications/
 ```
 
 4. Optionally set environment variables if your username or hostname differ from the defaults (`linnflux` / `opendia`):
@@ -434,7 +443,22 @@ export OPENDIA_USER="youruser"
 export OPENDIA_HOST="opendia"
 ```
 
-**Verify:** Open a browser and navigate to `opendia://tmux/test`. A terminal should open and attempt to SSH into the `test` tmux session. If no protocol handler is registered, the dashboard will copy the SSH command to your clipboard instead.
+5. **Browser setup** — the first time you click Launch, your browser will ask how to handle `opendia://` links:
+
+   **Chromium / Chrome:** A dialog will ask to open the link with the handler. Check **"Always allow"** and confirm. Works out of the box.
+
+   **Firefox / Firefox-based browsers (Zen, LibreWolf, etc.):** Firefox may not recognize the system protocol handler automatically. If clicking Launch does nothing:
+   - Open `about:config` in Firefox
+   - Search for `network.protocol-handler.expose.opendia`
+   - If it doesn't exist, create a new **Boolean** entry: `network.protocol-handler.expose.opendia` = `false`
+   - Click Launch again — Firefox will now prompt you to choose an application
+   - Browse to `~/OpenDia/scripts/opendia-handler.sh`, select it, and check **"Always use this application"**
+
+   > **Tip:** After changing browser handler settings, fully close and reopen the browser (not just refresh). Browsers cache protocol handler associations aggressively.
+
+**Verify from terminal:** Run `xdg-open 'opendia://tmux/test'` — a terminal should open and attempt to SSH into the `test` tmux session.
+
+**Verify from browser:** Open the dashboard, click a project card with a tmux session, and click Launch. If no protocol handler is registered, the button falls back to copying the SSH command to your clipboard.
 
 ### Full bootstrap
 
