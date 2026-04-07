@@ -173,7 +173,16 @@ export default function CardModal({ project, onClose, onUpdate }) {
       if (res.ok) {
         const data = await res.json();
         setSyncData(data);
-        showToast("Refreshed");
+        // Update local next_step if AI changed it
+        if (data.updated?.next_step) {
+          setNextStep(data.updated.next_step);
+          onUpdate(project.id, { next_step: data.updated.next_step });
+        }
+        const parts = [];
+        if (data.emails?.length) parts.push(`${data.emails.length} email(s)`);
+        if (data.analysis?.changeRequests?.length) parts.push(`${data.analysis.changeRequests.length} change request(s)`);
+        if (data.updated?.notion_appended) parts.push("Notion updated");
+        showToast(parts.length ? `Synced: ${parts.join(", ")}` : "Synced — no new activity");
       } else {
         showToast("Sync failed");
       }
@@ -403,17 +412,44 @@ export default function CardModal({ project, onClose, onUpdate }) {
               </div>
             )}
 
-            {syncData.gmail_query && (
-              <a className="sync-gmail-link" href={syncData.gmail_query} target="_blank" rel="noopener noreferrer">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                  <polyline points="22,6 12,13 2,6" />
-                </svg>
-                Search recent emails for {project.company_name}
-              </a>
+            {syncData.emails?.length > 0 && (
+              <div className="sync-emails">
+                <div className="sync-sub-label">Recent Emails ({syncData.emails.length})</div>
+                {syncData.emails.map((e) => (
+                  <a key={e.id} className="sync-email" href={e.threadUrl} target="_blank" rel="noopener noreferrer">
+                    <div className="sync-email-subject">{e.subject}</div>
+                    <div className="sync-email-meta">
+                      <span className="sync-email-from">{e.from.replace(/<[^>]+>/, "").trim()}</span>
+                      <span className="sync-email-date">{new Date(e.date).toLocaleDateString()}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
             )}
 
-            {!syncData.notion && !syncData.gmail_query && (
+            {syncData.analysis && (
+              <div className="sync-analysis">
+                {syncData.analysis.changeRequests?.length > 0 && (
+                  <div className="sync-changes">
+                    <div className="sync-sub-label">Change Requests Detected</div>
+                    {syncData.analysis.changeRequests.map((cr, i) => (
+                      <div key={i} className="sync-change">
+                        <div className="sync-change-summary">{cr.summary}</div>
+                        <div className="sync-change-detail">{cr.detail}</div>
+                      </div>
+                    ))}
+                    {syncData.updated?.notion_appended && (
+                      <div className="sync-meta" style={{ marginTop: "0.25rem" }}>Added to Notion task</div>
+                    )}
+                  </div>
+                )}
+                {syncData.analysis.reasoning && (
+                  <div className="sync-reasoning">{syncData.analysis.reasoning}</div>
+                )}
+              </div>
+            )}
+
+            {!syncData.notion && !syncData.emails?.length && (
               <div className="modal-empty">No Notion page or email data linked</div>
             )}
           </div>

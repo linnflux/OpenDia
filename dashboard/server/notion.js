@@ -21,12 +21,14 @@ if (!notionToken) {
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
 
-async function notionFetch(path) {
+async function notionFetch(path, options = {}) {
   if (!notionToken) return null;
   const res = await fetch(`${NOTION_API}${path}`, {
+    ...options,
     headers: {
       Authorization: `Bearer ${notionToken}`,
       "Notion-Version": NOTION_VERSION,
+      ...(options.headers || {}),
     },
   });
   if (!res.ok) return null;
@@ -107,4 +109,50 @@ export async function fetchNotionPage(notionId) {
     comments,
     url: `https://www.notion.so/${notionId.replace(/-/g, "")}`,
   };
+}
+
+/**
+ * Prepend toggle blocks (with date headings) to a Notion page for change requests.
+ * Each request becomes a toggle with the date as the heading and detail inside.
+ */
+export async function appendToggleBlocks(notionId, changeRequests) {
+  if (!notionToken || !notionId || !changeRequests?.length) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const children = changeRequests.map((cr) => ({
+    object: "block",
+    type: "toggle",
+    toggle: {
+      rich_text: [
+        {
+          type: "text",
+          text: { content: `${today} — ${cr.summary}` },
+          annotations: { bold: true },
+        },
+      ],
+      children: [
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: {
+            rich_text: [
+              { type: "text", text: { content: cr.detail } },
+            ],
+          },
+        },
+      ],
+    },
+  }));
+
+  // Get existing children to prepend (Notion API only appends, so we
+  // fetch existing blocks, append our new ones first, then re-append old ones)
+  // Actually, Notion's PATCH /blocks/{id}/children always appends at the end.
+  // To prepend, we'd need to delete and recreate — too destructive.
+  // Instead, we'll just append with a clear date marker. The toggle format
+  // makes it scannable regardless of position.
+  return notionFetch(`/blocks/${notionId}/children`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ children }),
+  });
 }

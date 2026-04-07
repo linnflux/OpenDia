@@ -4,7 +4,9 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
-import { fetchNotionPage } from "./notion.js";
+import { fetchNotionPage, appendToggleBlocks } from "./notion.js";
+import { searchRecentEmails } from "./gmail.js";
+import { analyzeSync } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -80,21 +82,54 @@ app.post("/api/projects/:id/sync", async (req, res) => {
       return res.status(404).json({ error: "project not found" });
     }
 
-    const result = { notion: null, timers: null, gmail_query: null };
+    const result = { notion: null, emails: [], analysis: null, updated: {} };
 
     // Fetch Notion data if linked
     if (project.notion_id) {
       result.notion = await fetchNotionPage(project.notion_id);
     }
 
-    // Fetch latest timer entries
-    const limit = 5;
-    result.timers = await getTimerEntriesForProject(project, limit);
+    // Search Gmail for recent emails
+    try {
+      result.emails = await searchRecentEmails(project.company_name, {
+        shortName: project.company_short,
+      });
+    } catch (err) {
+      console.error("Gmail search error:", err.message);
+    }
 
-    // Build Gmail search query for the client
-    if (project.company_name && project.company_name !== "Linnflux") {
-      const q = encodeURIComponent(project.company_name);
-      result.gmail_query = `https://mail.google.com/mail/u/0/#search/${q}+newer_than%3A7d`;
+    // AI analysis if we have emails or Notion data
+    if (result.emails.length > 0 || result.notion) {
+      try {
+        result.analysis = await analyzeSync({
+          project,
+          emails: result.emails,
+          notion: result.notion,
+        });
+
+        if (result.analysis) {
+          // Update next_step if AI suggests a change
+          if (result.analysis.nextStep && result.analysis.nextStep !== project.next_step) {
+            updateProject(id, { next_step: result.analysis.nextStep });
+            result.updated.next_step = result.analysis.nextStep;
+          }
+
+          // Append change requests to Notion as toggle blocks
+          if (result.analysis.changeRequests?.length > 0 && project.notion_id) {
+            try {
+              await appendToggleBlocks(
+                project.notion_id,
+                result.analysis.changeRequests
+              );
+              result.updated.notion_appended = true;
+            } catch (err) {
+              console.error("Notion append error:", err.message);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("AI analysis error:", err.message);
+      }
     }
 
     res.json(result);
