@@ -82,6 +82,8 @@ Services with narrow, infrequent use run through their native CLI — things lik
 
 Services used occasionally via direct API calls. Tokens are stored as environment variables, referenced at runtime — never hardcoded in memory files or source code.
 
+One example is `scripts/nano_banana.py`, a stdlib-only Python wrapper around Google's Gemini 2.5 Flash Image model (marketing name "Nano Banana"). It reads an API key from `~/.claude/mcp-credentials/gemini/api_key`, takes a text prompt (and optional reference images for edit-style generation), and writes a PNG to `~/OpenDia/Debug/` by default. Because the dashboard card modal already auto-renders images referenced in a card's notes, attaching a generated visual to a project is as simple as appending the output path to the card via `PATCH /api/projects/:id` — no dashboard changes required. Typical use: client mockups, hero imagery, section illustrations (~$0.039 per image on the paid Gemini tier).
+
 ### Credential Security
 
 No API tokens, keys, or secrets are stored in:
