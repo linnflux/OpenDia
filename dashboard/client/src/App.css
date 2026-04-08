@@ -382,6 +382,7 @@ body.has-bg::before {
 }
 
 .modal-timer-active {
+  --timer-angle: 0deg;
   border: 2px solid transparent;
   background:
     linear-gradient(var(--bg-surface), var(--bg-surface)) padding-box,
@@ -399,6 +400,9 @@ body.has-bg::before {
 }
 
 @keyframes timer-border-spin {
+  from {
+    --timer-angle: 0deg;
+  }
   to {
     --timer-angle: 360deg;
   }

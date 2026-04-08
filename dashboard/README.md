@@ -68,6 +68,8 @@ Cards with a running timer display a Linnflux green (`#54af4d`) border. The boar
 
 Timer state is read from `.timer-*.json` files in `~/OpenDia/Time/`. Files without an `end` field are considered active.
 
+Opening a card with an active timer shows a subtle rotating conic-gradient border on the modal, built with a CSS `@property`-registered angle and a 6s linear animation. Users with `prefers-reduced-motion: reduce` get a static solid green border instead.
+
 ## API
 
 | Method | Endpoint | Description |
