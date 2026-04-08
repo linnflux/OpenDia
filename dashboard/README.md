@@ -83,11 +83,21 @@ Opening a card with an active timer shows a subtle rotating conic-gradient borde
 | `GET` | `/api/projects/:id/timers` | Time entries matching the project |
 | `GET` | `/api/projects/:id/notion-title` | Lightweight Notion title fetch |
 | `GET` | `/api/timers/active` | Returns array of project IDs with running timers |
+| `POST` | `/api/projects/:id/log-timer` | Append a single timer entry to the project's Notion task as a toggle block. Body: `{ start, task, duration, notes }`. Silently no-ops if the project has no `notion_id`. |
+| `POST` | `/api/timers/backfill` | One-shot sync of all historical daily `.md` entries to their matching Notion tasks. Idempotent (dedupes by start-time marker in existing toggle titles). Throttled to stay under Notion's rate limit. |
 | `GET` | `/api/file` | Serve files under `~/OpenDia/` by `?path=` |
 
-## `/od-go` Integration
+## `/od-go` and `/od-stop` Integration
 
-The `/od-go` command (Step 5.5) checks for a matching dashboard card after resolving client and division. If no card exists, it prompts to create one via `POST /api/projects` before starting the timer.
+**`/od-go`** (Step 5.5) checks for a matching dashboard card after resolving client and division. If no card exists, it prompts to create one via `POST /api/projects` before starting the timer.
+
+**`/od-stop`** is the mirror — it stops the running timer, writes justified notes to the daily `.md`, updates the card's `next_step`, and logs a toggle block to the linked Notion task via `POST /api/projects/:id/log-timer`. Running `/od-stop backfill` does a one-shot historical sync of all prior entries.
+
+### The Justification Rule
+
+Timer entry notes are a **billing ledger**, not a changelog. Every bullet must correspond to real work done during the timed period, and together they must plausibly account for the billed duration (~1 bullet per 10-15 minutes as a rule of thumb). The dashboard card's time entries, the daily `.md` files, and the Notion task's toggle blocks all share the same note body, so consistency is maintained at write time by `/od-stop`.
+
+Toggle block title format in Notion: `YYYY-MM-DD HH:MM — Task Title (1h 30m)`. The start-time prefix doubles as a dedupe key for backfill re-runs.
 
 ## Security
 

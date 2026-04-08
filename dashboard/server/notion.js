@@ -178,6 +178,121 @@ export async function fetchNotionPage(notionId) {
 }
 
 /**
+ * Collect all "YYYY-MM-DD HH:MM" markers from existing toggle blocks on a Notion page.
+ * Used by /od-stop backfill to dedupe entries already logged. Paginates through all
+ * children.
+ */
+export async function getTimerMarkers(notionId) {
+  if (!notionToken || !notionId) return new Set();
+
+  const markers = new Set();
+  let startCursor = null;
+  let hasMore = true;
+
+  while (hasMore) {
+    const qs = startCursor
+      ? `?page_size=100&start_cursor=${encodeURIComponent(startCursor)}`
+      : "?page_size=100";
+    const data = await notionFetch(`/blocks/${notionId}/children${qs}`);
+    if (!data) break;
+
+    for (const block of data.results || []) {
+      if (block.type !== "toggle") continue;
+      const text = block.toggle.rich_text?.map((t) => t.plain_text).join("") || "";
+      // Titles start with "YYYY-MM-DD HH:MM — ..."
+      const match = text.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
+      if (match) markers.add(match[1]);
+    }
+
+    hasMore = data.has_more || false;
+    startCursor = data.next_cursor;
+  }
+
+  return markers;
+}
+
+/**
+ * Append a single timer entry to a Notion task as a toggle block.
+ *
+ * Title format: "YYYY-MM-DD HH:MM — Task Title (1h 30m)" (the start-time prefix
+ * serves as a dedupe marker when backfilling).
+ *
+ * Each line in the entry's notes becomes a bulleted_list_item child. Lines
+ * starting with "NEXT:" are rendered in bold so they stand out in the toggle.
+ */
+export async function appendTimerLog(notionId, entry) {
+  if (!notionToken || !notionId || !entry?.start) {
+    return { logged: false, reason: "missing_input" };
+  }
+
+  const marker = entry.start.replace("T", " "); // "2026-04-08 09:00"
+  const taskTitle = (entry.task || "(no task)").trim();
+  const durationStr = entry.duration ? ` (${entry.duration})` : "";
+  const title = `${marker} — ${taskTitle}${durationStr}`;
+
+  const noteLines = (entry.notes || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const children = noteLines.length
+    ? noteLines.map((line) => {
+        const isNext = /^NEXT:/i.test(line);
+        return {
+          object: "block",
+          type: "bulleted_list_item",
+          bulleted_list_item: {
+            rich_text: [
+              {
+                type: "text",
+                text: { content: line },
+                annotations: isNext ? { bold: true } : {},
+              },
+            ],
+          },
+        };
+      })
+    : [
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: {
+            rich_text: [
+              {
+                type: "text",
+                text: { content: "(no notes)" },
+                annotations: { italic: true, color: "gray" },
+              },
+            ],
+          },
+        },
+      ];
+
+  const block = {
+    object: "block",
+    type: "toggle",
+    toggle: {
+      rich_text: [
+        {
+          type: "text",
+          text: { content: title },
+          annotations: { bold: true },
+        },
+      ],
+      children,
+    },
+  };
+
+  const res = await notionFetch(`/blocks/${notionId}/children`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ children: [block] }),
+  });
+
+  return res ? { logged: true, marker } : { logged: false, reason: "api_error" };
+}
+
+/**
  * Prepend toggle blocks (with date headings) to a Notion page for change requests.
  * Each request becomes a toggle with the date as the heading and detail inside.
  */

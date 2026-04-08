@@ -99,6 +99,47 @@ async function getTimeDirs() {
 }
 
 /**
+ * Scan every daily .md file under ~/OpenDia/Time and return all completed
+ * timer entries (entries with both a start and an end). Used by the backfill
+ * endpoint to push historical entries into Notion.
+ */
+export async function getAllTimerEntries() {
+  const results = [];
+  const dirs = await getTimeDirs();
+
+  for (const dir of dirs) {
+    const files = await readdir(dir).catch(() => []);
+    const mdFiles = files.filter((f) => f.endsWith(".md")).sort();
+
+    for (const file of mdFiles) {
+      const filePath = join(dir, file);
+      const content = await readFile(filePath, "utf-8").catch(() => "");
+      const entries = parseEntries(content, filePath);
+
+      for (const entry of entries) {
+        if (!entry.start || !entry.end) continue;
+        results.push({
+          client: entry.client || null,
+          project: entry.project || null,
+          division: entry.division || null,
+          task: entry.task || null,
+          start: entry.start,
+          end: entry.end,
+          duration: entry.duration || null,
+          notes: entry.notes || null,
+          billable: entry.billable === "true",
+          estimated_minutes: entry.estimated_minutes
+            ? parseInt(entry.estimated_minutes, 10)
+            : null,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
  * Find timer entries matching a project.
  * Matches on: (client=company AND division matches) OR project/task contains project name.
  * Returns most recent `limit` entries.

@@ -3,8 +3,8 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject } from "./db.js";
-import { getTimerEntriesForProject, getActiveTimers } from "./timers.js";
-import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject } from "./notion.js";
+import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
+import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
 import { analyzeSync } from "./ai.js";
 
@@ -172,6 +172,96 @@ app.get("/api/timers/active", async (req, res) => {
     res.json([...projectIds]);
   } catch (err) {
     console.error("GET /api/timers/active error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Log a single completed timer entry to the project's Notion task as a toggle.
+// Silently skips if the project has no notion_id linked.
+app.post("/api/projects/:id/log-timer", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) return res.status(404).json({ error: "project not found" });
+    if (!project.notion_id) return res.json({ logged: false, skipped: "no_notion_id" });
+
+    const entry = req.body;
+    if (!entry?.start) return res.status(400).json({ error: "start required" });
+
+    const result = await appendTimerLog(project.notion_id, entry);
+    res.json(result);
+  } catch (err) {
+    console.error("POST /api/projects/:id/log-timer error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scan every daily .md file and back-fill Notion toggle blocks for any
+// completed entry whose matching project has a notion_id and isn't already
+// logged (dedupe by start-time marker in the toggle title).
+app.post("/api/timers/backfill", async (_req, res) => {
+  try {
+    const entries = await getAllTimerEntries();
+    let logged = 0;
+    let skippedAlreadyLogged = 0;
+    let skippedNoProject = 0;
+    let skippedNoNotion = 0;
+    const errors = [];
+    const markerCache = new Map();
+
+    // Sort ascending so Notion receives entries in chronological order.
+    entries.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+    for (const entry of entries) {
+      const project = matchProject(
+        entry.client,
+        entry.division,
+        entry.task,
+        entry.project
+      );
+      if (!project) {
+        skippedNoProject++;
+        continue;
+      }
+      if (!project.notion_id) {
+        skippedNoNotion++;
+        continue;
+      }
+
+      if (!markerCache.has(project.notion_id)) {
+        markerCache.set(
+          project.notion_id,
+          await getTimerMarkers(project.notion_id)
+        );
+      }
+      const markers = markerCache.get(project.notion_id);
+      const marker = entry.start.replace("T", " ");
+      if (markers.has(marker)) {
+        skippedAlreadyLogged++;
+        continue;
+      }
+
+      const result = await appendTimerLog(project.notion_id, entry);
+      if (result.logged) {
+        logged++;
+        markers.add(marker);
+        // Throttle to stay under Notion's ~3 req/sec rate limit
+        await new Promise((r) => setTimeout(r, 400));
+      } else {
+        errors.push({ start: entry.start, project: project.id, reason: result.reason });
+      }
+    }
+
+    res.json({
+      logged,
+      skippedAlreadyLogged,
+      skippedNoProject,
+      skippedNoNotion,
+      errors,
+      totalScanned: entries.length,
+    });
+  } catch (err) {
+    console.error("POST /api/timers/backfill error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
