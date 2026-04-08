@@ -66,14 +66,38 @@ function extractDate(page) {
 }
 
 /**
+ * Check if a Notion page title is a reasonable match for a query.
+ * Requires at least half the significant words (3+ chars) from the query
+ * to appear in the title, with a minimum of 2 matching words
+ * (or 1 if the query only has 1 significant word).
+ */
+function titleMatchesQuery(title, query) {
+  if (!title || !query) return false;
+  const titleLower = title.toLowerCase();
+  const NOISE = new Set(["the", "and", "for", "with", "from", "website", "site", "project", "app"]);
+  const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 3 && !NOISE.has(w));
+  if (queryWords.length === 0) return false;
+  const matches = queryWords.filter((w) => titleLower.includes(w)).length;
+  const threshold = Math.max(1, Math.ceil(queryWords.length / 2));
+  return matches >= threshold;
+}
+
+/**
  * Search Notion for a page matching the project name or company name.
+ * Validates that the returned page title actually relates to the query.
  * Returns the first matching page ID or null.
  */
 export async function searchNotionForProject(projectName, companyName) {
   if (!notionToken) return null;
 
-  // Try project name first, then company name as fallback
-  for (const query of [projectName, companyName].filter(Boolean)) {
+  // Skip company-name fallback for internal/generic names
+  const SKIP_COMPANY = new Set(["linnflux"]);
+  const queries = [projectName];
+  if (companyName && !SKIP_COMPANY.has(companyName.toLowerCase())) {
+    queries.push(companyName);
+  }
+
+  for (const query of queries.filter(Boolean)) {
     const data = await notionFetch("/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -83,8 +107,14 @@ export async function searchNotionForProject(projectName, companyName) {
         page_size: 5,
       }),
     });
-    if (data?.results?.length > 0) {
-      return data.results[0].id;
+    if (!data?.results?.length) continue;
+
+    // Validate: the page title must actually contain query terms
+    for (const page of data.results) {
+      const title = extractTitle(page);
+      if (titleMatchesQuery(title, query)) {
+        return page.id;
+      }
     }
   }
 
