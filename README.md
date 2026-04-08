@@ -46,6 +46,8 @@ Time entries live in daily markdown files with YAML frontmatter. Each running ti
 
 Every entry records: client, project, division, task, estimated minutes, start/end, duration, billable flag, and notes. The `estimated_minutes` field drives billing — it captures how long the task *should* take a professional developer, not the wall-clock time. Actual elapsed time is tracked for internal reference. If a second timer is started for the same client, Claude flags it as a potential duplicate. This runs alongside your external time tracker, not instead of it — it's your own internal record with fields external tools don't track.
 
+**The Justification Rule.** Notes on a completed entry are a **billing ledger**, not a changelog. Every bullet must correspond to real work performed during the timed period, and together the bullets must plausibly account for the billed duration (rule of thumb: ~1 bullet per 10–15 minutes). `/od-stop` enforces this at write time — if conversation context is thin relative to the duration, it prompts the Operator for the missing detail instead of auto-generating filler. The daily `.md` entry, the dashboard card's time entries, and the linked Notion task's toggle blocks all share the same note body, so the ledger is consistent across every surface.
+
 ```yaml
 ~/OpenDia/Time/2026/03/2026-03-12.md
 
@@ -94,7 +96,7 @@ Credentials live outside the project directory, managed by MCP server configs, e
 A lightweight Kanban board that provides a visual interface to the SQLite database. Built with React and Express, served on a single port, accessible from any machine on the Tailscale network. See [`dashboard/README.md`](dashboard/README.md) for setup and usage details.
 
 - **Board view:** Projects appear as draggable cards organized into status columns (`In Progress`, `WFHuman`, `Ice`, `Completed`). Cards show company, division, notes, tmux session, and next step at a glance.
-- **Next Step:** Each project carries a `next_step` field — a short, actionable description of what to do next. Auto-populated when timers are paused or stopped (via `NEXT:` convention in notes), and refreshable on demand with `/od-next-steps`. Displayed on cards with a purple arrow indicator.
+- **Next Step:** Each project carries a `next_step` field — a short, actionable description of what to do next. Auto-populated when a timer is stopped via `/od-stop` (via `NEXT:` convention in notes), and refreshable on demand with `/od-next-steps`. Displayed on cards with a purple arrow indicator.
 - **Card modal:** Click a card to open a detail modal with editable fields (name, status, notes, tmux session, next step) and a scrollable list of associated time entries pulled from the internal timer system. Company names link to their Notion page when available. Linked Notion tasks show an icon and title in the header.
 - **Card sync:** The refresh button in each card modal triggers an AI-powered sync that: auto-discovers and links a Notion task if none is set (searches by project name, then company name), fetches the linked Notion task (todos, comments, status), searches Gmail for recent client emails (exact phrase match, scoped to inbox and client label), runs Claude Haiku to analyze the context, auto-updates the project's next step, and appends any detected change requests to the Notion task as dated toggle blocks. Email threads are shown as clickable links to Gmail.
 - **Inline attachments:** Image paths (`~/OpenDia/.../*.png`, `.jpg`, etc.) found in notes or next step fields are automatically detected and rendered as clickable thumbnail previews in an Attachments section. Clicking opens the full image. Files are served through a scoped API endpoint restricted to `~/OpenDia/`.
@@ -117,14 +119,13 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/notion-new` | Creates a Notion task and starts a Toggl timer in one flow. |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
+| `/od-stop` | Unified work stop. Stops the running timer, writes justified notes (bullets must account for billed duration), updates the dashboard card's next step, and logs a dated toggle block to the linked Notion task. `backfill` mode does a one-shot historical sync of all prior entries. |
 | `/card-update` | Update a project card from the CLI. Auto-detects project from the current tmux session, shows card state, accepts freeform updates ("next step is X, status wfhuman"). Optional `--sync` flag triggers full AI-powered sync (Gmail + Notion + analysis) before prompting. |
 | `/od-next-steps` | Research and set a project's next step from timers, Notion, and notes. Accepts a project name/ID, or `--all` for a full scan. |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
 | `/roundup` | Project priority roundup. Scores and ranks open projects by urgency, refreshes next steps for top picks, lets you start via `/od-go`. |
-| `/timer-end` | End a running timer, prompt for notes, calculate duration, finalize the entry. Auto-updates the project's next step. |
 | `/timer-merge` | Merge duplicate timers for the same client/project into one consolidated entry. |
-| `/timer-pause` | Pause with auto-generated notes and project summary. Auto-updates the project's next step. |
-| `/timer-start` | Start an internal time entry with client, task, division, and billable prompts. |
+| `/timer-start` | Start an internal time entry with client, task, division, and billable prompts. (Primitive — `/od-go` is the preferred entrypoint.) |
 | `/timer-status` | Show all active timers across all sessions. |
 | `/zero` | Inbox Zero. Scans primary inbox, groups by thread, extracts action items. |
 
