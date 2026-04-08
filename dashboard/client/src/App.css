@@ -375,6 +375,43 @@ body.has-bg::before {
   scrollbar-color: var(--bg-card) var(--bg-main);
 }
 
+@property --timer-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.modal-timer-active {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--bg-surface), var(--bg-surface)) padding-box,
+    conic-gradient(
+      from var(--timer-angle),
+      #2e7a28 0%,
+      #54af4d 20%,
+      #8fd689 35%,
+      #54af4d 50%,
+      #2e7a28 65%,
+      #54af4d 80%,
+      #2e7a28 100%
+    ) border-box;
+  animation: timer-border-spin 6s linear infinite;
+}
+
+@keyframes timer-border-spin {
+  to {
+    --timer-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-timer-active {
+    animation: none;
+    border: 2px solid #54af4d;
+    background: var(--bg-surface);
+  }
+}
+
 .modal::-webkit-scrollbar {
   width: 8px;
 }

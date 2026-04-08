@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useProjects } from "./hooks/useProjects.js";
 import Board from "./components/Board.jsx";
 import CardModal from "./components/CardModal.jsx";
@@ -25,11 +25,26 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [filter, setFilter] = useState("all");
+  const [activeTimerIds, setActiveTimerIds] = useState(new Set());
 
   useEffect(() => {
     document.documentElement.className = theme === "light" ? "light-theme" : "";
     localStorage.setItem("opendia-theme", theme);
   }, [theme]);
+
+  const fetchActiveTimers = useCallback(() => {
+    fetch("/api/timers/active")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((ids) => setActiveTimerIds(new Set(ids)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchActiveTimers();
+    const onFocus = () => fetchActiveTimers();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchActiveTimers]);
 
   // Collect unique divisions from loaded projects
   const divisions = useMemo(() => {
@@ -131,13 +146,14 @@ export default function App() {
       {loading ? (
         <div className="loading">Loading projects...</div>
       ) : (
-        <Board grouped={filtered} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} />
+        <Board grouped={filtered} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} activeTimerIds={activeTimerIds} />
       )}
       {selectedProject && (
         <CardModal
           project={selectedProject}
           onClose={handleModalClose}
           onUpdate={handleModalUpdate}
+          hasActiveTimer={activeTimerIds.has(selectedProject.id)}
         />
       )}
       <CommandPalette

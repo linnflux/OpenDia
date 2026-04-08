@@ -66,7 +66,7 @@ function extractImagePaths(...fields) {
   return paths;
 }
 
-export default function CardModal({ project, onClose, onUpdate }) {
+export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
@@ -240,7 +240,7 @@ export default function CardModal({ project, onClose, onUpdate }) {
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdropClick}>
-      <div className="modal">
+      <div className={`modal${hasActiveTimer ? " modal-timer-active" : ""}`}>
         <div className="modal-top-actions">
           <button
             className={`modal-sync-btn ${syncing ? "syncing" : ""}`}
