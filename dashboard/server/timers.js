@@ -172,9 +172,14 @@ export async function getTimerEntriesForProject(project, limit = 20) {
         const entryProject = (entry.project || "").toLowerCase();
         const entryTask = (entry.task || "").toLowerCase();
 
+        const clientNameMatch =
+          companyLower && entryClient && (
+            entryClient === companyLower ||
+            entryClient.includes(companyLower) ||
+            companyLower.includes(entryClient)
+          );
         const companyDivMatch =
-          companyLower && divisionLower &&
-          entryClient === companyLower && entryDiv === divisionLower;
+          clientNameMatch && divisionLower && entryDiv === divisionLower;
         const projectNameMatch =
           nameLower && (entryProject.includes(nameLower) || entryTask.includes(nameLower));
 

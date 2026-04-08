@@ -105,7 +105,12 @@ export function matchProject(client, division, task, project) {
     const pDivLower = (p.division || "").toLowerCase();
     const nameLower = (p.name || "").toLowerCase();
 
-    const clientMatch = clientLower && (companyLower === clientLower || shortLower === clientLower);
+    const clientMatch = clientLower && (
+      companyLower === clientLower ||
+      shortLower === clientLower ||
+      (companyLower && (companyLower.includes(clientLower) || clientLower.includes(companyLower))) ||
+      (shortLower && (shortLower.includes(clientLower) || clientLower.includes(shortLower)))
+    );
     const divMatch = divisionLower && pDivLower === divisionLower;
     const taskMatch = taskLower && (nameLower.includes(taskLower) || taskLower.includes(nameLower));
 
