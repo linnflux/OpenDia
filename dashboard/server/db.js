@@ -76,10 +76,11 @@ export function updateProject(id, fields) {
   return result.changes > 0;
 }
 
-export function matchProject(client, division, task) {
+export function matchProject(client, division, task, project) {
   const clientLower = (client || "").toLowerCase();
   const divisionLower = (division || "").toLowerCase();
   const taskLower = (task || "").toLowerCase();
+  const projectLower = (project || "").toLowerCase();
 
   const projects = getDb().prepare(`
     SELECT p.id, p.name, p.status,
@@ -90,6 +91,14 @@ export function matchProject(client, division, task) {
     LEFT JOIN divisions d ON p.division_id = d.id
   `).all();
 
+  // First pass: exact project name match (highest priority)
+  if (projectLower) {
+    for (const p of projects) {
+      if ((p.name || "").toLowerCase() === projectLower) return p;
+    }
+  }
+
+  // Second pass: client + division or client + task
   for (const p of projects) {
     const companyLower = (p.company_name || "").toLowerCase();
     const shortLower = (p.company_short || "").toLowerCase();
@@ -105,6 +114,37 @@ export function matchProject(client, division, task) {
   }
 
   return null;
+}
+
+export function createProject({ name, companyName, divisionName, status = "in_progress", notionId = null }) {
+  const db = getDb();
+
+  let companyId = null;
+  if (companyName) {
+    const company = db.prepare(
+      "SELECT id FROM companies WHERE LOWER(name) = LOWER(?) OR LOWER(short_name) = LOWER(?)"
+    ).get(companyName, companyName);
+    if (company) companyId = company.id;
+  }
+
+  let divisionId = null;
+  if (divisionName) {
+    const division = db.prepare(
+      "SELECT id FROM divisions WHERE LOWER(name) = LOWER(?)"
+    ).get(divisionName);
+    if (division) divisionId = division.id;
+  }
+
+  if (!VALID_STATUSES.has(status)) {
+    throw new Error(`Invalid status: ${status}`);
+  }
+
+  const result = db.prepare(`
+    INSERT INTO projects (name, company_id, division_id, status, notion_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(name, companyId, divisionId, status, notionId);
+
+  return getProjectById(result.lastInsertRowid);
 }
 
 export function reorderProjects(status, ids) {

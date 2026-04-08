@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject } from "./db.js";
 import { getTimerEntriesForProject, getActiveTimers } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -22,6 +22,18 @@ app.get("/api/projects", (req, res) => {
   } catch (err) {
     console.error("GET /api/projects error:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects", (req, res) => {
+  try {
+    const { name, companyName, divisionName, status, notionId } = req.body;
+    if (!name) return res.status(400).json({ error: "name is required" });
+    const project = createProject({ name, companyName, divisionName, status, notionId });
+    res.status(201).json(project);
+  } catch (err) {
+    console.error("POST /api/projects error:", err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -154,7 +166,7 @@ app.get("/api/timers/active", async (req, res) => {
     const timers = await getActiveTimers();
     const projectIds = new Set();
     for (const timer of timers) {
-      const project = matchProject(timer.client, timer.division, timer.task);
+      const project = matchProject(timer.client, timer.division, timer.task, timer.project);
       if (project) projectIds.add(project.id);
     }
     res.json([...projectIds]);
