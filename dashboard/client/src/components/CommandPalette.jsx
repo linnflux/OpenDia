@@ -2,9 +2,15 @@ import { useState, useEffect, useRef, useMemo } from "react";
 
 const BG_STORAGE_KEY = "opendia-bg-image";
 
-function getActions({ onRefresh, onUploadBg, onClearBg, hasBg }) {
+function getActions({ onRefresh, onUploadBg, onClearBg, hasBg, onToggleTheme, theme }) {
   return [
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", shortcut: "R", action: onRefresh },
+    {
+      id: "toggle-theme",
+      icon: theme === "dark" ? "\u2600" : "\u263D",
+      label: theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode",
+      action: onToggleTheme,
+    },
     { id: "upload-bg", icon: "\u{1F5BC}", label: "Upload Background Image", action: onUploadBg },
     ...(hasBg
       ? [{ id: "clear-bg", icon: "\u2715", label: "Remove Background Image", action: onClearBg }]
@@ -12,7 +18,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, hasBg }) {
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, onSelectProject }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, onSelectProject, theme, onToggleTheme }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -68,8 +74,15 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
   }
 
   const actions = useMemo(
-    () => getActions({ onRefresh: () => { onRefresh(); onClose(); }, onUploadBg: handleUploadBg, onClearBg: handleClearBg, hasBg: !!bgImage }),
-    [bgImage, onRefresh, onClose]
+    () => getActions({
+      onRefresh: () => { onRefresh(); onClose(); },
+      onUploadBg: handleUploadBg,
+      onClearBg: handleClearBg,
+      hasBg: !!bgImage,
+      onToggleTheme: () => { onToggleTheme(); onClose(); },
+      theme,
+    }),
+    [bgImage, onRefresh, onClose, onToggleTheme, theme]
   );
 
   const filteredActions = useMemo(() => {

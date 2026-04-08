@@ -122,13 +122,6 @@ export default function App() {
               );
             })}
           </div>
-          <button
-            className="theme-toggle"
-            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {theme === "dark" ? "\u2600" : "\u263D"}
-          </button>
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>
             <kbd className="cp-trigger-kbd">Ctrl+K</kbd>
@@ -153,6 +146,8 @@ export default function App() {
         onRefresh={refresh}
         projects={projects}
         onSelectProject={(p) => setSelectedProject(p)}
+        theme={theme}
+        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
       />
     </div>
   );
