@@ -21,11 +21,18 @@ function getInitialTheme() {
 
 export default function App() {
   const { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh } = useProjects();
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [filter, setFilter] = useState("all");
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
+
+  // Derive the live project object from the current projects list so the open
+  // modal automatically reflects status/next-step/notes changes pushed in by
+  // the 30s poll or optimistic updates — no stale snapshot.
+  const selectedProject = selectedProjectId
+    ? projects.find((p) => p.id === selectedProjectId) || null
+    : null;
 
   useEffect(() => {
     document.documentElement.className = theme === "light" ? "light-theme" : "";
@@ -43,7 +50,13 @@ export default function App() {
     fetchActiveTimers();
     const onFocus = () => fetchActiveTimers();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    // Poll every 10s so the green border appears without needing to refocus
+    // the window (common when starting a timer from a terminal on the same machine).
+    const interval = setInterval(fetchActiveTimers, 10000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearInterval(interval);
+    };
   }, [fetchActiveTimers]);
 
   // Collect unique divisions from loaded projects
@@ -88,16 +101,17 @@ export default function App() {
   }, []);
 
   function handleCardClick(project) {
-    setSelectedProject(project);
+    setSelectedProjectId(project.id);
   }
 
   function handleModalUpdate(id, fields) {
+    // updateProject does an optimistic setProjects; selectedProject is derived
+    // from that list, so the modal re-renders automatically.
     updateProject(id, fields);
-    setSelectedProject((prev) => (prev ? { ...prev, ...fields } : null));
   }
 
   function handleModalClose() {
-    setSelectedProject(null);
+    setSelectedProjectId(null);
   }
 
   return (
@@ -150,6 +164,7 @@ export default function App() {
       )}
       {selectedProject && (
         <CardModal
+          key={selectedProject.id}
           project={selectedProject}
           onClose={handleModalClose}
           onUpdate={handleModalUpdate}
@@ -161,7 +176,7 @@ export default function App() {
         onClose={() => setPaletteOpen(false)}
         onRefresh={refresh}
         projects={projects}
-        onSelectProject={(p) => setSelectedProject(p)}
+        onSelectProject={(p) => setSelectedProjectId(p.id)}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
       />
