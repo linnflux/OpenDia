@@ -95,12 +95,19 @@ export async function searchRecentEmails(companyName, { shortName, days = 7 } = 
   // Gmail OR syntax: {query1 query2} means either condition
   const SCOPE = "{in:inbox label:~linnflux-cloud-solutions}";
 
+  // Exclude automated service senders that mention client names in digests
+  const EXCLUDE = [
+    "toggl.com", "notion.so", "github.com", "gitlab.com", "cloudflare.com",
+    "google.com", "googleapis.com", "aws.amazon.com", "anthropic.com",
+    "make.com", "integromat.com", "stripe.com", "squareup.com",
+  ].map((d) => `-from:${d}`).join(" ");
+
   // Build multiple search queries to cast a wider net
-  const queries = [`"${companyName}" ${SCOPE} newer_than:${days}d`];
+  const queries = [`"${companyName}" ${SCOPE} ${EXCLUDE} newer_than:${days}d`];
 
   // Search by short name if it's specific enough (5+ chars avoids generic matches)
   if (shortName && shortName.length >= 5 && shortName.toLowerCase() !== companyName.toLowerCase()) {
-    queries.push(`"${shortName}" ${SCOPE} newer_than:${days}d`);
+    queries.push(`"${shortName}" ${SCOPE} ${EXCLUDE} newer_than:${days}d`);
   }
 
   // Try to derive sender domain patterns from company name
@@ -117,7 +124,7 @@ export async function searchRecentEmails(companyName, { shortName, days = 7 } = 
     const domainBase = words.join("");
     if (domainBase.length > 4) {
       // Use partial from: match — Gmail matches substrings in the from field
-      queries.push(`from:${domainBase} ${SCOPE} newer_than:${days}d`);
+      queries.push(`from:${domainBase} ${SCOPE} ${EXCLUDE} newer_than:${days}d`);
     }
   }
 
