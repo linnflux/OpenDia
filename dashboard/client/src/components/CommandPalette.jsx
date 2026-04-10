@@ -98,7 +98,8 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
       (p.name || "").toLowerCase().includes(q) ||
       (p.company_name || "").toLowerCase().includes(q) ||
       (p.next_step || "").toLowerCase().includes(q) ||
-      (p.division || "").toLowerCase().includes(q)
+      (p.division || "").toLowerCase().includes(q) ||
+      (p.tmux_session || "").toLowerCase().includes(q)
     ).slice(0, 8);
   }, [query, projects]);
 
@@ -108,6 +109,7 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
       icon: "\u25A3",
       label: p.name,
       sublabel: p.company_name || "",
+      tmux: p.tmux_session || "",
       action: () => { onSelectProject(p); onClose(); },
     }));
     return [...filteredActions, ...projectItems];
@@ -190,6 +192,9 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
                   {action.label}
                   {action.sublabel && <span className="cp-item-sub"> — {action.sublabel}</span>}
                 </span>
+                {action.tmux && (
+                  <span className="card-tmux">{action.tmux}</span>
+                )}
                 {action.shortcut && (
                   <kbd className="cp-kbd">{action.shortcut}</kbd>
                 )}
