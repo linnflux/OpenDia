@@ -76,6 +76,28 @@ export function updateProject(id, fields) {
   return result.changes > 0;
 }
 
+const MATCH_STOPWORDS = new Set([
+  "the","for","and","with","fix","new","get","add","to","of","in","on","a","an",
+  "is","at","or","it","re","per","via","from","into","out","up","down","use","set"
+]);
+
+function matchTokenize(s) {
+  const out = new Set();
+  for (const t of (s || "").toLowerCase().split(/[^a-z0-9]+/)) {
+    if (t.length > 2 && !MATCH_STOPWORDS.has(t)) out.add(t);
+  }
+  return out;
+}
+
+function matchSharedTokens(a, b) {
+  const aT = matchTokenize(a);
+  if (aT.size === 0) return 0;
+  const bT = matchTokenize(b);
+  let n = 0;
+  for (const t of aT) if (bT.has(t)) n++;
+  return n;
+}
+
 export function matchProject(client, division, task, project) {
   const clientLower = (client || "").toLowerCase();
   const divisionLower = (division || "").toLowerCase();
@@ -98,7 +120,13 @@ export function matchProject(client, division, task, project) {
     }
   }
 
-  // Second pass: client + division or client + task
+  // Scored pass: among projects whose client matches, pick the best by
+  // (task text overlap with name) + (division match) + (active status bonus).
+  // Replaces the old "first client+division hit wins", which mis-attributed
+  // timers to completed projects when a newer in_progress project existed
+  // for the same (client, division) pair.
+  let best = null;
+  let bestScore = 0;
   for (const p of projects) {
     const companyLower = (p.company_name || "").toLowerCase();
     const shortLower = (p.company_short || "").toLowerCase();
@@ -111,14 +139,28 @@ export function matchProject(client, division, task, project) {
       (companyLower && (companyLower.includes(clientLower) || clientLower.includes(companyLower))) ||
       (shortLower && (shortLower.includes(clientLower) || clientLower.includes(shortLower)))
     );
-    const divMatch = divisionLower && pDivLower === divisionLower;
-    const taskMatch = taskLower && (nameLower.includes(taskLower) || taskLower.includes(nameLower));
+    if (!clientMatch) continue;
 
-    if (clientMatch && divMatch) return p;
-    if (clientMatch && taskMatch) return p;
+    const divMatch = divisionLower && pDivLower === divisionLower;
+    const taskSubstr = taskLower && nameLower && (nameLower.includes(taskLower) || taskLower.includes(nameLower));
+    const sharedTokens = matchSharedTokens(taskLower, nameLower);
+
+    // Require at least one signal beyond "same client" to be considered.
+    if (!divMatch && !taskSubstr && sharedTokens === 0) continue;
+
+    let score = 0;
+    if (taskSubstr) score += 10;              // strongest: full substring match
+    score += sharedTokens * 3;                 // per shared significant token
+    if (divMatch) score += 2;                  // same division
+    if (p.status !== "completed") score += 1;  // prefer active work on ties
+
+    if (score > bestScore) {
+      best = p;
+      bestScore = score;
+    }
   }
 
-  return null;
+  return best;
 }
 
 export function createProject({ name, companyName, divisionName, status = "in_progress", notionId = null }) {
