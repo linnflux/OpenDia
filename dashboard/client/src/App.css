@@ -224,6 +224,25 @@ body.has-bg::before {
   overflow-x: auto;
   align-items: flex-start;
   min-height: calc(100vh - 6rem);
+  scrollbar-color: var(--bg-card) var(--bg-main);
+}
+
+.board::-webkit-scrollbar {
+  height: 8px;
+}
+
+.board::-webkit-scrollbar-track {
+  background: var(--bg-main);
+  border-radius: 4px;
+}
+
+.board::-webkit-scrollbar-thumb {
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+.board::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 /* Column */
