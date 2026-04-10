@@ -94,13 +94,17 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
   const filteredProjects = useMemo(() => {
     if (!query || !projects) return [];
     const q = query.toLowerCase();
-    return projects.filter((p) =>
-      (p.name || "").toLowerCase().includes(q) ||
-      (p.company_name || "").toLowerCase().includes(q) ||
-      (p.next_step || "").toLowerCase().includes(q) ||
-      (p.division || "").toLowerCase().includes(q) ||
-      (p.tmux_session || "").toLowerCase().includes(q)
-    ).slice(0, 8);
+    const scored = [];
+    for (const p of projects) {
+      let score = 0;
+      if ((p.tmux_session || "").toLowerCase().includes(q)) score += 4;
+      if ((p.name || "").toLowerCase().includes(q)) score += 3;
+      if ((p.company_name || "").toLowerCase().includes(q)) score += 2;
+      if ((p.division || "").toLowerCase().includes(q)) score += 1;
+      if (score > 0) scored.push({ p, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 8).map((s) => s.p);
   }, [query, projects]);
 
   const filtered = useMemo(() => {
