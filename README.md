@@ -217,6 +217,16 @@ Read-only commands (`ls`, `cat`, `grep`, `wp option get`, etc.) pass through wit
 
 The hook returns `{"decision": "ask"}` rather than `{"decision": "block"}`, so the Operator can always override. The goal is verification, not obstruction.
 
+## Email Handling
+
+OpenDia treats outbound email with the same care as destructive shell commands — every message goes through a draft-first workflow with explicit AI disclosure and a pinned signature.
+
+**Drafts only.** Claude never calls `gmail_send` directly. All composition goes through `gmail_create_draft`, which saves to Gmail Drafts for Operator review and manual send from the Gmail UI. This keeps a human in the loop on every outbound message, preserves last-minute editing, and prevents accidental sends.
+
+**AI disclosure.** Every draft carries the line *"AI was used in the drafting of this message."* rendered as small italic text at the top of the signature block. Recipients of a Linnflux message always know when AI participated in the drafting.
+
+**Pinned signature.** The Gmail v1 API only returns the current default new-message signature for the primary `sendAs` alias — it cannot enumerate named alternates. To decouple Claude's output from whatever the Operator has set as the Gmail Web compose default, the signature HTML is pinned to a local file (`~/.claude/mcp-credentials/google-workspace/signature.html`) that the Google Workspace MCP reads directly. The Operator can switch their Gmail default signature freely without affecting what Claude applies to drafts. If the file is missing, drafts are created with no signature block at all — no silent fallback to the wrong signature.
+
 ## Divisions
 
 | Division | Focus |
