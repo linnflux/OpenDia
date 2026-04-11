@@ -32,6 +32,8 @@ export default function App() {
   const [theme, setTheme] = useState(getInitialTheme);
   const [filter, setFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [inboxFilter, setInboxFilter] = useState("active");
+  const [inboxFilterOpen, setInboxFilterOpen] = useState(false);
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
 
   // Derive the live project object from the current projects list so the open
@@ -123,6 +125,12 @@ export default function App() {
 
   const pendingInbox = inboxItems.filter((i) => i.status !== "done").length;
 
+  const filteredInbox = inboxItems.filter((i) => {
+    if (inboxFilter === "active") return i.status !== "done";
+    if (inboxFilter === "done") return i.status === "done";
+    return true; // "all"
+  });
+
   return (
     <div className="app">
       <header className="app-header">
@@ -131,6 +139,35 @@ export default function App() {
           <h1 className="app-wordmark"><span className="wm-open">Open</span><span className="wm-dia">Dia</span></h1>
         </div>
         <div className="app-header-actions">
+          {view === "inbox" && (
+            <div className="filter-dropdown-wrap">
+              {inboxFilterOpen && <div className="filter-backdrop" onClick={() => setInboxFilterOpen(false)} />}
+              <button
+                className={`filter-dropdown-btn${inboxFilter !== "all" ? " active" : ""}`}
+                onClick={() => setInboxFilterOpen((v) => !v)}
+              >
+                {inboxFilter === "all" ? "All" : inboxFilter === "active" ? "Active" : "Done"}
+                <span className="filter-caret">▾</span>
+              </button>
+              {inboxFilterOpen && (
+                <div className="filter-dropdown-menu">
+                  {[
+                    { key: "active", label: "Active" },
+                    { key: "done", label: "Done" },
+                    { key: "all", label: "All" },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key}
+                      className={`filter-option${inboxFilter === key ? " active" : ""}`}
+                      onClick={() => { setInboxFilter(key); setInboxFilterOpen(false); }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {view === "board" && (
             <div className="filter-dropdown-wrap">
               {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
@@ -207,11 +244,11 @@ export default function App() {
         <div className="inbox-view">
           {inboxLoading ? (
             <div className="loading">Loading inbox...</div>
-          ) : inboxItems.length === 0 ? (
-            <div className="inbox-empty">No inbox items. Label an email "OpenDia Inbox" in Gmail to get started.</div>
+          ) : filteredInbox.length === 0 ? (
+            <div className="inbox-empty">{inboxItems.length === 0 ? "No inbox items. Label an email \"OpenDia Inbox\" in Gmail to get started." : "No items match this filter."}</div>
           ) : (
             <div className="inbox-grid">
-              {inboxItems.map((item) => (
+              {filteredInbox.map((item) => (
                 <InboxCard key={item.id} item={item} onClick={setSelectedInboxItem} />
               ))}
             </div>
