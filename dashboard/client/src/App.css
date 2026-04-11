@@ -150,44 +150,101 @@ body.has-bg::before {
   gap: 0.5rem;
 }
 
-.filter-pills {
+.filter-dropdown-wrap {
+  position: relative;
+}
+
+.filter-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.filter-dropdown-btn {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  flex-wrap: wrap;
-}
-
-.filter-pill {
-  padding: 0.25rem 0.625rem;
-  background: transparent;
+  gap: 0.375rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 9999px;
+  border-radius: 6px;
   color: var(--text-secondary);
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: 0.8rem;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.15s;
   white-space: nowrap;
+  transition: all 0.15s;
 }
 
-.filter-pill:hover {
+.filter-dropdown-btn:hover {
   border-color: var(--border-hover);
   color: var(--text-primary);
 }
 
-.filter-pill.active {
-  background: var(--accent);
+.filter-dropdown-btn.active {
   border-color: var(--accent);
-  color: #fff;
+  color: var(--text-primary);
 }
 
-.filter-pill-div {
-  border-width: 1.5px;
+.filter-caret {
+  font-size: 0.65rem;
+  opacity: 0.5;
+  margin-left: 0.1rem;
 }
 
-.filter-pill-div.active {
-  border-color: inherit;
+.filter-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.25rem;
+  min-width: 160px;
+  z-index: 100;
+  box-shadow: 0 4px 16px var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s;
+}
+
+.filter-option:hover {
+  background: var(--badge-bg);
+  color: var(--text-primary);
+}
+
+.filter-option.active {
+  font-weight: 600;
+}
+
+.filter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.filter-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
 }
 
 .theme-toggle {

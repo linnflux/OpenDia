@@ -31,6 +31,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [filter, setFilter] = useState("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
 
   // Derive the live project object from the current projects list so the open
@@ -138,34 +139,55 @@ export default function App() {
             </button>
           </div>
           {view === "board" && (
-            <div className="filter-pills">
-              {["all", "deliverable", "internal"].map((key) => (
-                <button
-                  key={key}
-                  className={`filter-pill ${filter === key ? "active" : ""}`}
-                  onClick={() => setFilter(filter === key && key !== "all" ? "all" : key)}
-                >
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
-                </button>
-              ))}
-              {divisions.map((div) => {
-                const colors = DIVISION_COLORS[div] || { bg: "#6b7280", text: "#fff" };
-                const active = filter === div;
-                return (
-                  <button
-                    key={div}
-                    className={`filter-pill filter-pill-div ${active ? "active" : ""}`}
-                    style={{
-                      backgroundColor: active ? colors.bg : "transparent",
-                      color: active ? colors.text : colors.bg,
-                      borderColor: colors.bg,
-                    }}
-                    onClick={() => setFilter(active ? "all" : div)}
-                  >
-                    {div}
-                  </button>
-                );
-              })}
+            <div className="filter-dropdown-wrap">
+              {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
+              <button
+                className={`filter-dropdown-btn${filter !== "all" ? " active" : ""}`}
+                onClick={() => setFilterOpen((v) => !v)}
+              >
+                {filter === "all" ? "Filter" : (
+                  <>
+                    {DIVISION_COLORS[filter] && (
+                      <span className="filter-dot" style={{ backgroundColor: DIVISION_COLORS[filter].bg }} />
+                    )}
+                    {filter === "deliverable" ? "Deliverable" : filter === "internal" ? "Internal" : filter}
+                  </>
+                )}
+                <span className="filter-caret">▾</span>
+              </button>
+              {filterOpen && (
+                <div className="filter-dropdown-menu">
+                  {[
+                    { key: "all", label: "All" },
+                    { key: "deliverable", label: "Deliverable" },
+                    { key: "internal", label: "Internal" },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key}
+                      className={`filter-option${filter === key ? " active" : ""}`}
+                      onClick={() => { setFilter(key); setFilterOpen(false); }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  {divisions.length > 0 && <div className="filter-divider" />}
+                  {divisions.map((div) => {
+                    const colors = DIVISION_COLORS[div] || { bg: "#6b7280", text: "#fff" };
+                    const active = filter === div;
+                    return (
+                      <button
+                        key={div}
+                        className={`filter-option${active ? " active" : ""}`}
+                        style={active ? { backgroundColor: colors.bg, color: colors.text } : { color: colors.bg }}
+                        onClick={() => { setFilter(active ? "all" : div); setFilterOpen(false); }}
+                      >
+                        <span className="filter-dot" style={{ backgroundColor: colors.bg }} />
+                        {div}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
