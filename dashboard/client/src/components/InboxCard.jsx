@@ -24,8 +24,13 @@ export default function InboxCard({ item, onClick }) {
   const from = item.from_addr?.replace(/^"?([^"<]+)"?\s*<[^>]+>$/, "$1").trim() || item.from_addr;
   const age = relativeTime(item.created_at);
 
+  const isServerWork = item.requires_server_access === 1 || item.requires_server_access === true;
+
   return (
-    <div className={`inbox-card${item.status === "dispatched" ? " inbox-card-running" : ""}`} onClick={() => onClick(item)}>
+    <div
+      className={`inbox-card${item.status === "dispatched" ? " inbox-card-running" : ""}${isServerWork ? " inbox-card-server" : ""}`}
+      onClick={() => onClick(item)}
+    >
       <div className="inbox-card-top">
         <span className="inbox-card-from">{from}</span>
         <span className="inbox-card-age">{age}</span>
@@ -33,6 +38,7 @@ export default function InboxCard({ item, onClick }) {
       <div className="inbox-card-subject">{item.subject}</div>
       <div className="inbox-card-meta">
         <span className="inbox-priority-dot" style={{ backgroundColor: dot }} title={item.priority} />
+        {isServerWork && <span className="inbox-card-server-flag">SERVER</span>}
         {item.client_hint && item.client_hint !== "unknown" && (
           <span className="inbox-card-client">{item.client_hint}</span>
         )}

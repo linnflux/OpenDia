@@ -200,28 +200,32 @@ export function ensureInboxTable() {
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS inbox_items (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      gmail_id      TEXT UNIQUE,
-      thread_id     TEXT,
-      from_addr     TEXT,
-      subject       TEXT,
-      client_hint   TEXT,
-      division_hint TEXT,
-      priority      TEXT DEFAULT 'normal',
-      short_slug    TEXT,
-      prompt_text   TEXT,
-      status        TEXT DEFAULT 'classified',
-      session_name  TEXT,
-      error_text    TEXT,
-      notes         TEXT,
-      created_at    DATETIME DEFAULT (datetime('now')),
-      updated_at    DATETIME DEFAULT (datetime('now'))
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      gmail_id              TEXT UNIQUE,
+      thread_id             TEXT,
+      from_addr             TEXT,
+      subject               TEXT,
+      client_hint           TEXT,
+      division_hint         TEXT,
+      priority              TEXT DEFAULT 'normal',
+      short_slug            TEXT,
+      prompt_text           TEXT,
+      status                TEXT DEFAULT 'classified',
+      session_name          TEXT,
+      error_text            TEXT,
+      notes                 TEXT,
+      requires_server_access INTEGER DEFAULT 0,
+      created_at            DATETIME DEFAULT (datetime('now')),
+      updated_at            DATETIME DEFAULT (datetime('now'))
     )
   `);
-  // Migrate: add notes column if it doesn't exist yet
+  // Migrate: add columns if they don't exist yet
   const cols = db.pragma("table_info(inbox_items)").map((r) => r.name);
   if (!cols.includes("notes")) {
     db.exec("ALTER TABLE inbox_items ADD COLUMN notes TEXT");
+  }
+  if (!cols.includes("requires_server_access")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN requires_server_access INTEGER DEFAULT 0");
   }
 }
 
@@ -250,6 +254,7 @@ export function getAllInboxItems() {
 const INBOX_UPDATABLE = new Set([
   "status", "session_name", "error_text",
   "client_hint", "division_hint", "priority", "notes",
+  "requires_server_access",
 ]);
 
 export function updateInboxItem(id, fields) {

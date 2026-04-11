@@ -1610,6 +1610,118 @@ body.has-bg::before {
   color: #f87171;
 }
 
+/* Server-work inbox card */
+.inbox-card-server {
+  border-left: 3px solid #f59e0b;
+}
+
+.inbox-card-server-flag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: #78350f;
+  color: #fde68a;
+  border: 1px solid #b45309;
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  text-transform: uppercase;
+}
+
+/* Server-work gate in InboxModal */
+.inbox-server-gate {
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  background: #1c1208;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+
+.inbox-server-gate-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.inbox-server-gate-info {
+  font-size: 0.8rem;
+  color: #fbbf24;
+  line-height: 1.45;
+}
+
+.inbox-server-instance-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.inbox-server-instance-input {
+  flex: 1;
+  background: #0f172a;
+  border: 1px solid #b45309;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  outline: none;
+}
+
+.inbox-server-instance-input:focus {
+  border-color: #f59e0b;
+}
+
+.inbox-approve-btn {
+  background: #b45309;
+  color: #fef3c7;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.inbox-approve-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.inbox-approve-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inbox-server-result {
+  font-size: 0.78rem;
+  border-radius: 5px;
+  padding: 0.4rem 0.65rem;
+  line-height: 1.4;
+}
+
+.inbox-server-result code {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.76rem;
+  background: rgba(0,0,0,0.25);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+.inbox-server-result-ok {
+  background: #1a3a2a;
+  border: 1px solid #166534;
+  color: #86efac;
+}
+
+.inbox-server-result-err {
+  background: #3b1a1a;
+  border: 1px solid #7f1d1d;
+  color: #f87171;
+}
+
 /* Sync results */
 .sync-results {
   border-top: 1px solid var(--border);
