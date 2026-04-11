@@ -238,18 +238,26 @@ Operator labels email "OpenDia Inbox"
   ┌── cron (*/5 min) ──────────────────────────────────────────────┐
   │  Stage A — Classify                                            │
   │    Claude Haiku reads the email and extracts:                  │
-  │      client, division, priority, directive, short slug         │
+  │      client, division, priority, directive, short slug,        │
+  │      requires_server_access (bool)                             │
   │    Checks client alias table first (learned mappings           │
   │      override Haiku — e.g. @deanvaughnlearning.com →           │
   │      "Memory Sports")                                          │
   │    Writes to inbox_items DB, moves to "OpenDia Processed"      │
   │                                                                │
   │  Stage B — Dispatch                                            │
-  │    Builds context header from recent timers + project match    │
-  │    Assembles full prompt (context + directive + finish rules)   │
-  │    Spawns detached tmux session running claude --print         │
-  │    Output logged to ~/OpenDia/logs/sessions/<session>.log      │
-  │    On finish: DB status → done / error                         │
+  │    ┌─ requires_server_access? ──────────────────────────────┐  │
+  │    │  YES → hold at "Classified", move out of queue         │  │
+  │    │         SERVER badge on dashboard card                  │  │
+  │    │         Operator approves via "Approve & Dispatch"      │  │
+  │    │           → dashboard verifies Lightsail instance       │  │
+  │    │           → takes pre-work snapshot (AWS CLI)           │  │
+  │    │           → spawns session with SERVER_WORK_PREAMBLE    │  │
+  │    └─ NO  → Builds context header (timers + project match)  │  │
+  │             Assembles full prompt (context + directive)       │  │
+  │             Spawns detached tmux session: claude --print      │  │
+  │             Output → ~/OpenDia/logs/sessions/<session>.log   │  │
+  │             On finish: DB status → done / error              │  │
   └────────────────────────────────────────────────────────────────┘
           │
           ▼
@@ -261,7 +269,9 @@ Operator labels email "OpenDia Inbox"
 
 **Operator correction.** Classification isn't always right — a sender's email domain may not match the client name in the working relationship. The modal makes every classification field editable: client, division, priority, and a notes textarea. Saving a corrected client name offers a one-click **"Save as alias"** prompt that writes to a `client_aliases` table so all future emails from that domain are classified correctly without touching Haiku.
 
-**Re-dispatch.** If Claude's first attempt was wrong (bad context, wrong client, or just a task that needs more guidance), add operator notes in the modal and click **↺ Re-dispatch**. The old session is killed, a fresh one spawns with the corrected classification and your notes prepended as an `## Operator correction` block, and the card updates with the new session name.
+**Re-dispatch.** If Claude's first attempt was wrong (bad context, wrong client, or just a task that needs more guidance), add operator notes in the modal and click **↺ Re-dispatch**. The old session is killed, a fresh one spawns with the corrected classification and your notes prepended as an `## Operator correction` block, and the card updates with the new session name. Re-dispatch is not available for server-work items — those must go through the approval gate.
+
+**Server-work safety gate.** Emails that require SSH or website changes are flagged with an amber **SERVER** badge and held at "Classified" — they never auto-dispatch. To release one, open the card, enter the Lightsail instance name, and click **Approve & Dispatch**. The dashboard verifies the instance exists via AWS CLI, takes a Lightsail snapshot, then spawns the Claude session with a stricter preamble that names the verified instance and snapshot and requires Claude to confirm the target before any write. This enforces the pre-work snapshot requirement from the server safety policy.
 
 **Error diagnosis.** When a session fails, the last 40 lines of Claude's output are stored in the DB and shown directly on the card — no need to dig through logs or attach to a dead tmux session.
 
