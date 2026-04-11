@@ -22,5 +22,34 @@ export function useInbox() {
     fetch("/api/inbox/" + id, { method: "DELETE" }).catch(() => {});
   }
 
-  return { items, loading, refresh: fetch_, dismissItem };
+  function updateItem(id, fields) {
+    // Optimistic update
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...fields } : i));
+    return fetch("/api/inbox/" + id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    }).then((r) => {
+      if (!r.ok) {
+        // Revert on failure
+        fetch_();
+        throw new Error("Update failed");
+      }
+      return r.json();
+    });
+  }
+
+  function redispatchItem(id) {
+    // Optimistic: mark as dispatched
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, status: "dispatched" } : i));
+    return fetch(`/api/inbox/${id}/redispatch`, { method: "POST" }).then((r) => {
+      if (!r.ok) {
+        fetch_();
+        throw new Error("Redispatch failed");
+      }
+      return r.json();
+    });
+  }
+
+  return { items, loading, refresh: fetch_, dismissItem, updateItem, redispatchItem };
 }

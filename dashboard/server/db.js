@@ -197,7 +197,8 @@ export function createProject({ name, companyName, divisionName, status = "in_pr
 // ── Inbox items ───────────────────────────────────────────────────────────────
 
 export function ensureInboxTable() {
-  getDb().exec(`
+  const db = getDb();
+  db.exec(`
     CREATE TABLE IF NOT EXISTS inbox_items (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       gmail_id      TEXT UNIQUE,
@@ -212,8 +213,29 @@ export function ensureInboxTable() {
       status        TEXT DEFAULT 'classified',
       session_name  TEXT,
       error_text    TEXT,
+      notes         TEXT,
       created_at    DATETIME DEFAULT (datetime('now')),
       updated_at    DATETIME DEFAULT (datetime('now'))
+    )
+  `);
+  // Migrate: add notes column if it doesn't exist yet
+  const cols = db.pragma("table_info(inbox_items)").map((r) => r.name);
+  if (!cols.includes("notes")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN notes TEXT");
+  }
+}
+
+export function ensureClientAliasesTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS client_aliases (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_type    TEXT NOT NULL,
+      match_value   TEXT NOT NULL,
+      client_hint   TEXT NOT NULL,
+      division_hint TEXT,
+      note          TEXT,
+      created_at    DATETIME DEFAULT (datetime('now')),
+      UNIQUE(match_type, match_value)
     )
   `);
 }
@@ -225,7 +247,10 @@ export function getAllInboxItems() {
   `).all();
 }
 
-const INBOX_UPDATABLE = new Set(["status", "session_name", "error_text"]);
+const INBOX_UPDATABLE = new Set([
+  "status", "session_name", "error_text",
+  "client_hint", "division_hint", "priority", "notes",
+]);
 
 export function updateInboxItem(id, fields) {
   ensureInboxTable();
@@ -248,6 +273,30 @@ export function updateInboxItem(id, fields) {
 export function deleteInboxItem(id) {
   ensureInboxTable();
   return getDb().prepare("DELETE FROM inbox_items WHERE id = ?").run(id).changes > 0;
+}
+
+export function getInboxItemById(id) {
+  ensureInboxTable();
+  return getDb().prepare("SELECT * FROM inbox_items WHERE id = ?").get(id);
+}
+
+export function getAllClientAliases() {
+  ensureClientAliasesTable();
+  return getDb().prepare(
+    "SELECT * FROM client_aliases ORDER BY match_type, match_value"
+  ).all();
+}
+
+export function insertClientAlias({ match_type, match_value, client_hint, division_hint, note }) {
+  ensureClientAliasesTable();
+  getDb().prepare(`
+    INSERT INTO client_aliases (match_type, match_value, client_hint, division_hint, note)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(match_type, match_value)
+    DO UPDATE SET client_hint=excluded.client_hint,
+                  division_hint=excluded.division_hint,
+                  note=excluded.note
+  `).run(match_type, (match_value || "").toLowerCase(), client_hint, division_hint || null, note || null);
 }
 
 export function reorderProjects(status, ids) {

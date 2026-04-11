@@ -24,7 +24,7 @@ function getInitialTheme() {
 
 export default function App() {
   const { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh } = useProjects();
-  const { items: inboxItems, loading: inboxLoading, dismissItem } = useInbox();
+  const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [selectedInboxItem, setSelectedInboxItem] = useState(null);
   const [view, setView] = useState("board"); // "board" | "inbox"
@@ -208,9 +208,11 @@ export default function App() {
       )}
       {selectedInboxItem && (
         <InboxModal
-          item={selectedInboxItem}
+          item={inboxItems.find((i) => i.id === selectedInboxItem.id) || selectedInboxItem}
           onClose={() => setSelectedInboxItem(null)}
           onDismiss={dismissItem}
+          onUpdate={updateItem}
+          onRedispatch={redispatchItem}
         />
       )}
       <CommandPalette

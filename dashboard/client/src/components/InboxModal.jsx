@@ -1,4 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+const DIVISIONS = [
+  "WordFlux", "WatchThreat", "AmPen", "Bedford AI", "ADA Web Work", "Linnflux", "unknown",
+];
 
 const STATUS_COLORS = {
   classified: { bg: "#1e3a5f", text: "#60a5fa", label: "Classified" },
@@ -7,7 +11,37 @@ const STATUS_COLORS = {
   error:      { bg: "#3b1a1a", text: "#f87171", label: "Error" },
 };
 
-export default function InboxModal({ item, onClose, onDismiss }) {
+function extractDomain(fromAddr) {
+  const m = fromAddr?.match(/<([^>]+)>/) || fromAddr?.match(/(\S+@\S+)/);
+  const email = m ? m[1] : fromAddr || "";
+  const parts = email.split("@");
+  return parts.length === 2 ? parts[1].toLowerCase().trim() : "";
+}
+
+export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedispatch }) {
+  const [draft, setDraft] = useState({
+    client_hint: item.client_hint || "",
+    division_hint: item.division_hint || "unknown",
+    priority: item.priority || "normal",
+    notes: item.notes || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [redispatching, setRedispatching] = useState(false);
+  const [aliasPrompt, setAliasPrompt] = useState(null); // { domain, client_hint, division_hint }
+  const [aliasSaved, setAliasSaved] = useState(false);
+
+  // Reset draft when item changes (modal reused for different items)
+  useEffect(() => {
+    setDraft({
+      client_hint: item.client_hint || "",
+      division_hint: item.division_hint || "unknown",
+      priority: item.priority || "normal",
+      notes: item.notes || "",
+    });
+    setAliasPrompt(null);
+    setAliasSaved(false);
+  }, [item.id]);
+
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", onKey);
@@ -16,6 +50,69 @@ export default function InboxModal({ item, onClose, onDismiss }) {
 
   const st = STATUS_COLORS[item.status] || STATUS_COLORS.classified;
   const from = item.from_addr || "";
+
+  function changed() {
+    return (
+      draft.client_hint !== (item.client_hint || "") ||
+      draft.division_hint !== (item.division_hint || "unknown") ||
+      draft.priority !== (item.priority || "normal") ||
+      draft.notes !== (item.notes || "")
+    );
+  }
+
+  async function handleSave() {
+    if (!changed()) return;
+    setSaving(true);
+    const fieldsToSave = { ...draft };
+    try {
+      await onUpdate(item.id, fieldsToSave);
+      // If client_hint changed, offer alias prompt
+      if (draft.client_hint !== (item.client_hint || "")) {
+        const domain = extractDomain(item.from_addr);
+        if (domain) {
+          setAliasPrompt({
+            domain,
+            client_hint: draft.client_hint,
+            division_hint: draft.division_hint !== "unknown" ? draft.division_hint : null,
+          });
+        }
+      } else {
+        setAliasPrompt(null);
+      }
+    } catch (_) {
+      // error handled in hook (reverts optimistic update)
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveAlias() {
+    if (!aliasPrompt) return;
+    try {
+      await fetch("/api/client-aliases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          match_type: "domain",
+          match_value: aliasPrompt.domain,
+          client_hint: aliasPrompt.client_hint,
+          division_hint: aliasPrompt.division_hint,
+          note: `From inbox card #${item.id}`,
+        }),
+      });
+      setAliasSaved(true);
+    } catch (_) {}
+  }
+
+  async function handleRedispatch() {
+    setRedispatching(true);
+    try {
+      await onRedispatch(item.id);
+    } catch (_) {
+    } finally {
+      setRedispatching(false);
+    }
+  }
 
   function handleLaunch() {
     const session = item.session_name;
@@ -28,6 +125,8 @@ export default function InboxModal({ item, onClose, onDismiss }) {
       }
     }, 500);
   }
+
+  const canRedispatch = ["done", "error", "dispatched"].includes(item.status);
 
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -45,18 +144,45 @@ export default function InboxModal({ item, onClose, onDismiss }) {
           <span className="inbox-card-status" style={{ background: st.bg, color: st.text }}>
             {st.label}
           </span>
-          {item.client_hint && item.client_hint !== "unknown" && (
-            <span className="inbox-modal-badge">{item.client_hint}</span>
-          )}
-          {item.division_hint && item.division_hint !== "unknown" && (
-            <span className="inbox-modal-badge">{item.division_hint}</span>
-          )}
-          {item.priority && item.priority !== "normal" && (
-            <span className="inbox-modal-badge" style={{ color: item.priority === "high" ? "#f87171" : "#94a3b8" }}>
-              {item.priority} priority
-            </span>
-          )}
           <span className="modal-id">{item.created_at?.slice(0, 16).replace("T", " ")}</span>
+        </div>
+
+        {/* Editable classification fields */}
+        <div className="modal-section">
+          <span className="modal-label">Classification</span>
+          <div className="inbox-edit-grid">
+            <div className="inbox-edit-field">
+              <label className="inbox-edit-label">Client</label>
+              <input
+                className="inbox-edit-input"
+                value={draft.client_hint}
+                onChange={(e) => setDraft((d) => ({ ...d, client_hint: e.target.value }))}
+                placeholder="Client name"
+              />
+            </div>
+            <div className="inbox-edit-field">
+              <label className="inbox-edit-label">Division</label>
+              <select
+                className="inbox-edit-select"
+                value={draft.division_hint}
+                onChange={(e) => setDraft((d) => ({ ...d, division_hint: e.target.value }))}
+              >
+                {DIVISIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div className="inbox-edit-field">
+              <label className="inbox-edit-label">Priority</label>
+              <select
+                className="inbox-edit-select"
+                value={draft.priority}
+                onChange={(e) => setDraft((d) => ({ ...d, priority: e.target.value }))}
+              >
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* Directive */}
@@ -64,6 +190,34 @@ export default function InboxModal({ item, onClose, onDismiss }) {
           <span className="modal-label">Directive</span>
           <div className="inbox-modal-prompt">{item.prompt_text || "(no directive)"}</div>
         </div>
+
+        {/* Notes */}
+        <div className="modal-section">
+          <span className="modal-label">Operator Notes</span>
+          <textarea
+            className="inbox-edit-notes"
+            value={draft.notes}
+            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+            placeholder="Corrections, context, or instructions for re-dispatch…"
+            rows={3}
+          />
+        </div>
+
+        {/* Alias prompt */}
+        {aliasPrompt && !aliasSaved && (
+          <div className="inbox-alias-banner">
+            <span>Save <strong>{aliasPrompt.client_hint}</strong> as the default client for <em>{aliasPrompt.domain}</em> going forward?</span>
+            <div className="inbox-alias-actions">
+              <button className="inbox-alias-btn" onClick={handleSaveAlias}>Save alias</button>
+              <button className="inbox-alias-dismiss" onClick={() => setAliasPrompt(null)}>Skip</button>
+            </div>
+          </div>
+        )}
+        {aliasSaved && (
+          <div className="inbox-alias-banner inbox-alias-saved">
+            Alias saved — future emails from {aliasPrompt?.domain} will classify as {aliasPrompt?.client_hint}.
+          </div>
+        )}
 
         {/* Error */}
         {item.error_text && (
@@ -89,9 +243,21 @@ export default function InboxModal({ item, onClose, onDismiss }) {
         {/* Footer */}
         <div className="modal-footer inbox-modal-footer">
           <span className="modal-id">gmail:{item.gmail_id}</span>
-          <button className="inbox-dismiss-btn" onClick={() => { onDismiss(item.id); onClose(); }}>
-            Dismiss
-          </button>
+          <div className="inbox-footer-actions">
+            {changed() && (
+              <button className="inbox-save-btn" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            )}
+            {canRedispatch && (
+              <button className="inbox-redispatch-btn" onClick={handleRedispatch} disabled={redispatching}>
+                {redispatching ? "Dispatching…" : "↺ Re-dispatch"}
+              </button>
+            )}
+            <button className="inbox-dismiss-btn" onClick={() => { onDismiss && onDismiss(item.id); onClose(); }}>
+              Dismiss
+            </button>
+          </div>
         </div>
       </div>
     </div>

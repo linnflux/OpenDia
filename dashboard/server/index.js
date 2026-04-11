@@ -2,7 +2,8 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias } from "./db.js";
+import { spawn } from "child_process";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -315,6 +316,7 @@ app.get("/api/file", (req, res) => {
 // ── Inbox API ─────────────────────────────────────────────────────────────────
 
 ensureInboxTable();
+ensureClientAliasesTable();
 
 app.get("/api/inbox", (req, res) => {
   try {
@@ -346,6 +348,54 @@ app.delete("/api/inbox/:id", (req, res) => {
   } catch (err) {
     console.error("DELETE /api/inbox/:id error:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/inbox/:id/redispatch", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const item = getInboxItemById(id);
+    if (!item) return res.status(404).json({ error: "inbox item not found" });
+    if (!item.gmail_id) return res.status(400).json({ error: "item has no gmail_id" });
+
+    const scriptPath = `${process.env.HOME}/OpenDia/scripts/inbox_stage_b.py`;
+    const child = spawn("python3", [scriptPath, "--redispatch", item.gmail_id], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    child.unref();
+
+    res.json({ ok: true, gmail_id: item.gmail_id });
+  } catch (err) {
+    console.error("POST /api/inbox/:id/redispatch error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/client-aliases", (req, res) => {
+  try {
+    res.json(getAllClientAliases());
+  } catch (err) {
+    console.error("GET /api/client-aliases error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/client-aliases", (req, res) => {
+  try {
+    const { match_type, match_value, client_hint, division_hint, note } = req.body;
+    if (!match_type || !match_value || !client_hint) {
+      return res.status(400).json({ error: "match_type, match_value, and client_hint are required" });
+    }
+    if (!["domain", "email", "substring"].includes(match_type)) {
+      return res.status(400).json({ error: "match_type must be domain, email, or substring" });
+    }
+    insertClientAlias({ match_type, match_value, client_hint, division_hint, note });
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/client-aliases error:", err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
