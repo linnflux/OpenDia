@@ -1525,6 +1525,34 @@ body.has-bg::before {
   cursor: not-allowed;
 }
 
+.inbox-redispatch-banner {
+  font-size: 0.8rem;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.25rem;
+  line-height: 1.4;
+}
+
+.inbox-redispatch-banner code {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.78rem;
+  background: rgba(0,0,0,0.25);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+.inbox-redispatch-ok {
+  background: #1a3a2a;
+  border: 1px solid #166534;
+  color: #86efac;
+}
+
+.inbox-redispatch-err {
+  background: #3b1a1a;
+  border: 1px solid #7f1d1d;
+  color: #f87171;
+}
+
 /* Sync results */
 .sync-results {
   border-top: 1px solid var(--border);

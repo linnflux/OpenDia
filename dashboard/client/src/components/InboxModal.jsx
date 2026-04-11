@@ -27,6 +27,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   });
   const [saving, setSaving] = useState(false);
   const [redispatching, setRedispatching] = useState(false);
+  const [redispatched, setRedispatched] = useState(false);
+  const [redispatchError, setRedispatchError] = useState(null);
   const [aliasPrompt, setAliasPrompt] = useState(null); // { domain, client_hint, division_hint }
   const [aliasSaved, setAliasSaved] = useState(false);
 
@@ -106,9 +108,13 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
 
   async function handleRedispatch() {
     setRedispatching(true);
+    setRedispatched(false);
+    setRedispatchError(null);
     try {
       await onRedispatch(item.id);
-    } catch (_) {
+      setRedispatched(true);
+    } catch (e) {
+      setRedispatchError(e?.message || "Redispatch failed");
     } finally {
       setRedispatching(false);
     }
@@ -237,6 +243,18 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
                 ⬡ Attach
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Re-dispatch feedback */}
+        {redispatched && (
+          <div className="inbox-redispatch-banner inbox-redispatch-ok">
+            Session spawning — check <code>tmux ls | grep inbox-</code> in a moment.
+          </div>
+        )}
+        {redispatchError && (
+          <div className="inbox-redispatch-banner inbox-redispatch-err">
+            Re-dispatch failed: {redispatchError}
           </div>
         )}
 
