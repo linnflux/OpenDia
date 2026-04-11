@@ -47,6 +47,8 @@ export function useInbox() {
         fetch_();
         throw new Error("Redispatch failed");
       }
+      // Refresh after a short delay to pick up the new session_name written by the Python script
+      setTimeout(fetch_, 3000);
       return r.json();
     });
   }
