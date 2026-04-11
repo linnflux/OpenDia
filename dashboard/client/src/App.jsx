@@ -131,13 +131,6 @@ export default function App() {
           <h1 className="app-wordmark"><span className="wm-open">Open</span><span className="wm-dia">Dia</span></h1>
         </div>
         <div className="app-header-actions">
-          {/* View toggle */}
-          <div className="view-toggle">
-            <button className={`view-toggle-btn${view === "board" ? " active" : ""}`} onClick={() => setView("board")}>Board</button>
-            <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
-              Inbox{pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
-            </button>
-          </div>
           {view === "board" && (
             <div className="filter-dropdown-wrap">
               {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
@@ -190,6 +183,13 @@ export default function App() {
               )}
             </div>
           )}
+          {/* View toggle */}
+          <div className="view-toggle">
+            <button className={`view-toggle-btn${view === "board" ? " active" : ""}`} onClick={() => setView("board")}>Board</button>
+            <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
+              Inbox{pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
+            </button>
+          </div>
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>
             <kbd className="cp-trigger-kbd">Ctrl+K</kbd>
