@@ -238,15 +238,22 @@ Operator labels email "OpenDia Inbox"
           │
           ▼
   ┌── cron (*/5 min) ──────────────────────────────────────────────┐
-  │  Stage A — Classify                                            │
-  │    Claude Haiku reads the email and extracts:                  │
-  │      client, division, priority, directive, short slug,        │
+  │  Stage A — Classify (one dispatch per thread, not per message) │
+  │    Groups labeled messages by threadId. For each unique thread:│
+  │      Fetches full thread (threads.get) to get all messages     │
+  │      Identifies latest inbound msg (no SENT label = customer)  │
+  │      Builds thread history from prior messages for context     │
+  │    Claude Haiku classifies the latest customer message and     │
+  │    extracts: client, division, priority, directive, short slug,│
   │      requires_server_access (bool),                            │
   │      estimated_minutes (int — Haiku's work-time estimate)      │
+  │    Thread history is passed to Haiku so prompt_text reflects   │
+  │      the full conversation, not just the last message          │
   │    Checks client alias table first (learned mappings           │
   │      override Haiku — e.g. @deanvaughnlearning.com →           │
   │      "Memory Sports")                                          │
-  │    Writes to inbox_items DB, moves to "OpenDia Processed"      │
+  │    Writes one inbox_items row, relabels ALL thread messages     │
+  │      to "OpenDia Processed" (prevents duplicate dispatches)    │
   │                                                                │
   │  Stage B — Dispatch                                            │
   │    ┌─ requires_server_access? ──────────────────────────────┐  │
