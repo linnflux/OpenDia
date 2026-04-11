@@ -227,6 +227,53 @@ OpenDia treats outbound email with the same care as destructive shell commands �
 
 **Pinned signature.** The Gmail v1 API only returns the current default new-message signature for the primary `sendAs` alias — it cannot enumerate named alternates. To decouple Claude's output from whatever the Operator has set as the Gmail Web compose default, the signature HTML is pinned to a local file (`~/.claude/mcp-credentials/google-workspace/signature.html`) that the Google Workspace MCP reads directly. The Operator can switch their Gmail default signature freely without affecting what Claude applies to drafts. If the file is missing, drafts are created with no signature block at all — no silent fallback to the wrong signature.
 
+### Inbox Pipeline
+
+Labeling a Gmail message **"OpenDia Inbox"** is all it takes to kick off a fully automated work session. A cron job runs every 5 minutes and handles everything from there.
+
+```
+Operator labels email "OpenDia Inbox"
+          │
+          ▼
+  ┌── cron (*/5 min) ──────────────────────────────────────────────┐
+  │  Stage A — Classify                                            │
+  │    Claude Haiku reads the email and extracts:                  │
+  │      client, division, priority, directive, short slug         │
+  │    Checks client alias table first (learned mappings           │
+  │      override Haiku — e.g. @deanvaughnlearning.com →           │
+  │      "Memory Sports")                                          │
+  │    Writes to inbox_items DB, moves to "OpenDia Processed"      │
+  │                                                                │
+  │  Stage B — Dispatch                                            │
+  │    Builds context header from recent timers + project match    │
+  │    Assembles full prompt (context + directive + finish rules)   │
+  │    Spawns detached tmux session running claude --print         │
+  │    Output logged to ~/OpenDia/logs/sessions/<session>.log      │
+  │    On finish: DB status → done / error                         │
+  └────────────────────────────────────────────────────────────────┘
+          │
+          ▼
+  Claude creates a Gmail DRAFT reply to the original sender
+  (never sends — Operator reviews and sends manually)
+```
+
+**Dashboard Inbox view.** Every processed email appears as a card in the OpenDia dashboard under the Inbox tab. Cards show sender, subject, client/division badges, priority, status (Classified → Running → Done / Error), and the extracted directive. Clicking a card opens a modal with full detail.
+
+**Operator correction.** Classification isn't always right — a sender's email domain may not match the client name in the working relationship. The modal makes every classification field editable: client, division, priority, and a notes textarea. Saving a corrected client name offers a one-click **"Save as alias"** prompt that writes to a `client_aliases` table so all future emails from that domain are classified correctly without touching Haiku.
+
+**Re-dispatch.** If Claude's first attempt was wrong (bad context, wrong client, or just a task that needs more guidance), add operator notes in the modal and click **↺ Re-dispatch**. The old session is killed, a fresh one spawns with the corrected classification and your notes prepended as an `## Operator correction` block, and the card updates with the new session name.
+
+**Error diagnosis.** When a session fails, the last 40 lines of Claude's output are stored in the DB and shown directly on the card — no need to dig through logs or attach to a dead tmux session.
+
+**Session lifecycle.** Completed `inbox-*` tmux sessions stay alive so the Operator can attach and review or continue the conversation. A weekly cron (`inbox-sweep.sh`) kills sessions that have been inactive for more than 7 days. Attaching to a session resets its activity clock.
+
+**Controls.**
+- Pause the pipeline: `touch ~/OpenDia/inbox.disabled`
+- Resume: `rm ~/OpenDia/inbox.disabled`
+- Replay a failed item: re-apply the `OpenDia Inbox` label in Gmail
+- View session logs: `~/OpenDia/logs/sessions/<session-name>.log`
+- View alias table: `python3 ~/OpenDia/scripts/inbox_db.py dump-aliases`
+
 ## Divisions
 
 | Division | Focus |
