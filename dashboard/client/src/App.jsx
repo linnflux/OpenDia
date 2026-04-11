@@ -245,7 +245,7 @@ export default function App() {
           {inboxLoading ? (
             <div className="loading">Loading inbox...</div>
           ) : filteredInbox.length === 0 ? (
-            <div className="inbox-empty">{inboxItems.length === 0 ? "No inbox items. Label an email \"OpenDia Inbox\" in Gmail to get started." : "No items match this filter."}</div>
+            <div className="inbox-empty">{inboxItems.length === 0 ? "No inbox items. Label an email \"OpenDia Inbox\" in Gmail to get started." : "Nothing to see here."}</div>
           ) : (
             <div className="inbox-grid">
               {filteredInbox.map((item) => (
