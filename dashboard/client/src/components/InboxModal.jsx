@@ -31,9 +31,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   const [redispatchError, setRedispatchError] = useState(null);
   const [aliasPrompt, setAliasPrompt] = useState(null); // { domain, client_hint, division_hint }
   const [aliasSaved, setAliasSaved] = useState(false);
-  const [instanceName, setInstanceName] = useState("");
   const [approving, setApproving] = useState(false);
-  const [approveResult, setApproveResult] = useState(null); // { ok, snapshot_name } | { error }
+  const [approveResult, setApproveResult] = useState(null); // { ok } | { error }
 
   // Reset draft when item changes (modal reused for different items)
   useEffect(() => {
@@ -45,7 +44,6 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
     });
     setAliasPrompt(null);
     setAliasSaved(false);
-    setInstanceName("");
     setApproveResult(null);
   }, [item.id]);
 
@@ -141,18 +139,17 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   const canRedispatch = ["classified", "done", "error", "dispatched"].includes(item.status) && !isServerWork;
 
   async function handleApproveServer() {
-    if (!instanceName.trim()) return;
     setApproving(true);
     setApproveResult(null);
     try {
       const r = await fetch(`/api/inbox/${item.id}/approve-server`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instance_name: instanceName.trim() }),
+        body: JSON.stringify({}),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Approval failed");
-      setApproveResult({ ok: true, snapshot_name: data.snapshot_name });
+      setApproveResult({ ok: true });
     } catch (e) {
       setApproveResult({ error: e.message || "Approval failed" });
     } finally {
@@ -278,29 +275,19 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
             <div className="inbox-server-gate-body">
               <span className="inbox-card-server-flag">SERVER</span>
               <span className="inbox-server-gate-info">
-                This task requires server access. Enter the Lightsail instance name to verify,
-                take a snapshot, and dispatch.
+                This task requires server access. Review the directive above, then approve to dispatch.
               </span>
-            </div>
-            <div className="inbox-server-instance-row">
-              <input
-                className="inbox-server-instance-input"
-                value={instanceName}
-                onChange={(e) => setInstanceName(e.target.value)}
-                placeholder="instance-name"
-                disabled={approving}
-              />
               <button
                 className="inbox-approve-btn"
                 onClick={handleApproveServer}
-                disabled={approving || !instanceName.trim()}
+                disabled={approving}
               >
-                {approving ? "Verifying…" : "Approve & Dispatch"}
+                {approving ? "Dispatching…" : "Approve & Dispatch"}
               </button>
             </div>
             {approveResult?.ok && (
               <div className="inbox-server-result inbox-server-result-ok">
-                Snapshot taken ({approveResult.snapshot_name}). Session spawning — check <code>tmux ls | grep inbox-</code> in a moment.
+                Session spawning — check <code>tmux ls | grep inbox-</code> in a moment.
               </div>
             )}
             {approveResult?.error && (

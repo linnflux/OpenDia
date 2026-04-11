@@ -3,7 +3,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias } from "./db.js";
-import { spawn, spawnSync } from "child_process";
+import { spawn } from "child_process";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -381,61 +381,15 @@ app.post("/api/inbox/:id/approve-server", (req, res) => {
     if (!item.gmail_id) return res.status(400).json({ error: "item has no gmail_id" });
     if (!item.requires_server_access) return res.status(400).json({ error: "item does not require server access" });
 
-    const { instance_name } = req.body;
-    if (!instance_name || !/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(instance_name)) {
-      return res.status(400).json({ error: "instance_name must be alphanumeric with hyphens" });
-    }
-
-    // Verify the instance exists via AWS CLI
-    const listResult = spawnSync("aws", ["lightsail", "get-instances", "--output", "json"], {
-      env: { ...process.env },
-      encoding: "utf8",
-      timeout: 30000,
-    });
-    if (listResult.error || listResult.status !== 0) {
-      const msg = listResult.stderr || (listResult.error && listResult.error.message) || "aws cli failed";
-      console.error("aws lightsail get-instances error:", msg);
-      return res.status(502).json({ error: `AWS CLI error: ${msg}` });
-    }
-    let instances;
-    try {
-      instances = JSON.parse(listResult.stdout).instances || [];
-    } catch (e) {
-      return res.status(502).json({ error: "Failed to parse AWS response" });
-    }
-    const found = instances.find((i) => i.name === instance_name);
-    if (!found) {
-      return res.status(400).json({ error: `Instance "${instance_name}" not found in Lightsail` });
-    }
-
-    // Take a pre-work snapshot
-    const ts = Date.now();
-    const snapshot_name = `od-inbox-${ts}-${instance_name.slice(0, 20)}`;
-    const snapResult = spawnSync("aws", [
-      "lightsail", "create-instance-snapshot",
-      "--instance-name", instance_name,
-      "--instance-snapshot-name", snapshot_name,
-    ], {
-      env: { ...process.env },
-      encoding: "utf8",
-      timeout: 30000,
-    });
-    if (snapResult.error || snapResult.status !== 0) {
-      const msg = snapResult.stderr || (snapResult.error && snapResult.error.message) || "snapshot failed";
-      console.error("aws lightsail create-instance-snapshot error:", msg);
-      return res.status(502).json({ error: `Snapshot failed: ${msg}` });
-    }
-
-    // Spawn Python server-dispatch (detached)
     const scriptPath = `${process.env.HOME}/OpenDia/scripts/inbox_stage_b.py`;
-    const child = spawn("python3", [scriptPath, "--server-dispatch", item.gmail_id, instance_name, snapshot_name], {
+    const child = spawn("python3", [scriptPath, "--server-dispatch", item.gmail_id], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env },
     });
     child.unref();
 
-    res.json({ ok: true, instance_name, snapshot_name });
+    res.json({ ok: true });
   } catch (err) {
     console.error("POST /api/inbox/:id/approve-server error:", err.message);
     res.status(500).json({ error: err.message });

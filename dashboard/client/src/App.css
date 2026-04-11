@@ -1641,36 +1641,16 @@ body.has-bg::before {
 
 .inbox-server-gate-body {
   display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .inbox-server-gate-info {
   font-size: 0.8rem;
   color: #fbbf24;
   line-height: 1.45;
-}
-
-.inbox-server-instance-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.inbox-server-instance-input {
   flex: 1;
-  background: #0f172a;
-  border: 1px solid #b45309;
-  border-radius: 5px;
-  color: var(--text-primary);
-  font-size: 0.85rem;
-  padding: 0.3rem 0.6rem;
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  outline: none;
-}
-
-.inbox-server-instance-input:focus {
-  border-color: #f59e0b;
 }
 
 .inbox-approve-btn {
