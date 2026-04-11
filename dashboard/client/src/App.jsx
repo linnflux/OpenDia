@@ -138,7 +138,7 @@ export default function App() {
                 className={`filter-dropdown-btn${filter !== "all" ? " active" : ""}`}
                 onClick={() => setFilterOpen((v) => !v)}
               >
-                {filter === "all" ? "Filter" : (
+                {filter === "all" ? "All" : (
                   <>
                     {DIVISION_COLORS[filter] && (
                       <span className="filter-dot" style={{ backgroundColor: DIVISION_COLORS[filter].bg }} />
