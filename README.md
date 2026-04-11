@@ -39,6 +39,8 @@ A local SQLite database stores the canonical list of companies, people, projects
 | `people` | Contacts at companies | name, email, role, company_id |
 | `projects` | Work projects per company | name, company_id, division_id, status, sort_order, tmux_session, next_step |
 | `tasks` | Tasks per project | title, project_id, status, notion_url |
+| `inbox_items` | Inbox pipeline items | gmail_id, client_hint, division_hint, short_slug, prompt_text, status, session_name, estimated_minutes, timer_marker |
+| `client_aliases` | Learned sender → client mappings | match_type, match_value, client_hint, division_hint |
 
 ### Internal Time Tracking
 
@@ -239,7 +241,8 @@ Operator labels email "OpenDia Inbox"
   │  Stage A — Classify                                            │
   │    Claude Haiku reads the email and extracts:                  │
   │      client, division, priority, directive, short slug,        │
-  │      requires_server_access (bool)                             │
+  │      requires_server_access (bool),                            │
+  │      estimated_minutes (int — Haiku's work-time estimate)      │
   │    Checks client alias table first (learned mappings           │
   │      override Haiku — e.g. @deanvaughnlearning.com →           │
   │      "Memory Sports")                                          │
@@ -253,23 +256,31 @@ Operator labels email "OpenDia Inbox"
   │    │           → dashboard verifies Lightsail instance       │  │
   │    │           → takes pre-work snapshot (AWS CLI)           │  │
   │    │           → spawns session with SERVER_WORK_PREAMBLE    │  │
-  │    └─ NO  → Builds context header (timers + project match)  │  │
-  │             Assembles full prompt (context + directive)       │  │
-  │             Spawns detached tmux session: claude --print      │  │
-  │             Output → ~/OpenDia/logs/sessions/<session>.log   │  │
-  │             On finish: DB status → done / error              │  │
+  │    └─ NO  → Opens time ledger entry (Eastern-time marker,   │  │
+  │             estimated_minutes from Stage A, billable flag)    │  │
+  │             Stores timer_marker on inbox_items row            │  │
+  │             Builds context header (timers + project match)    │  │
+  │             Assembles full prompt (context + directive)        │  │
+  │             Spawns detached tmux session: claude --print       │  │
+  │             Output → ~/OpenDia/logs/sessions/<session>.log    │  │
+  │             On exit 0: DB status → done                       │  │
+  │             On exit ≠0: stub-close timer + DB status → error  │  │
   └────────────────────────────────────────────────────────────────┘
           │
           ▼
-  Claude creates a Gmail DRAFT reply to the original sender
-  (never sends — Operator reviews and sends manually)
+  Claude session finish steps (IN ORDER):
+    1. Edit ledger file — fill in end:, duration:, notes:
+       (justified bullets ~1 per 10-15 min; may revise estimated_minutes)
+    2. Delete timer state file
+    3. Create Gmail DRAFT reply to original sender
+  (draft never sent — Operator reviews and sends manually)
 ```
 
 **Dashboard Inbox view.** Every processed email appears as a card in the OpenDia dashboard under the Inbox tab. Cards show sender, subject, client/division badges, priority, status (Classified → Running → Done / Error), and the extracted directive. Clicking a card opens a modal with full detail.
 
 **Operator correction.** Classification isn't always right — a sender's email domain may not match the client name in the working relationship. The modal makes every classification field editable: client, division, priority, and a notes textarea. Saving a corrected client name offers a one-click **"Save as alias"** prompt that writes to a `client_aliases` table so all future emails from that domain are classified correctly without touching Haiku.
 
-**Re-dispatch.** If Claude's first attempt was wrong (bad context, wrong client, or just a task that needs more guidance), add operator notes in the modal and click **↺ Re-dispatch**. The old session is killed, a fresh one spawns with the corrected classification and your notes prepended as an `## Operator correction` block, and the card updates with the new session name. Re-dispatch is not available for server-work items — those must go through the approval gate.
+**Re-dispatch.** If Claude's first attempt was wrong (bad context, wrong client, or just a task that needs more guidance), add operator notes in the modal and click **↺ Re-dispatch**. The old session is killed, any open timer is stub-closed with a "Superseded by re-dispatch" note, a fresh one spawns with the corrected classification and your notes prepended as an `## Operator correction` block, and the card updates with the new session name. Re-dispatch is not available for server-work items — those must go through the approval gate.
 
 **Server-work safety gate.** Emails that require SSH or website changes are flagged with an amber **SERVER** badge and held at "Classified" — they never auto-dispatch. To release one, open the card, enter the Lightsail instance name, and click **Approve & Dispatch**. The dashboard verifies the instance exists via AWS CLI, takes a Lightsail snapshot, then spawns the Claude session with a stricter preamble that names the verified instance and snapshot and requires Claude to confirm the target before any write. This enforces the pre-work snapshot requirement from the server safety policy.
 
@@ -277,12 +288,15 @@ Operator labels email "OpenDia Inbox"
 
 **Session lifecycle.** Completed `inbox-*` tmux sessions stay alive so the Operator can attach and review or continue the conversation. A weekly cron (`inbox-sweep.sh`) kills sessions that have been inactive for more than 7 days. Attaching to a session resets its activity clock.
 
+**Time tracking.** Every dispatch opens a time ledger entry identical in format to entries created by `/od-go`. The entry uses `estimated_minutes` from Stage A as the initial bill duration; Claude may revise it at close time (the justified notes must support whatever number is left). Internal work (`client_hint: "Linnflux"`) is flagged `billable: false` and excluded from the monthly billing run automatically — same filter as `/od-go` internal work. If the Claude session exits non-zero, a stub entry is written automatically so no open timer is left dangling.
+
 **Controls.**
 - Pause the pipeline: `touch ~/OpenDia/inbox.disabled`
 - Resume: `rm ~/OpenDia/inbox.disabled`
 - Replay a failed item: re-apply the `OpenDia Inbox` label in Gmail
 - View session logs: `~/OpenDia/logs/sessions/<session-name>.log`
 - View alias table: `python3 ~/OpenDia/scripts/inbox_db.py dump-aliases`
+- Stub-close a stale timer manually: `python3 ~/OpenDia/scripts/inbox_db.py close-timer-stub <marker> <state_file> <ledger_file> <note>`
 
 ## Divisions
 

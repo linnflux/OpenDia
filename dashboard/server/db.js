@@ -215,6 +215,8 @@ export function ensureInboxTable() {
       error_text            TEXT,
       notes                 TEXT,
       requires_server_access INTEGER DEFAULT 0,
+      estimated_minutes     INTEGER DEFAULT 0,
+      timer_marker          TEXT,
       created_at            DATETIME DEFAULT (datetime('now')),
       updated_at            DATETIME DEFAULT (datetime('now'))
     )
@@ -226,6 +228,12 @@ export function ensureInboxTable() {
   }
   if (!cols.includes("requires_server_access")) {
     db.exec("ALTER TABLE inbox_items ADD COLUMN requires_server_access INTEGER DEFAULT 0");
+  }
+  if (!cols.includes("estimated_minutes")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN estimated_minutes INTEGER DEFAULT 0");
+  }
+  if (!cols.includes("timer_marker")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN timer_marker TEXT");
   }
 }
 
@@ -254,7 +262,7 @@ export function getAllInboxItems() {
 const INBOX_UPDATABLE = new Set([
   "status", "session_name", "error_text",
   "client_hint", "division_hint", "priority", "notes",
-  "requires_server_access",
+  "requires_server_access", "estimated_minutes", "timer_marker",
 ]);
 
 export function updateInboxItem(id, fields) {
