@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable } from "./db.js";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -310,6 +310,43 @@ app.get("/api/file", (req, res) => {
   res.sendFile(resolved, (err) => {
     if (err) res.status(404).json({ error: "file not found" });
   });
+});
+
+// ── Inbox API ─────────────────────────────────────────────────────────────────
+
+ensureInboxTable();
+
+app.get("/api/inbox", (req, res) => {
+  try {
+    res.json(getAllInboxItems());
+  } catch (err) {
+    console.error("GET /api/inbox error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/inbox/:id", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const updated = updateInboxItem(id, req.body);
+    if (!updated) return res.status(404).json({ error: "inbox item not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("PATCH /api/inbox/:id error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/inbox/:id", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const deleted = deleteInboxItem(id);
+    if (!deleted) return res.status(404).json({ error: "inbox item not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /api/inbox/:id error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Serve static files in production

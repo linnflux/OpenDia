@@ -194,6 +194,62 @@ export function createProject({ name, companyName, divisionName, status = "in_pr
   return getProjectById(result.lastInsertRowid);
 }
 
+// ── Inbox items ───────────────────────────────────────────────────────────────
+
+export function ensureInboxTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS inbox_items (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      gmail_id      TEXT UNIQUE,
+      thread_id     TEXT,
+      from_addr     TEXT,
+      subject       TEXT,
+      client_hint   TEXT,
+      division_hint TEXT,
+      priority      TEXT DEFAULT 'normal',
+      short_slug    TEXT,
+      prompt_text   TEXT,
+      status        TEXT DEFAULT 'classified',
+      session_name  TEXT,
+      error_text    TEXT,
+      created_at    DATETIME DEFAULT (datetime('now')),
+      updated_at    DATETIME DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+export function getAllInboxItems() {
+  ensureInboxTable();
+  return getDb().prepare(`
+    SELECT * FROM inbox_items ORDER BY created_at DESC LIMIT 200
+  `).all();
+}
+
+const INBOX_UPDATABLE = new Set(["status", "session_name", "error_text"]);
+
+export function updateInboxItem(id, fields) {
+  ensureInboxTable();
+  const sets = [];
+  const vals = [];
+  for (const [key, val] of Object.entries(fields)) {
+    if (!INBOX_UPDATABLE.has(key)) continue;
+    sets.push(`${key} = ?`);
+    vals.push(val);
+  }
+  if (sets.length === 0) throw new Error("No valid inbox fields to update");
+  sets.push("updated_at = datetime('now')");
+  vals.push(id);
+  const result = getDb()
+    .prepare(`UPDATE inbox_items SET ${sets.join(", ")} WHERE id = ?`)
+    .run(...vals);
+  return result.changes > 0;
+}
+
+export function deleteInboxItem(id) {
+  ensureInboxTable();
+  return getDb().prepare("DELETE FROM inbox_items WHERE id = ?").run(id).changes > 0;
+}
+
 export function reorderProjects(status, ids) {
   if (!VALID_STATUSES.has(status)) {
     throw new Error(`Invalid status: ${status}`);

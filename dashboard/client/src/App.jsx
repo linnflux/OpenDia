@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useProjects } from "./hooks/useProjects.js";
+import { useInbox } from "./hooks/useInbox.js";
 import Board from "./components/Board.jsx";
 import CardModal from "./components/CardModal.jsx";
+import InboxCard from "./components/InboxCard.jsx";
+import InboxModal from "./components/InboxModal.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
 
 const DIVISION_COLORS = {
@@ -21,7 +24,10 @@ function getInitialTheme() {
 
 export default function App() {
   const { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh } = useProjects();
+  const { items: inboxItems, loading: inboxLoading, dismissItem } = useInbox();
   const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedInboxItem, setSelectedInboxItem] = useState(null);
+  const [view, setView] = useState("board"); // "board" | "inbox"
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [filter, setFilter] = useState("all");
@@ -114,6 +120,8 @@ export default function App() {
     setSelectedProjectId(null);
   }
 
+  const pendingInbox = inboxItems.filter((i) => i.status !== "done").length;
+
   return (
     <div className="app">
       <header className="app-header">
@@ -122,46 +130,73 @@ export default function App() {
           <h1 className="app-wordmark"><span className="wm-open">Open</span><span className="wm-dia">Dia</span></h1>
         </div>
         <div className="app-header-actions">
-          <div className="filter-pills">
-            {["all", "deliverable", "internal"].map((key) => (
-              <button
-                key={key}
-                className={`filter-pill ${filter === key ? "active" : ""}`}
-                onClick={() => setFilter(filter === key && key !== "all" ? "all" : key)}
-              >
-                {key.charAt(0).toUpperCase() + key.slice(1)}
-              </button>
-            ))}
-            {divisions.map((div) => {
-              const colors = DIVISION_COLORS[div] || { bg: "#6b7280", text: "#fff" };
-              const active = filter === div;
-              return (
-                <button
-                  key={div}
-                  className={`filter-pill filter-pill-div ${active ? "active" : ""}`}
-                  style={{
-                    backgroundColor: active ? colors.bg : "transparent",
-                    color: active ? colors.text : colors.bg,
-                    borderColor: colors.bg,
-                  }}
-                  onClick={() => setFilter(active ? "all" : div)}
-                >
-                  {div}
-                </button>
-              );
-            })}
+          {/* View toggle */}
+          <div className="view-toggle">
+            <button className={`view-toggle-btn${view === "board" ? " active" : ""}`} onClick={() => setView("board")}>Board</button>
+            <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
+              Inbox{pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
+            </button>
           </div>
+          {view === "board" && (
+            <div className="filter-pills">
+              {["all", "deliverable", "internal"].map((key) => (
+                <button
+                  key={key}
+                  className={`filter-pill ${filter === key ? "active" : ""}`}
+                  onClick={() => setFilter(filter === key && key !== "all" ? "all" : key)}
+                >
+                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                </button>
+              ))}
+              {divisions.map((div) => {
+                const colors = DIVISION_COLORS[div] || { bg: "#6b7280", text: "#fff" };
+                const active = filter === div;
+                return (
+                  <button
+                    key={div}
+                    className={`filter-pill filter-pill-div ${active ? "active" : ""}`}
+                    style={{
+                      backgroundColor: active ? colors.bg : "transparent",
+                      color: active ? colors.text : colors.bg,
+                      borderColor: colors.bg,
+                    }}
+                    onClick={() => setFilter(active ? "all" : div)}
+                  >
+                    {div}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>
             <kbd className="cp-trigger-kbd">Ctrl+K</kbd>
           </button>
         </div>
       </header>
-      {loading ? (
-        <div className="loading">Loading projects...</div>
+
+      {view === "board" ? (
+        loading ? (
+          <div className="loading">Loading projects...</div>
+        ) : (
+          <Board grouped={filtered} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} activeTimerIds={activeTimerIds} />
+        )
       ) : (
-        <Board grouped={filtered} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} activeTimerIds={activeTimerIds} />
+        <div className="inbox-view">
+          {inboxLoading ? (
+            <div className="loading">Loading inbox...</div>
+          ) : inboxItems.length === 0 ? (
+            <div className="inbox-empty">No inbox items. Label an email "OpenDia Inbox" in Gmail to get started.</div>
+          ) : (
+            <div className="inbox-grid">
+              {inboxItems.map((item) => (
+                <InboxCard key={item.id} item={item} onClick={setSelectedInboxItem} />
+              ))}
+            </div>
+          )}
+        </div>
       )}
+
       {selectedProject && (
         <CardModal
           key={selectedProject.id}
@@ -169,6 +204,13 @@ export default function App() {
           onClose={handleModalClose}
           onUpdate={handleModalUpdate}
           hasActiveTimer={activeTimerIds.has(selectedProject.id)}
+        />
+      )}
+      {selectedInboxItem && (
+        <InboxModal
+          item={selectedInboxItem}
+          onClose={() => setSelectedInboxItem(null)}
+          onDismiss={dismissItem}
         />
       )}
       <CommandPalette
