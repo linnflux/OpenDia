@@ -138,7 +138,7 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   }
 
   const isServerWork = item.requires_server_access === 1 || item.requires_server_access === true;
-  const canRedispatch = ["done", "error", "dispatched"].includes(item.status) && !isServerWork;
+  const canRedispatch = ["classified", "done", "error", "dispatched"].includes(item.status) && !isServerWork;
 
   async function handleApproveServer() {
     if (!instanceName.trim()) return;
@@ -334,7 +334,7 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
             )}
             {canRedispatch && (
               <button className="inbox-redispatch-btn" onClick={handleRedispatch} disabled={redispatching}>
-                {redispatching ? "Dispatching…" : "↺ Re-dispatch"}
+                {redispatching ? "Dispatching…" : item.status === "classified" ? "▶ Dispatch" : "↺ Re-dispatch"}
               </button>
             )}
             <button className="inbox-dismiss-btn" onClick={() => { onDismiss && onDismiss(item.id); onClose(); }}>
