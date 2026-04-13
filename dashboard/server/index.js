@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox } from "./db.js";
 import { spawn } from "child_process";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
@@ -313,6 +313,17 @@ app.get("/api/file", (req, res) => {
   });
 });
 
+app.get("/api/projects/:id/inbox", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const items = getInboxItemsByProject(id);
+    res.json(items);
+  } catch (err) {
+    console.error("GET /api/projects/:id/inbox error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Inbox API ─────────────────────────────────────────────────────────────────
 
 ensureInboxTable();
@@ -332,6 +343,19 @@ app.patch("/api/inbox/:id", (req, res) => {
     const id = parseInt(req.params.id, 10);
     const updated = updateInboxItem(id, req.body);
     if (!updated) return res.status(404).json({ error: "inbox item not found" });
+
+    // Re-link project when classification fields change
+    if (req.body.client_hint !== undefined || req.body.division_hint !== undefined) {
+      const item = getInboxItemById(id);
+      if (item) {
+        const matched = matchProject(item.client_hint, item.division_hint, item.short_slug);
+        const projectId = matched
+          ? matched.id
+          : ensureProjectForInbox(item.client_hint, item.division_hint, item.short_slug, item.subject);
+        updateInboxItem(id, { project_id: projectId });
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error("PATCH /api/inbox/:id error:", err.message);
@@ -339,11 +363,12 @@ app.patch("/api/inbox/:id", (req, res) => {
   }
 });
 
+// Soft-delete: sets status='dismissed' to preserve project link and audit trail
 app.delete("/api/inbox/:id", (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const deleted = deleteInboxItem(id);
-    if (!deleted) return res.status(404).json({ error: "inbox item not found" });
+    const updated = updateInboxItem(id, { status: "dismissed" });
+    if (!updated) return res.status(404).json({ error: "inbox item not found" });
     res.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/inbox/:id error:", err.message);

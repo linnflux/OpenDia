@@ -16,7 +16,8 @@ const GET_ALL_PROJECTS = `
   SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id,
-         d.name AS division
+         d.name AS division,
+         (SELECT COUNT(*) FROM inbox_items WHERE project_id = p.id AND status NOT IN ('done', 'dismissed')) AS inbox_count
   FROM projects p
   LEFT JOIN companies c ON p.company_id = c.id
   LEFT JOIN divisions d ON p.division_id = d.id
@@ -29,7 +30,8 @@ const GET_ACTIVE_PROJECTS = `
   SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id,
-         d.name AS division
+         d.name AS division,
+         (SELECT COUNT(*) FROM inbox_items WHERE project_id = p.id AND status NOT IN ('done', 'dismissed')) AS inbox_count
   FROM projects p
   LEFT JOIN companies c ON p.company_id = c.id
   LEFT JOIN divisions d ON p.division_id = d.id
@@ -217,6 +219,8 @@ export function ensureInboxTable() {
       requires_server_access INTEGER DEFAULT 0,
       estimated_minutes     INTEGER DEFAULT 0,
       timer_marker          TEXT,
+      project_hint          TEXT,
+      project_id            INTEGER REFERENCES projects(id),
       created_at            DATETIME DEFAULT (datetime('now')),
       updated_at            DATETIME DEFAULT (datetime('now'))
     )
@@ -234,6 +238,13 @@ export function ensureInboxTable() {
   }
   if (!cols.includes("timer_marker")) {
     db.exec("ALTER TABLE inbox_items ADD COLUMN timer_marker TEXT");
+  }
+  if (!cols.includes("project_hint")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN project_hint TEXT");
+  }
+  if (!cols.includes("project_id")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN project_id INTEGER REFERENCES projects(id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_items_project_id ON inbox_items(project_id)");
   }
 }
 
@@ -255,14 +266,29 @@ export function ensureClientAliasesTable() {
 export function getAllInboxItems() {
   ensureInboxTable();
   return getDb().prepare(`
-    SELECT * FROM inbox_items ORDER BY created_at DESC LIMIT 200
+    SELECT i.*, p.name AS project_name
+    FROM inbox_items i
+    LEFT JOIN projects p ON i.project_id = p.id
+    ORDER BY i.created_at DESC LIMIT 200
   `).all();
+}
+
+export function getInboxItemsByProject(projectId) {
+  ensureInboxTable();
+  return getDb().prepare(`
+    SELECT i.*, p.name AS project_name
+    FROM inbox_items i
+    LEFT JOIN projects p ON i.project_id = p.id
+    WHERE i.project_id = ?
+    ORDER BY i.created_at DESC
+  `).all(projectId);
 }
 
 const INBOX_UPDATABLE = new Set([
   "status", "session_name", "error_text",
   "client_hint", "division_hint", "priority", "notes",
   "requires_server_access", "estimated_minutes", "timer_marker",
+  "project_hint", "project_id",
 ]);
 
 export function updateInboxItem(id, fields) {
@@ -310,6 +336,34 @@ export function insertClientAlias({ match_type, match_value, client_hint, divisi
                   division_hint=excluded.division_hint,
                   note=excluded.note
   `).run(match_type, (match_value || "").toLowerCase(), client_hint, division_hint || null, note || null);
+}
+
+export function ensureProjectForInbox(clientHint, divisionHint, shortSlug, subject) {
+  const db = getDb();
+  const name = (shortSlug || "inbox-item").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  let companyId = null;
+  if (clientHint && clientHint.toLowerCase() !== "unknown") {
+    const company = db.prepare(
+      "SELECT id FROM companies WHERE LOWER(name) = LOWER(?) OR LOWER(short_name) = LOWER(?)"
+    ).get(clientHint, clientHint);
+    if (company) companyId = company.id;
+  }
+
+  let divisionId = null;
+  if (divisionHint && divisionHint.toLowerCase() !== "unknown") {
+    const division = db.prepare(
+      "SELECT id FROM divisions WHERE LOWER(name) = LOWER(?)"
+    ).get(divisionHint);
+    if (division) divisionId = division.id;
+  }
+
+  const result = db.prepare(`
+    INSERT INTO projects (name, company_id, division_id, status, notes, created_at, updated_at)
+    VALUES (?, ?, ?, 'wfhuman', ?, datetime('now'), datetime('now'))
+  `).run(name, companyId, divisionId, `Auto-created from inbox: ${subject}`);
+
+  return result.lastInsertRowid;
 }
 
 export function reorderProjects(status, ids) {

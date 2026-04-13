@@ -54,6 +54,9 @@ export default function InboxCard({ item, onClick }) {
       {item.short_slug && (
         <div className="inbox-card-slug">{item.short_slug.replace(/-/g, " ")}</div>
       )}
+      {item.project_name && (
+        <div className="inbox-card-project">{item.project_name}</div>
+      )}
     </div>
   );
 }

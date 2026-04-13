@@ -18,7 +18,7 @@ function extractDomain(fromAddr) {
   return parts.length === 2 ? parts[1].toLowerCase().trim() : "";
 }
 
-export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedispatch }) {
+export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedispatch, onProjectClick }) {
   const [draft, setDraft] = useState({
     client_hint: item.client_hint || "",
     division_hint: item.division_hint || "unknown",
@@ -167,6 +167,15 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
         {/* Header */}
         <div className="inbox-modal-subject">{item.subject || "(no subject)"}</div>
         <div className="inbox-modal-from">{from}</div>
+        {item.project_name && (
+          <div
+            className={`inbox-modal-project-link${onProjectClick ? " clickable" : ""}`}
+            onClick={() => onProjectClick && (onProjectClick(item.project_id), onClose())}
+            title={onProjectClick ? "Open project card" : undefined}
+          >
+            &#8618; {item.project_name}
+          </div>
+        )}
 
         {/* Status + meta row */}
         <div className="inbox-modal-meta">

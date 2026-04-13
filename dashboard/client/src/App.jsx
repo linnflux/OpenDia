@@ -123,13 +123,25 @@ export default function App() {
     setSelectedProjectId(null);
   }
 
-  const pendingInbox = inboxItems.filter((i) => i.status !== "done").length;
+  const pendingInbox = inboxItems.filter((i) => !["done", "dismissed"].includes(i.status)).length;
 
   const filteredInbox = inboxItems.filter((i) => {
-    if (inboxFilter === "active") return i.status !== "done";
+    if (inboxFilter === "active") return !["done", "dismissed"].includes(i.status);
     if (inboxFilter === "done") return i.status === "done";
     return true; // "all"
   });
+
+  function handleInboxItemClick(item) {
+    // From CardModal: open InboxModal for a linked inbox item
+    setSelectedInboxItem(item);
+    setSelectedProjectId(null);
+  }
+
+  function handleProjectClick(projectId) {
+    // From InboxModal: open CardModal for the linked project
+    setSelectedProjectId(projectId);
+    setSelectedInboxItem(null);
+  }
 
   return (
     <div className="app">
@@ -263,6 +275,7 @@ export default function App() {
           onClose={handleModalClose}
           onUpdate={handleModalUpdate}
           hasActiveTimer={activeTimerIds.has(selectedProject.id)}
+          onInboxItemClick={handleInboxItemClick}
         />
       )}
       {selectedInboxItem && (
@@ -272,6 +285,7 @@ export default function App() {
           onDismiss={dismissItem}
           onUpdate={updateItem}
           onRedispatch={redispatchItem}
+          onProjectClick={handleProjectClick}
         />
       )}
       <CommandPalette

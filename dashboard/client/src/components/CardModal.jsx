@@ -66,7 +66,26 @@ function extractImagePaths(...fields) {
   return paths;
 }
 
-export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }) {
+function relativeTime(iso) {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso + "Z").getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+const INBOX_STATUS_DOT = {
+  classified: "#60a5fa",
+  dispatched: "#4ade80",
+  done: "#86efac",
+  error: "#f87171",
+  dismissed: "#475569",
+};
+
+export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
@@ -77,6 +96,8 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }
   const [editingNextStep, setEditingNextStep] = useState(false);
   const [timers, setTimers] = useState([]);
   const [timersLoading, setTimersLoading] = useState(true);
+  const [inboxItems, setInboxItems] = useState([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncData, setSyncData] = useState(null);
@@ -108,6 +129,20 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }
       }
     }
     fetchTimers();
+  }, [project.id]);
+
+  useEffect(() => {
+    async function fetchInbox() {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/inbox`);
+        if (res.ok) setInboxItems(await res.json());
+      } catch (err) {
+        console.error("inbox fetch error:", err);
+      } finally {
+        setInboxLoading(false);
+      }
+    }
+    fetchInbox();
   }, [project.id]);
 
   useEffect(() => {
@@ -237,6 +272,10 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }
   }
 
   const div = DIVISION_COLORS[project.division] || { bg: "#6b7280", text: "#fff" };
+  const INBOX_PREFIX = "Auto-created from inbox: ";
+  const inboxSource = project.notes?.startsWith(INBOX_PREFIX)
+    ? project.notes.slice(INBOX_PREFIX.length)
+    : null;
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdropClick}>
@@ -433,6 +472,38 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }
           </div>
         )}
 
+        {(inboxLoading || inboxItems.length > 0) && (
+          <div className="modal-section">
+            <label className="modal-label">
+              Inbox Items
+              {inboxItems.length > 0 && <span className="timer-count">{inboxItems.length}</span>}
+            </label>
+            {inboxLoading ? (
+              <div className="modal-empty">Loading…</div>
+            ) : (
+              <div className="modal-inbox-list">
+                {inboxItems.map((item) => {
+                  const dot = INBOX_STATUS_DOT[item.status] || "#94a3b8";
+                  const from = item.from_addr?.replace(/^"?([^"<]+)"?\s*<[^>]+>$/, "$1").trim() || item.from_addr;
+                  const canClick = !!onInboxItemClick;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`modal-inbox-item${canClick ? " clickable" : ""}`}
+                      onClick={() => canClick && onInboxItemClick(item)}
+                    >
+                      <span className="modal-inbox-dot" style={{ backgroundColor: dot }} />
+                      <span className="modal-inbox-subject">{(item.subject || "(no subject)").slice(0, 60)}{(item.subject || "").length > 60 ? "…" : ""}</span>
+                      <span className="modal-inbox-from">{from}</span>
+                      <span className="modal-inbox-age">{relativeTime(item.created_at)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="modal-section">
           <label className="modal-label">
             Time Entries
@@ -551,6 +622,15 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer }
 
         <div className="modal-footer">
           <span className="modal-id">ID: {project.id}</span>
+          {inboxSource && (
+            <span className="modal-inbox-origin" title={inboxSource}>
+              <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style={{ verticalAlign: "middle", marginRight: "0.25rem" }}>
+                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+              </svg>
+              inbox · {inboxSource.length > 40 ? inboxSource.slice(0, 40) + "…" : inboxSource}
+            </span>
+          )}
           {project.notion_id && (
             <a
               className="modal-notion-link"
