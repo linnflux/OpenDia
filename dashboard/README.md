@@ -81,9 +81,11 @@ Click a card to open a detail modal with:
 - **Tmux Session** — click to edit
 - **Next Step** — click to edit
 - **Notes** — click to edit (persisted to the database)
+- **Inbox Items** — linked inbox emails (status dot, subject, sender, age). Clicking an item opens the inbox modal. Only shown when at least one item exists.
 - **Time Entries** — matched from `~/OpenDia/Time/` by company+division or project name. Expandable to show full notes.
 - **Attachments** — inline image previews from linked files
 - **Sync** — pulls Notion task data, recent Gmail threads, and runs AI analysis to suggest next steps and surface change requests
+- **Footer** — shows inbox-origin subject if the project was auto-created by the inbox pipeline
 
 ## Active Timer Indicators
 
@@ -97,17 +99,25 @@ Opening a card with an active timer shows a subtle rotating conic-gradient borde
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/projects` | All projects with company and division joins. `?include_completed=true` to include completed. |
+| `GET` | `/api/projects` | All projects with company and division joins + `inbox_count`. `?include_completed=true` to include completed. |
 | `POST` | `/api/projects` | Create a new project card. Body: `{ name, companyName, divisionName, status, notionId }` |
 | `PATCH` | `/api/projects/:id` | Update fields: `name`, `status`, `notes`, `tmux_session`, `next_step`, `notion_id` |
 | `PUT` | `/api/projects/reorder` | Reorder cards within a column. Body: `{ status, ids[] }` |
 | `GET` | `/api/projects/match` | Find a project by `?client=&division=&task=`. Returns 404 if no match. |
 | `POST` | `/api/projects/:id/sync` | Sync project with Notion + Gmail + AI analysis |
 | `GET` | `/api/projects/:id/timers` | Time entries matching the project |
+| `GET` | `/api/projects/:id/inbox` | Inbox items linked to this project via `project_id` FK |
 | `GET` | `/api/projects/:id/notion-title` | Lightweight Notion title fetch |
 | `GET` | `/api/timers/active` | Returns array of project IDs with running timers |
 | `POST` | `/api/projects/:id/log-timer` | Append a single timer entry to the project's Notion task as a toggle block. Body: `{ start, task, duration, notes }`. Silently no-ops if the project has no `notion_id`. |
 | `POST` | `/api/timers/backfill` | One-shot sync of all historical daily `.md` entries to their matching Notion tasks. Idempotent (dedupes by start-time marker in existing toggle titles). Throttled to stay under Notion's rate limit. |
+| `GET` | `/api/inbox` | All inbox items (joined with project name). |
+| `PATCH` | `/api/inbox/:id` | Update classification fields. Re-links `project_id` automatically when `client_hint` or `division_hint` changes. |
+| `DELETE` | `/api/inbox/:id` | Soft-delete: sets `status = dismissed` (preserves project FK and audit trail). |
+| `POST` | `/api/inbox/:id/redispatch` | Re-run Stage B for the item. |
+| `POST` | `/api/inbox/:id/approve-server` | Approve and dispatch a server-work item through the safety gate. |
+| `GET` | `/api/client-aliases` | All learned sender → client mappings. |
+| `POST` | `/api/client-aliases` | Add or update an alias. Body: `{ match_type, match_value, client_hint, division_hint, note }` |
 | `GET` | `/api/file` | Serve files under `~/OpenDia/` by `?path=` |
 
 ## `/od-go` and `/od-stop` Integration

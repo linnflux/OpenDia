@@ -39,7 +39,7 @@ A local SQLite database stores the canonical list of companies, people, projects
 | `people` | Contacts at companies | name, email, role, company_id |
 | `projects` | Work projects per company | name, company_id, division_id, status, sort_order, tmux_session, next_step |
 | `tasks` | Tasks per project | title, project_id, status, notion_url |
-| `inbox_items` | Inbox pipeline items | gmail_id, client_hint, division_hint, short_slug, prompt_text, status, session_name, estimated_minutes, timer_marker |
+| `inbox_items` | Inbox pipeline items | gmail_id, client_hint, division_hint, project_id (FK → projects), short_slug, prompt_text, status (`classified→dispatched→done\|error\|dismissed`), session_name, estimated_minutes, timer_marker |
 | `client_aliases` | Learned sender → client mappings | match_type, match_value, client_hint, division_hint |
 
 ### Internal Time Tracking
@@ -99,9 +99,9 @@ Credentials live outside the project directory, managed by MCP server configs, e
 
 A lightweight Kanban board that provides a visual interface to the SQLite database. Built with React and Express, served on a single port, accessible from any machine on the Tailscale network. See [`dashboard/README.md`](dashboard/README.md) for setup and usage details.
 
-- **Board view:** Projects appear as draggable cards organized into status columns (`In Progress`, `WFHuman`, `Ice`, `Completed`). Cards show company, division, notes, tmux session, and next step at a glance.
+- **Board view:** Projects appear as draggable cards organized into status columns (`In Progress`, `WFHuman`, `Ice`, `Completed`). Cards show company, division, notes, tmux session, and next step at a glance. A blue badge shows the count of active inbox items linked to the project. Projects auto-created by the inbox pipeline show the OpenDia mark at 50% opacity in the top-right corner (brightens to 85% on hover; tooltip shows the originating email subject).
 - **Next Step:** Each project carries a `next_step` field — a short, actionable description of what to do next. Auto-populated when a timer is stopped via `/od-stop` (via `NEXT:` convention in notes), and refreshable on demand with `/od-next-steps`. Displayed on cards with a purple arrow indicator.
-- **Card modal:** Click a card to open a detail modal with editable fields (name, status, notes, tmux session, next step) and a scrollable list of associated time entries pulled from the internal timer system. Company names link to their Notion page when available. Linked Notion tasks show an icon and title in the header.
+- **Card modal:** Click a card to open a detail modal with editable fields (name, status, notes, tmux session, next step) and a scrollable list of associated time entries pulled from the internal timer system. Company names link to their Notion page when available. Linked Notion tasks show an icon and title in the header. An **Inbox Items** section lists all classified emails linked to the project (status dot, subject, sender, age) — clicking an item opens the inbox modal for that item. If the project was auto-created by the inbox pipeline, the footer shows the originating email subject.
 - **Card sync:** The refresh button in each card modal triggers an AI-powered sync that: auto-discovers and links a Notion task if none is set (searches by project name, then company name), fetches the linked Notion task (todos, comments, status), searches Gmail for recent client emails (exact phrase match, scoped to inbox and client label), runs Claude Haiku to analyze the context, auto-updates the project's next step, and appends any detected change requests to the Notion task as dated toggle blocks. Email threads are shown as clickable links to Gmail.
 - **Inline attachments:** Image paths (`~/OpenDia/.../*.png`, `.jpg`, etc.) found in notes or next step fields are automatically detected and rendered as clickable thumbnail previews in an Attachments section. Clicking opens the full image. Files are served through a scoped API endpoint restricted to `~/OpenDia/`.
 - **Tmux Launch:** Cards with a tmux session show a "Launch" button in the modal. If the `opendia://` protocol handler is registered on the client machine, it opens a terminal and SSHs directly into the tmux session. Otherwise, it copies the SSH command to clipboard. See [installation step 9](#9-dashboard-tmux-launcher-recommended) for setup.
@@ -252,6 +252,9 @@ Operator labels email "OpenDia Inbox"
   │    Checks client alias table first (learned mappings           │
   │      override Haiku — e.g. @deanvaughnlearning.com →           │
   │      "Memory Sports")                                          │
+  │    Matches result to an existing project via match_project()   │
+  │      → sets project_id FK. If no match, auto-creates a new    │
+  │      project in wfhuman status ("Auto-created from inbox: …") │
   │    Writes one inbox_items row, relabels ALL thread messages     │
   │      to "OpenDia Processed" (prevents duplicate dispatches)    │
   │                                                                │
@@ -283,7 +286,7 @@ Operator labels email "OpenDia Inbox"
   (draft never sent — Operator reviews and sends manually)
 ```
 
-**Dashboard Inbox view.** Every processed email appears as a card in the OpenDia dashboard under the Inbox tab. Cards show sender, subject, client/division badges, priority, status (Classified → Running → Done / Error), and the extracted directive. Clicking a card opens a modal with full detail.
+**Dashboard Inbox view.** Every processed email appears as a card in the OpenDia dashboard under the Inbox tab. Cards show sender, subject, client/division badges, priority, status (Classified → Running → Done / Error / Dismissed), the extracted directive, and the name of the linked project. Clicking a card opens a modal with full detail, including a clickable "→ Project Name" link that jumps to the project's card modal. Dismissing an inbox item soft-deletes it (sets `status = dismissed`) rather than hard-deleting, preserving the project link and audit trail.
 
 **Operator correction.** Classification isn't always right — a sender's email domain may not match the client name in the working relationship. The modal makes every classification field editable: client, division, priority, and a notes textarea. Saving a corrected client name offers a one-click **"Save as alias"** prompt that writes to a `client_aliases` table so all future emails from that domain are classified correctly without touching Haiku.
 
