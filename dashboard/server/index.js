@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox } from "./db.js";
 import { spawn } from "child_process";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
@@ -83,6 +83,20 @@ app.get("/api/projects/match", (req, res) => {
     res.json(project);
   } catch (err) {
     console.error("GET /api/projects/match error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/projects/match-candidates", (req, res) => {
+  try {
+    const { client, division, task } = req.query;
+    const limit = parseInt(req.query.limit || "3", 10);
+    const candidates = matchProjectCandidates(client, division, task, limit);
+    res.json(candidates.map(({ id, name, status, company_name, company_short, division: div, score }) => ({
+      id, name, status, company_name, company_short, division: div, score,
+    })));
+  } catch (err) {
+    console.error("GET /api/projects/match-candidates error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

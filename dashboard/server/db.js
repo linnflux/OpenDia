@@ -165,6 +165,73 @@ export function matchProject(client, division, task, project) {
   return best;
 }
 
+export function matchProjectCandidates(client, division, task, limit = 3) {
+  const clientLower = (client || "").toLowerCase();
+  const divisionLower = (division || "").toLowerCase();
+  const taskLower = (task || "").toLowerCase();
+
+  const projects = getDb().prepare(`
+    SELECT p.id, p.name, p.status,
+           c.name AS company_name, c.short_name AS company_short,
+           d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+  `).all();
+
+  const clientMatched = [];
+  const scored = [];
+
+  for (const p of projects) {
+    const companyLower = (p.company_name || "").toLowerCase();
+    const shortLower = (p.company_short || "").toLowerCase();
+    const pDivLower = (p.division || "").toLowerCase();
+    const nameLower = (p.name || "").toLowerCase();
+
+    const clientMatch = clientLower && (
+      companyLower === clientLower ||
+      shortLower === clientLower ||
+      (companyLower && (companyLower.includes(clientLower) || clientLower.includes(companyLower))) ||
+      (shortLower && (shortLower.includes(clientLower) || clientLower.includes(shortLower)))
+    );
+    if (!clientMatch) continue;
+
+    clientMatched.push(p);
+
+    const divMatch = divisionLower && pDivLower === divisionLower;
+    const taskSubstr = taskLower && nameLower && (nameLower.includes(taskLower) || taskLower.includes(nameLower));
+    const sharedTokens = matchSharedTokens(taskLower, nameLower);
+
+    // Require at least one signal beyond "same client"
+    if (!divMatch && !taskSubstr && sharedTokens === 0) continue;
+
+    let score = 0;
+    if (taskSubstr) score += 10;
+    score += sharedTokens * 3;
+    if (divMatch) score += 2;
+    if (p.status !== "completed") score += 1;
+
+    scored.push({ ...p, score });
+  }
+
+  if (scored.length > 0) {
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit);
+  }
+
+  // Relaxed pass: return client-only matches so user can still see same-client options
+  if (clientMatched.length > 0) {
+    const relaxed = clientMatched.map((p) => ({
+      ...p,
+      score: p.status !== "completed" ? 1 : 0,
+    }));
+    relaxed.sort((a, b) => b.score - a.score);
+    return relaxed.slice(0, limit);
+  }
+
+  return [];
+}
+
 export function createProject({ name, companyName, divisionName, status = "in_progress", notionId = null }) {
   const db = getDb();
 
