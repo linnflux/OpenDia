@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
 const BG_STORAGE_KEY = "opendia-bg-image";
+const BG_POSITION_KEY = "opendia-bg-position";
 
-function getActions({ onRefresh, onUploadBg, onClearBg, hasBg, onToggleTheme, theme }) {
+function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onToggleTheme, theme }) {
   return [
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", shortcut: "R", action: onRefresh },
     {
@@ -13,7 +14,10 @@ function getActions({ onRefresh, onUploadBg, onClearBg, hasBg, onToggleTheme, th
     },
     { id: "upload-bg", icon: "\u{1F5BC}", label: "Upload Background Image", action: onUploadBg },
     ...(hasBg
-      ? [{ id: "clear-bg", icon: "\u2715", label: "Remove Background Image", action: onClearBg }]
+      ? [
+          { id: "reposition-bg", icon: "\u2316", label: "Reposition Background Image", action: onReposition },
+          { id: "clear-bg", icon: "\u2715", label: "Remove Background Image", action: onClearBg },
+        ]
       : []),
   ];
 }
@@ -24,13 +28,16 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const [bgImage, setBgImage] = useState(() => localStorage.getItem(BG_STORAGE_KEY));
+  const [bgPosition, setBgPosition] = useState(() => localStorage.getItem(BG_POSITION_KEY) || "center");
+  const [repositionMode, setRepositionMode] = useState(false);
+  const origPosRef = useRef(null);
 
   // Apply background image to body
   useEffect(() => {
     if (bgImage) {
       document.body.style.backgroundImage = `url(${bgImage})`;
       document.body.style.backgroundSize = "cover";
-      document.body.style.backgroundPosition = "center";
+      document.body.style.backgroundPosition = bgPosition;
       document.body.style.backgroundAttachment = "fixed";
       document.body.classList.add("has-bg");
     } else {
@@ -40,7 +47,7 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
       document.body.style.backgroundAttachment = "";
       document.body.classList.remove("has-bg");
     }
-  }, [bgImage]);
+  }, [bgImage, bgPosition]);
 
   // Load background on mount (even when palette is closed)
   useEffect(() => {
@@ -69,8 +76,37 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
 
   function handleClearBg() {
     localStorage.removeItem(BG_STORAGE_KEY);
+    localStorage.removeItem(BG_POSITION_KEY);
     setBgImage(null);
+    setBgPosition("center");
     onClose();
+  }
+
+  function handleStartReposition() {
+    origPosRef.current = bgPosition;
+    setRepositionMode(true);
+    onClose();
+  }
+
+  function handleRepositionMouseMove(e) {
+    const x = Math.round((e.clientX / window.innerWidth) * 100);
+    const y = Math.round((e.clientY / window.innerHeight) * 100);
+    document.body.style.backgroundPosition = `${x}% ${y}%`;
+  }
+
+  function handleRepositionClick(e) {
+    const x = Math.round((e.clientX / window.innerWidth) * 100);
+    const y = Math.round((e.clientY / window.innerHeight) * 100);
+    const pos = `${x}% ${y}%`;
+    localStorage.setItem(BG_POSITION_KEY, pos);
+    setBgPosition(pos);
+    setRepositionMode(false);
+  }
+
+  function handleRepositionCancel() {
+    document.body.style.backgroundPosition = origPosRef.current || "center";
+    setBgPosition(origPosRef.current || "center");
+    setRepositionMode(false);
   }
 
   const actions = useMemo(
@@ -78,11 +114,12 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
       onRefresh: () => { onRefresh(); onClose(); },
       onUploadBg: handleUploadBg,
       onClearBg: handleClearBg,
+      onReposition: handleStartReposition,
       hasBg: !!bgImage,
       onToggleTheme: () => { onToggleTheme(); onClose(); },
       theme,
     }),
-    [bgImage, onRefresh, onClose, onToggleTheme, theme]
+    [bgImage, bgPosition, onRefresh, onClose, onToggleTheme, theme]
   );
 
   const filteredActions = useMemo(() => {
@@ -131,6 +168,15 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!repositionMode) return;
+    function onKey(e) {
+      if (e.key === "Escape") handleRepositionCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [repositionMode, bgPosition]);
+
   function handleKeyDown(e) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -144,6 +190,29 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
     } else if (e.key === "Escape") {
       onClose();
     }
+  }
+
+  if (repositionMode) {
+    return (
+      <>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
+        <div
+          className="bg-reposition-overlay"
+          onMouseMove={handleRepositionMouseMove}
+          onClick={handleRepositionClick}
+        >
+          <div className="bg-reposition-hint">
+            Click to set focal point &nbsp;&middot;&nbsp; <kbd>Esc</kbd> to cancel
+          </div>
+        </div>
+      </>
+    );
   }
 
   if (!open) {

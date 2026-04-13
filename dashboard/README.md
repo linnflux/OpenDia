@@ -30,6 +30,29 @@ npm start
 
 The dashboard is then available at `http://opendia:8038` from any Tailscale peer.
 
+### Running as a systemd User Service (Production)
+
+The dashboard runs as a systemd user service on the OpenDia server so it starts at boot and auto-recovers from crashes.
+
+```bash
+# Service file location
+~/.config/systemd/user/opendia-dashboard.service
+
+# Status / logs
+systemctl --user status opendia-dashboard
+journalctl --user -u opendia-dashboard -f
+
+# Manual restart / stop
+systemctl --user restart opendia-dashboard
+systemctl --user stop opendia-dashboard   # e.g. before running npm run dev
+```
+
+Linger must be enabled once so the service starts at boot without an active login session:
+
+```bash
+sudo loginctl enable-linger linnflux
+```
+
 ### Development
 
 ```bash
