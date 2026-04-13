@@ -103,7 +103,8 @@ Opening a card with an active timer shows a subtle rotating conic-gradient borde
 | `POST` | `/api/projects` | Create a new project card. Body: `{ name, companyName, divisionName, status, notionId }` |
 | `PATCH` | `/api/projects/:id` | Update fields: `name`, `status`, `notes`, `tmux_session`, `next_step`, `notion_id` |
 | `PUT` | `/api/projects/reorder` | Reorder cards within a column. Body: `{ status, ids[] }` |
-| `GET` | `/api/projects/match` | Find a project by `?client=&division=&task=`. Returns 404 if no match. |
+| `GET` | `/api/projects/match` | Find a project by `?client=&division=&task=`. Returns 404 if no match. Used by timers/active, backfill, and inbox re-link. |
+| `GET` | `/api/projects/match-candidates` | Return top N ranked project matches as a JSON array (always 200, empty if none). `?client=&division=&task=&limit=3`. Each element: `{ id, name, status, company_name, company_short, division, score }`. Used by `/od-go` Step 5.5. |
 | `POST` | `/api/projects/:id/sync` | Sync project with Notion + Gmail + AI analysis |
 | `GET` | `/api/projects/:id/timers` | Time entries matching the project |
 | `GET` | `/api/projects/:id/inbox` | Inbox items linked to this project via `project_id` FK |
@@ -122,7 +123,7 @@ Opening a card with an active timer shows a subtle rotating conic-gradient borde
 
 ## `/od-go` and `/od-stop` Integration
 
-**`/od-go`** (Step 5.5) checks for a matching dashboard card after resolving client and division. If no card exists, it prompts to create one via `POST /api/projects` before starting the timer.
+**`/od-go`** (Step 5.5) calls `GET /api/projects/match-candidates` to fetch ranked candidate cards for the resolved client/division/task. It presents a numbered list — existing cards first, then "Create new" and "Skip" — so the operator always sees and chooses what gets linked. The top result is marked "recommended" when its score is ≥ 10 (strong task-text match). The linked or created project name is written into the `project:` field of both the timer ledger entry and state file, so `/api/timers/active` can do an exact-name first-pass match and the correct card gets the green border.
 
 **`/od-stop`** is the mirror — it stops the running timer, writes justified notes to the daily `.md`, updates the card's `next_step`, and logs a toggle block to the linked Notion task via `POST /api/projects/:id/log-timer`. Running `/od-stop backfill` does a one-shot historical sync of all prior entries.
 
