@@ -386,6 +386,14 @@ export function getInboxItemById(id) {
   return getDb().prepare("SELECT * FROM inbox_items WHERE id = ?").get(id);
 }
 
+export function getProcessedGmailIds() {
+  ensureInboxTable();
+  return new Set(
+    getDb().prepare("SELECT gmail_id FROM inbox_items WHERE gmail_id IS NOT NULL").all()
+      .map((r) => r.gmail_id)
+  );
+}
+
 export function getAllClientAliases() {
   ensureClientAliasesTable();
   return getDb().prepare(

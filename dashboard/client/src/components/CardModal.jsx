@@ -98,6 +98,9 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [timersLoading, setTimersLoading] = useState(true);
   const [inboxItems, setInboxItems] = useState([]);
   const [inboxLoading, setInboxLoading] = useState(true);
+  const [checkingMail, setCheckingMail] = useState(false);
+  const [mailCandidates, setMailCandidates] = useState(null);
+  const [ingesting, setIngesting] = useState(null);
   const [toast, setToast] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncData, setSyncData] = useState(null);
@@ -271,6 +274,60 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
     }
   }
 
+  async function handleCheckMail() {
+    setCheckingMail(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/check-mail`, { method: "POST" });
+      if (res.ok) {
+        const candidates = await res.json();
+        setMailCandidates(candidates);
+        showToast(candidates.length > 0 ? `Found ${candidates.length} new email(s)` : "No new emails found");
+      } else {
+        showToast("Check mail failed");
+      }
+    } catch (err) {
+      console.error("check mail error:", err);
+      showToast("Check mail failed");
+    } finally {
+      setCheckingMail(false);
+    }
+  }
+
+  async function handleIngestEmail(email) {
+    setIngesting(email.id);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/ingest-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gmail_id: email.id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMailCandidates((prev) => prev?.filter((e) => e.id !== email.id) ?? null);
+        if (data.mode === "inject") {
+          showToast("Email injected into active session");
+        } else {
+          showToast("Ingesting — session will spawn shortly");
+        }
+        // Refresh inbox items after a short delay so the new item appears
+        setTimeout(async () => {
+          try {
+            const r = await fetch(`/api/projects/${project.id}/inbox`);
+            if (r.ok) setInboxItems(await r.json());
+          } catch {}
+        }, 3000);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || "Ingest failed");
+      }
+    } catch (err) {
+      console.error("ingest error:", err);
+      showToast("Ingest failed");
+    } finally {
+      setIngesting(null);
+    }
+  }
+
   const div = DIVISION_COLORS[project.division] || { bg: "#6b7280", text: "#fff" };
   const INBOX_PREFIX = "Auto-created from inbox: ";
   const inboxSource = project.notes?.startsWith(INBOX_PREFIX)
@@ -291,6 +348,17 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
               <polyline points="23 4 23 10 17 10" />
               <polyline points="1 20 1 14 7 14" />
               <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            </svg>
+          </button>
+          <button
+            className={`modal-sync-btn ${checkingMail ? "syncing" : ""}`}
+            onClick={handleCheckMail}
+            disabled={checkingMail}
+            title="Check for new emails"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+              <polyline points="22,6 12,13 2,6" />
             </svg>
           </button>
           <button className="modal-close" onClick={onClose}>&times;</button>
@@ -504,6 +572,49 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
           </div>
         )}
 
+        {mailCandidates !== null && (
+          <div className="modal-section">
+            <label className="modal-label">
+              Email Candidates
+              {mailCandidates.length > 0 && <span className="timer-count">{mailCandidates.length}</span>}
+            </label>
+            {mailCandidates.length === 0 ? (
+              <div className="modal-empty">No new emails found</div>
+            ) : (
+              <div className="modal-inbox-list">
+                {mailCandidates.map((email) => {
+                  const from = email.from?.replace(/^"?([^"<]+)"?\s*<[^>]+>$/, "$1").trim() || email.from;
+                  return (
+                    <div key={email.id} className="modal-inbox-item modal-inbox-item--candidate">
+                      <span className="modal-inbox-subject">
+                        {(email.subject || "(no subject)").slice(0, 55)}
+                        {(email.subject || "").length > 55 ? "…" : ""}
+                      </span>
+                      <span className="modal-inbox-from">{from}</span>
+                      <span className="modal-inbox-age">{new Date(email.date).toLocaleDateString()}</span>
+                      <button
+                        className="modal-ingest-btn"
+                        onClick={() => handleIngestEmail(email)}
+                        disabled={ingesting === email.id}
+                      >
+                        {ingesting === email.id ? "…" : "Ingest"}
+                      </button>
+                      <button
+                        className="modal-ingest-btn modal-ingest-btn--dismiss"
+                        onClick={() => setMailCandidates((prev) => prev?.filter((e) => e.id !== email.id) ?? null)}
+                        disabled={ingesting === email.id}
+                        title="Dismiss"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="modal-section">
           <label className="modal-label">
             Time Entries
@@ -580,15 +691,31 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
             {syncData.emails?.length > 0 && (
               <div className="sync-emails">
                 <div className="sync-sub-label">Recent Emails ({syncData.emails.length})</div>
-                {syncData.emails.map((e) => (
-                  <a key={e.id} className="sync-email" href={e.threadUrl} target="_blank" rel="noopener noreferrer">
-                    <div className="sync-email-subject">{e.subject}</div>
-                    <div className="sync-email-meta">
-                      <span className="sync-email-from">{e.from.replace(/<[^>]+>/, "").trim()}</span>
-                      <span className="sync-email-date">{new Date(e.date).toLocaleDateString()}</span>
+                {syncData.emails.map((e) => {
+                  const alreadyIngested = inboxItems.some((i) => i.gmail_id === e.id);
+                  return (
+                    <div key={e.id} className="sync-email">
+                      <a className="sync-email-link" href={e.threadUrl} target="_blank" rel="noopener noreferrer">
+                        <div className="sync-email-subject">{e.subject}</div>
+                        <div className="sync-email-meta">
+                          <span className="sync-email-from">{e.from.replace(/<[^>]+>/, "").trim()}</span>
+                          <span className="sync-email-date">{new Date(e.date).toLocaleDateString()}</span>
+                        </div>
+                      </a>
+                      {alreadyIngested ? (
+                        <span className="sync-email-ingested">✓</span>
+                      ) : (
+                        <button
+                          className="modal-ingest-btn"
+                          onClick={() => handleIngestEmail(e)}
+                          disabled={ingesting === e.id}
+                        >
+                          {ingesting === e.id ? "…" : "Ingest"}
+                        </button>
+                      )}
                     </div>
-                  </a>
-                ))}
+                  );
+                })}
               </div>
             )}
 

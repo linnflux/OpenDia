@@ -1858,8 +1858,9 @@ body.has-bg::before {
 }
 
 .sync-email {
-  display: block;
-  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.5rem;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -1870,6 +1871,18 @@ body.has-bg::before {
 
 .sync-email:hover {
   border-color: var(--accent);
+}
+
+.sync-email-link {
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.sync-email-ingested {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  flex-shrink: 0;
 }
 
 .sync-email-subject {
@@ -2045,6 +2058,43 @@ body.has-bg::before {
   color: var(--text-faint);
   font-size: 0.7rem;
   white-space: nowrap;
+}
+
+/* ── Mail candidate rows (Check Mail) ────────────────────────────────────── */
+.modal-inbox-item--candidate {
+  grid-template-columns: 1fr auto auto auto auto;
+}
+
+.modal-ingest-btn {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.modal-ingest-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.modal-ingest-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.modal-ingest-btn--dismiss {
+  border-color: var(--text-faint);
+  color: var(--text-faint);
+}
+
+.modal-ingest-btn--dismiss:hover:not(:disabled) {
+  background: var(--text-faint);
+  color: #fff;
 }
 
 /* ── Project link in InboxModal ────────────────────────────────────────────── */

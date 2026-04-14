@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds } from "./db.js";
 import { spawn } from "child_process";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
@@ -458,6 +458,60 @@ app.post("/api/client-aliases", (req, res) => {
   } catch (err) {
     console.error("POST /api/client-aliases error:", err.message);
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects/:id/check-mail", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) return res.status(404).json({ error: "project not found" });
+
+    let emails = [];
+    try {
+      emails = await searchRecentEmails(project.company_name, { shortName: project.company_short });
+    } catch (err) {
+      console.error("Gmail search error:", err.message);
+    }
+
+    const processed = getProcessedGmailIds();
+    const candidates = emails.filter((e) => !processed.has(e.id));
+
+    res.json(candidates);
+  } catch (err) {
+    console.error("POST /api/projects/:id/check-mail error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects/:id/ingest-email", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) return res.status(404).json({ error: "project not found" });
+
+    const { gmail_id } = req.body;
+    if (!gmail_id) return res.status(400).json({ error: "gmail_id is required" });
+
+    const processed = getProcessedGmailIds();
+    if (processed.has(gmail_id)) {
+      return res.status(409).json({ error: "email already in inbox_items" });
+    }
+
+    const scriptPath = `${process.env.HOME}/OpenDia/scripts/check_mail_ingest.py`;
+    const tmuxSession = project.tmux_session || "";
+    const child = spawn("python3", [scriptPath, gmail_id, String(id), tmuxSession], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    child.unref();
+
+    const mode = project.tmux_session ? "inject" : "spawn";
+    res.json({ ok: true, gmail_id, mode });
+  } catch (err) {
+    console.error("POST /api/projects/:id/ingest-email error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
