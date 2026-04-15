@@ -26,10 +26,10 @@ const DIVISION_COLORS = {
 };
 
 const DIVISION_LOGOS = {
-  WordFlux: "/divisions/wordflux.png",
-  WatchThreat: "/divisions/watchthreat.png",
+  WordFlux: "/divisions/wordflux-h.png",
+  WatchThreat: "/divisions/watchthreat-h.png",
   AmPen: "/divisions/ampen.png",
-  "Bedford AI": "/divisions/bedford-ai.png",
+  "Bedford AI": "/divisions/bedford-ai-h.png",
   "ADA Web Work": "/divisions/ada-web-work.png",
   Linnflux: "/divisions/linnflux.png",
 };
@@ -403,16 +403,19 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
             </span>
           )}
           {project.division && (
-            <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
-              {DIVISION_LOGOS[project.division] && (
+            DIVISION_LOGOS[project.division] ? (
+              <span className="division-logo-badge" title={project.division}>
                 <img
                   src={DIVISION_LOGOS[project.division]}
-                  alt=""
+                  alt={project.division}
                   className="division-logo"
                 />
-              )}
-              {project.division}
-            </span>
+              </span>
+            ) : (
+              <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
+                {project.division}
+              </span>
+            )
           )}
           {project.notion_id && (
             <a
