@@ -25,6 +25,15 @@ const DIVISION_COLORS = {
   Linnflux: { bg: "#54af4d", text: "#fff" },
 };
 
+const DIVISION_LOGOS = {
+  WordFlux: "/divisions/wordflux.png",
+  WatchThreat: "/divisions/watchthreat.png",
+  AmPen: "/divisions/ampen.png",
+  "Bedford AI": "/divisions/bedford-ai.png",
+  "ADA Web Work": "/divisions/ada-web-work.png",
+  Linnflux: "/divisions/linnflux.png",
+};
+
 function TimerEntry({ entry }) {
   const [expanded, setExpanded] = useState(false);
   const isRunning = !entry.end;
@@ -395,6 +404,13 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
           )}
           {project.division && (
             <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
+              {DIVISION_LOGOS[project.division] && (
+                <img
+                  src={DIVISION_LOGOS[project.division]}
+                  alt=""
+                  className="division-logo"
+                />
+              )}
               {project.division}
             </span>
           )}
