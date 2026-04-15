@@ -121,7 +121,7 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/checkin` | Hourly check-in. Loads today's log, scans recent Gmail, numbers tasks for quick selection. Refreshes the active project's next step. |
 | `/hello` | Morning routine. Creates daily log, carries over unchecked items from the prior day. |
 | `/monthly-billing` | Generate and push billing data for the previous month to the Billing Master sheet. |
-| `/notion-new` | Creates a Notion task and starts a Toggl timer in one flow. |
+| `/notion-new` | *Deprecated — use `/od-go` instead.* |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
 | `/od-stop` | Unified work stop. Stops the running timer, writes justified notes (bullets must account for billed duration), updates the dashboard card's next step, and logs a dated toggle block to the linked Notion task. `backfill` mode does a one-shot historical sync of all prior entries. |
