@@ -62,6 +62,13 @@ export function updateProject(id, fields) {
   const sets = [];
   const vals = [];
   for (const [key, val] of Object.entries(fields)) {
+    if (key === "division") {
+      const row = getDb().prepare("SELECT id FROM divisions WHERE LOWER(name) = LOWER(?)").get(val);
+      if (!row) throw new Error(`Unknown division: ${val}`);
+      sets.push("division_id = ?");
+      vals.push(row.id);
+      continue;
+    }
     if (!UPDATABLE_FIELDS.has(key)) continue;
     if (key === "status" && !VALID_STATUSES.has(val)) {
       throw new Error(`Invalid status: ${val}`);

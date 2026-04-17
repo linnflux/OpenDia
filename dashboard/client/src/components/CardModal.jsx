@@ -114,6 +114,7 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [syncing, setSyncing] = useState(false);
   const [syncData, setSyncData] = useState(null);
   const [notionTitle, setNotionTitle] = useState(null);
+  const [divisionOpen, setDivisionOpen] = useState(false);
   const backdropRef = useRef(null);
   const notesRef = useRef(null);
 
@@ -402,21 +403,47 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
               {project.company_name || "No company"}
             </span>
           )}
-          {project.division && (
-            DIVISION_LOGOS[project.division] ? (
-              <span className="division-logo-badge" title={project.division}>
+          <div className="division-selector-wrap">
+            {divisionOpen && (
+              <div className="division-backdrop" onClick={() => setDivisionOpen(false)} />
+            )}
+            <span
+              className="division-logo-badge clickable"
+              title={project.division || "Set division"}
+              onClick={() => setDivisionOpen((v) => !v)}
+            >
+              {project.division && DIVISION_LOGOS[project.division] ? (
                 <img
                   src={DIVISION_LOGOS[project.division]}
                   alt={project.division}
                   className="division-logo"
                 />
-              </span>
-            ) : (
-              <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
-                {project.division}
-              </span>
-            )
-          )}
+              ) : project.division ? (
+                <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
+                  {project.division}
+                </span>
+              ) : (
+                <span className="division-unset">— division —</span>
+              )}
+            </span>
+            {divisionOpen && (
+              <div className="division-dropdown-menu">
+                {Object.entries(DIVISION_LOGOS).map(([name, logo]) => (
+                  <div
+                    key={name}
+                    className={`division-option${project.division === name ? " active" : ""}`}
+                    onClick={() => {
+                      setDivisionOpen(false);
+                      if (name !== project.division) onUpdate(project.id, { division: name });
+                    }}
+                  >
+                    <img src={logo} alt={name} className="division-option-logo" />
+                    <span>{name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {project.notion_id && (
             <a
               className="modal-notion-link"

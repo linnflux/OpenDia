@@ -102,10 +102,33 @@ cat > "$OPENDIA_FILTER" <<'FILTER'
 - *
 FILTER
 
+# --- Step 4b: Versioned db backup BEFORE sync (safety net) ---
+DB_LOCAL="$OPENDIA_DIR/opendia.db"
+DB_SIZE=$(stat -c%s "$DB_LOCAL" 2>/dev/null || echo 0)
+if [ "$DB_SIZE" -gt 10000 ]; then
+    DB_STAMP=$(date +%Y%m%d)
+    info "Versioned db backup → gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db ..."
+    rclone copyto "$DB_LOCAL" "gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db" 2>&1 | tail -2
+    # Clean up backup copies older than 7 days
+    rclone delete "gdrive:OpenDia/db-backups/" --min-age 7d 2>/dev/null || true
+else
+    warn "Local db looks empty or missing (${DB_SIZE} bytes) — skipping versioned backup and db sync"
+    # Exclude opendia.db from the rclone sync below to protect Drive copy
+    echo "- opendia.db" >> "$OPENDIA_FILTER"
+fi
+
 rclone sync "$OPENDIA_DIR/" "gdrive:OpenDia/" \
     --filter-from "$OPENDIA_FILTER" \
     -v 2>&1 | tail -5
 rm -f "$OPENDIA_FILTER"
+
+# --- Step 4c: Verify Drive db backup isn't empty ---
+DRIVE_SIZE=$(rclone size "gdrive:OpenDia/opendia.db" --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('bytes',0))" 2>/dev/null || echo 0)
+if [ "$DRIVE_SIZE" -lt 50000 ]; then
+    warn "Drive db backup looks suspiciously small (${DRIVE_SIZE} bytes) — check immediately!"
+else
+    info "Drive db verified: ${DRIVE_SIZE} bytes"
+fi
 
 # --- Summary ---
 echo ""

@@ -7,7 +7,11 @@ import os
 DB_PATH = os.path.expanduser("~/OpenDia/opendia.db")
 
 
-def init_db():
+def init_db(force=False):
+    if not force and os.path.exists(DB_PATH) and os.path.getsize(DB_PATH) > 10000:
+        print(f"WARNING: {DB_PATH} already exists ({os.path.getsize(DB_PATH):,} bytes).")
+        print("Database appears populated. Run with --force to re-initialize.")
+        return
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.cursor()
@@ -104,4 +108,6 @@ def init_db():
 
 
 if __name__ == "__main__":
-    init_db()
+    import sys
+    force = "--force" in sys.argv
+    init_db(force=force)

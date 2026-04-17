@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds } from "./db.js";
 import { spawn } from "child_process";
+import { readFileSync, existsSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -511,6 +512,35 @@ app.post("/api/projects/:id/ingest-email", (req, res) => {
     res.json({ ok: true, gmail_id, mode });
   } catch (err) {
     console.error("POST /api/projects/:id/ingest-email error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Session log viewer
+app.get("/api/inbox/:id/log", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const item = getInboxItemById(id);
+    if (!item) return res.status(404).json({ error: "inbox item not found" });
+    if (!item.session_name) return res.json({ lines: "", exists: false });
+
+    const tail = Math.min(Math.max(parseInt(req.query.tail, 10) || 80, 1), 500);
+    const logPath = resolve(process.env.HOME, "OpenDia", "logs", "sessions", `${item.session_name}.log`);
+
+    // Path-traversal guard
+    const logRoot = resolve(process.env.HOME, "OpenDia", "logs", "sessions");
+    if (!logPath.startsWith(logRoot)) {
+      return res.status(403).json({ error: "invalid log path" });
+    }
+
+    if (!existsSync(logPath)) return res.json({ lines: "", exists: false });
+
+    const content = readFileSync(logPath, "utf8");
+    const allLines = content.split("\n");
+    const lines = allLines.slice(-tail).join("\n");
+    res.json({ lines, exists: true });
+  } catch (err) {
+    console.error("GET /api/inbox/:id/log error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

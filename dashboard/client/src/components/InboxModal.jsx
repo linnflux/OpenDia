@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const DIVISIONS = [
   "WordFlux", "WatchThreat", "AmPen", "Bedford AI", "ADA Web Work", "Linnflux", "unknown",
@@ -18,6 +18,18 @@ function extractDomain(fromAddr) {
   return parts.length === 2 ? parts[1].toLowerCase().trim() : "";
 }
 
+function LogPanel({ lines, exists }) {
+  const preRef = useRef(null);
+  useEffect(() => {
+    if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
+  }, [lines]);
+  return (
+    <pre className="inbox-modal-log" ref={preRef}>
+      {exists ? (lines || "") : "Waiting for session output…"}
+    </pre>
+  );
+}
+
 export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedispatch, onProjectClick }) {
   const [draft, setDraft] = useState({
     client_hint: item.client_hint || "",
@@ -33,6 +45,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   const [aliasSaved, setAliasSaved] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveResult, setApproveResult] = useState(null); // { ok } | { error }
+  const [logLines, setLogLines] = useState("");
+  const [logExists, setLogExists] = useState(false);
 
   // Reset draft when item changes (modal reused for different items)
   useEffect(() => {
@@ -45,6 +59,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
     setAliasPrompt(null);
     setAliasSaved(false);
     setApproveResult(null);
+    setLogLines("");
+    setLogExists(false);
   }, [item.id]);
 
   useEffect(() => {
@@ -52,6 +68,27 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Poll session log while dispatched
+  useEffect(() => {
+    if (!item.session_name) return;
+    if (!["dispatched", "done", "error"].includes(item.status)) return;
+
+    async function fetchLog() {
+      try {
+        const r = await fetch(`/api/inbox/${item.id}/log?tail=80`);
+        if (!r.ok) return;
+        const data = await r.json();
+        setLogLines(data.lines || "");
+        setLogExists(data.exists || false);
+      } catch (_) {}
+    }
+
+    fetchLog();
+    if (item.status !== "dispatched") return;
+    const interval = setInterval(fetchLog, 3000);
+    return () => clearInterval(interval);
+  }, [item.id, item.session_name, item.status]);
 
   const st = STATUS_COLORS[item.status] || STATUS_COLORS.classified;
   const from = item.from_addr || "";
@@ -275,6 +312,14 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
                 ⬡ Attach
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Session Log */}
+        {item.session_name && ["dispatched", "done", "error"].includes(item.status) && (
+          <div className="modal-section">
+            <span className="modal-label">Session Log</span>
+            <LogPanel lines={logLines} exists={logExists} />
           </div>
         )}
 

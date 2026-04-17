@@ -411,6 +411,74 @@ body.has-bg::before {
   display: block;
 }
 
+.division-selector-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.division-logo-badge.clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.division-logo-badge.clickable:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.division-unset {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
+.division-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+.division-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.25rem;
+  min-width: 180px;
+  z-index: 200;
+  box-shadow: 0 4px 16px var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.division-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.division-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.division-option.active {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.division-option-logo {
+  height: 18px;
+  width: auto;
+  max-width: 90px;
+  object-fit: contain;
+}
+
 .card-next-step {
   font-size: 0.75rem;
   color: var(--next-step-color);
@@ -1429,6 +1497,19 @@ body.has-bg::before {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.625rem 0.75rem;
+}
+
+.inbox-modal-log {
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #1a1a2e;
+  color: #c8c8d4;
+  padding: 0.75rem;
+  border-radius: 6px;
 }
 
 .inbox-modal-error {
