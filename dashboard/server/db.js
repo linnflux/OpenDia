@@ -262,12 +262,17 @@ export function createProject({ name, companyName, divisionName, status = "in_pr
     throw new Error(`Invalid status: ${status}`);
   }
 
-  const result = db.prepare(`
-    INSERT INTO projects (name, company_id, division_id, status, notion_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(name, companyId, divisionId, status, notionId);
+  let newId;
+  db.transaction(() => {
+    const result = db.prepare(`
+      INSERT INTO projects (name, company_id, division_id, status, notion_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(name, companyId, divisionId, status, notionId);
+    newId = result.lastInsertRowid;
+    insertAtTopOfColumn(db, status, newId);
+  })();
 
-  return getProjectById(result.lastInsertRowid);
+  return getProjectById(newId);
 }
 
 // ── Inbox items ───────────────────────────────────────────────────────────────
@@ -440,12 +445,30 @@ export function ensureProjectForInbox(clientHint, divisionHint, shortSlug, subje
     if (division) divisionId = division.id;
   }
 
-  const result = db.prepare(`
-    INSERT INTO projects (name, company_id, division_id, status, notes, created_at, updated_at)
-    VALUES (?, ?, ?, 'wfhuman', ?, datetime('now'), datetime('now'))
-  `).run(name, companyId, divisionId, `Auto-created from inbox: ${subject}`);
+  let newId;
+  db.transaction(() => {
+    const result = db.prepare(`
+      INSERT INTO projects (name, company_id, division_id, status, notes, created_at, updated_at)
+      VALUES (?, ?, ?, 'wfhuman', ?, datetime('now'), datetime('now'))
+    `).run(name, companyId, divisionId, `Auto-created from inbox: ${subject}`);
+    newId = result.lastInsertRowid;
+    insertAtTopOfColumn(db, 'wfhuman', newId);
+  })();
 
-  return result.lastInsertRowid;
+  return newId;
+}
+
+function insertAtTopOfColumn(db, status, projectId) {
+  db.prepare("UPDATE projects SET sort_order = sort_order + 1 WHERE status = ? AND sort_order IS NOT NULL").run(status);
+  db.prepare("UPDATE projects SET sort_order = 0 WHERE id = ?").run(projectId);
+}
+
+export function moveProjectToTop(projectId, newStatus) {
+  const db = getDb();
+  db.transaction(() => {
+    insertAtTopOfColumn(db, newStatus, projectId);
+    db.prepare("UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, projectId);
+  })();
 }
 
 export function reorderProjects(status, ids) {

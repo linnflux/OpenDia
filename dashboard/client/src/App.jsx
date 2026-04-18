@@ -14,6 +14,7 @@ const DIVISION_COLORS = {
   "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
   "ADA Web Work": { bg: "#15489f", text: "#fff" },
   Linnflux: { bg: "#54af4d", text: "#fff" },
+  FluxCC: { bg: "#2d1a0e", text: "#d4a528" },
 };
 
 function getInitialTheme() {
@@ -94,6 +95,16 @@ export default function App() {
     } else {
       // Division filter
       filtered[status] = list.filter((p) => p.division === filter);
+    }
+  }
+
+  // Stable-sort each column: timer-active cards bubble to top, relative order preserved within each group
+  if (activeTimerIds.size > 0) {
+    for (const status of Object.keys(filtered)) {
+      const list = filtered[status];
+      const withTimer = list.filter((p) => activeTimerIds.has(p.id));
+      const without = list.filter((p) => !activeTimerIds.has(p.id));
+      if (withTimer.length > 0) filtered[status] = [...withTimer, ...without];
     }
   }
 

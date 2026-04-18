@@ -23,6 +23,7 @@ const DIVISION_COLORS = {
   "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
   "ADA Web Work": { bg: "#15489f", text: "#fff" },
   Linnflux: { bg: "#54af4d", text: "#fff" },
+  FluxCC: { bg: "#2d1a0e", text: "#d4a528" },
 };
 
 const DIVISION_LOGOS = {
@@ -32,6 +33,7 @@ const DIVISION_LOGOS = {
   "Bedford AI": "/divisions/bedford-ai-h.png",
   "ADA Web Work": "/divisions/ada-web-work.png",
   Linnflux: "/divisions/linnflux.png",
+  FluxCC: "/divisions/fluxcc.png",
 };
 
 function TimerEntry({ entry }) {

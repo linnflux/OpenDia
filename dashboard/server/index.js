@@ -2,7 +2,7 @@ import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop } from "./db.js";
 import { spawn } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
@@ -46,10 +46,19 @@ app.patch("/api/projects/:id", (req, res) => {
     if (!fields || Object.keys(fields).length === 0) {
       return res.status(400).json({ error: "No fields provided" });
     }
-    const updated = updateProject(id, fields);
-    if (!updated) {
-      return res.status(404).json({ error: "project not found" });
+
+    if (fields.status !== undefined) {
+      moveProjectToTop(id, fields.status);
+      const { status: _s, ...rest } = fields;
+      if (Object.keys(rest).length > 0) {
+        const updated = updateProject(id, rest);
+        if (!updated) return res.status(404).json({ error: "project not found" });
+      }
+    } else {
+      const updated = updateProject(id, fields);
+      if (!updated) return res.status(404).json({ error: "project not found" });
     }
+
     res.json({ ok: true });
   } catch (err) {
     console.error("PATCH /api/projects/:id error:", err.message);

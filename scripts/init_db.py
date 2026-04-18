@@ -94,6 +94,7 @@ def init_db(force=False):
         ("AmPen", "Penetration Testing"),
         ("Bedford AI", "AI & Automation"),
         ("ADA Web Work", "Compliance"),
+        ("FluxCC", "Astro static site templates & client website builds"),
     ]
     for name, desc in divisions:
         cur.execute(

@@ -47,6 +47,7 @@ cat > "$CLAUDE_FILTER" <<'FILTER'
 + agents/**
 + skills/**
 + plugins/**
++ hooks/**
 + logs/**
 + memory/**
 + plans/**

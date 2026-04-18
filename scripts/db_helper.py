@@ -140,8 +140,10 @@ def add_project(name, company_id=None, division=None, status="active", notes=Non
         "INSERT INTO projects (name, company_id, division_id, status, notes) VALUES (?, ?, ?, ?, ?)",
         (name, company_id, division_id, status, notes),
     )
-    conn.commit()
     pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute("UPDATE projects SET sort_order = sort_order + 1 WHERE status = ? AND sort_order IS NOT NULL", (status,))
+    conn.execute("UPDATE projects SET sort_order = 0 WHERE id = ?", (pid,))
+    conn.commit()
     conn.close()
     print(f"Added project '{name}' (id={pid})")
     return pid

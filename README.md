@@ -21,6 +21,8 @@ OpenDia is designed to be run by an **Operator**: a trained professional inside 
 
 Claude Code runs on a persistent Linux Mint server (`opendia`) on a [Tailscale](https://tailscale.com) mesh network. The Operator SSHs in from any machine — desktop, laptop, or mobile — and attaches to long-running `tmux` sessions, one per project or client context. Sessions survive disconnects, sleep, and machine switches. The server is the single point of execution; client machines are just terminals.
 
+Claude Code sessions are named to match their tmux session — `claude -n acme` at start, `claude --resume acme` on reattach. This ties conversation history to the project context so nothing is lost between reconnects.
+
 ```
 laptop ~$ ssh youruser@opendia
 opendia ~$ tmux attach -t acme
@@ -44,7 +46,7 @@ A local SQLite database stores the canonical list of companies, people, projects
 
 ### Internal Time Tracking
 
-Time entries live in daily markdown files with YAML frontmatter. Each running timer has a companion `.json` state file that persists until the work is complete — timers represent open engagements, not stopwatch sessions. A timer might stay open for hours, days, or weeks as work progresses across multiple sessions.
+Time entries live in daily markdown files with YAML frontmatter. Each running timer has a companion `.json` state file that persists until the work is complete — timers represent open engagements, not stopwatch sessions. The state file includes a `tmux_session` field that ties it to the originating session, enabling commands like `/od-stop` to auto-select the correct timer when multiple are running. A timer might stay open for hours, days, or weeks as work progresses across multiple sessions.
 
 Every entry records: client, project, division, task, estimated minutes, start/end, duration, billable flag, and notes. The `estimated_minutes` field drives billing — it captures how long the task *should* take a professional developer, not the wall-clock time. Actual elapsed time is tracked for internal reference. If a second timer is started for the same client, Claude flags it as a potential duplicate. This runs alongside your external time tracker, not instead of it — it's your own internal record with fields external tools don't track.
 
@@ -123,8 +125,8 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/monthly-billing` | Generate and push billing data for the previous month to the Billing Master sheet. |
 | `/notion-new` | *Deprecated — use `/od-go` instead.* |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
-| `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
-| `/od-stop` | Unified work stop. Stops the running timer, writes justified notes (bullets must account for billed duration), updates the dashboard card's next step, and logs a dated toggle block to the linked Notion task. `backfill` mode does a one-shot historical sync of all prior entries. |
+| `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. Names the Claude Code session to match the current tmux session, patches `tmux_session` on the dashboard card, and embeds the session name in the timer state file. |
+| `/od-stop` | Unified work stop. Stops the running timer, writes justified notes (bullets must account for billed duration), updates the dashboard card's next step, and logs a dated toggle block to the linked Notion task. When multiple timers are running, auto-selects the correct one by matching the current tmux session name. `backfill` mode does a one-shot historical sync of all prior entries. |
 | `/card-update` | Update a project card from the CLI. Auto-detects project from the current tmux session, shows card state, accepts freeform updates ("next step is X, status wfhuman"). Optional `--sync` flag triggers full AI-powered sync (Gmail + Notion + analysis) before prompting. |
 | `/od-next-steps` | Research and set a project's next step from timers, Notion, and notes. Accepts a project name/ID, or `--all` for a full scan. |
 | `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |

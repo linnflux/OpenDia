@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const DIVISIONS = [
-  "WordFlux", "WatchThreat", "AmPen", "Bedford AI", "ADA Web Work", "Linnflux", "unknown",
+  "WordFlux", "WatchThreat", "AmPen", "Bedford AI", "ADA Web Work", "Linnflux", "FluxCC", "unknown",
 ];
 
 const STATUS_COLORS = {
