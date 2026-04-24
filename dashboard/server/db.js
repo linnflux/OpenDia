@@ -13,9 +13,9 @@ function getDb() {
 }
 
 const GET_ALL_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at,
          c.name AS company_name, c.short_name AS company_short,
-         c.notion_id AS company_notion_id,
+         c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
          (SELECT COUNT(*) FROM inbox_items WHERE project_id = p.id AND status NOT IN ('done', 'dismissed')) AS inbox_count
   FROM projects p
@@ -27,9 +27,9 @@ const GET_ALL_PROJECTS = `
 const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
 
 const GET_ACTIVE_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at,
          c.name AS company_name, c.short_name AS company_short,
-         c.notion_id AS company_notion_id,
+         c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
          (SELECT COUNT(*) FROM inbox_items WHERE project_id = p.id AND status NOT IN ('done', 'dismissed')) AS inbox_count
   FROM projects p
@@ -300,6 +300,9 @@ export function ensureInboxTable() {
       timer_marker          TEXT,
       project_hint          TEXT,
       project_id            INTEGER REFERENCES projects(id),
+      dev_preview_url       TEXT,
+      dev_branch            TEXT,
+      repo_path             TEXT,
       created_at            DATETIME DEFAULT (datetime('now')),
       updated_at            DATETIME DEFAULT (datetime('now'))
     )
@@ -324,6 +327,15 @@ export function ensureInboxTable() {
   if (!cols.includes("project_id")) {
     db.exec("ALTER TABLE inbox_items ADD COLUMN project_id INTEGER REFERENCES projects(id)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_items_project_id ON inbox_items(project_id)");
+  }
+  if (!cols.includes("dev_preview_url")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN dev_preview_url TEXT");
+  }
+  if (!cols.includes("dev_branch")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN dev_branch TEXT");
+  }
+  if (!cols.includes("repo_path")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN repo_path TEXT");
   }
 }
 
@@ -368,6 +380,7 @@ const INBOX_UPDATABLE = new Set([
   "client_hint", "division_hint", "priority", "notes",
   "requires_server_access", "estimated_minutes", "timer_marker",
   "project_hint", "project_id",
+  "dev_preview_url", "dev_branch", "repo_path",
 ]);
 
 export function updateInboxItem(id, fields) {

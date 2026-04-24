@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useProjects } from "./hooks/useProjects.js";
 import { useInbox } from "./hooks/useInbox.js";
+import { useCompanies } from "./hooks/useCompanies.js";
 import Board from "./components/Board.jsx";
 import CardModal from "./components/CardModal.jsx";
 import InboxCard from "./components/InboxCard.jsx";
 import InboxModal from "./components/InboxModal.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
+import Clients from "./components/Clients.jsx";
 
 const DIVISION_COLORS = {
   WordFlux: { bg: "#3b82f6", text: "#0a1628" },
@@ -26,9 +28,11 @@ function getInitialTheme() {
 export default function App() {
   const { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh } = useProjects();
   const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
+  const companies = useCompanies(projects);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [selectedInboxItem, setSelectedInboxItem] = useState(null);
-  const [view, setView] = useState("board"); // "board" | "inbox"
+  const [pendingClientKey, setPendingClientKey] = useState(null);
+  const [view, setView] = useState("board"); // "board" | "inbox" | "clients"
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [filter, setFilter] = useState("all");
@@ -148,6 +152,12 @@ export default function App() {
     setSelectedProjectId(null);
   }
 
+  // Called by Ctrl+K to jump to a company in the Clients view
+  function openClientPanel(companyKey) {
+    setView("clients");
+    setPendingClientKey(companyKey);
+  }
+
   function handleProjectClick(projectId) {
     // From InboxModal: open CardModal for the linked project
     setSelectedProjectId(projectId);
@@ -249,6 +259,7 @@ export default function App() {
             <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
               Inbox{pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
             </button>
+            <button className={`view-toggle-btn${view === "clients" ? " active" : ""}`} onClick={() => setView("clients")}>Clients</button>
           </div>
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>
@@ -263,7 +274,7 @@ export default function App() {
         ) : (
           <Board grouped={filtered} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} activeTimerIds={activeTimerIds} />
         )
-      ) : (
+      ) : view === "inbox" ? (
         <div className="inbox-view">
           {inboxLoading ? (
             <div className="loading">Loading inbox...</div>
@@ -277,6 +288,13 @@ export default function App() {
             </div>
           )}
         </div>
+      ) : (
+        <Clients
+          projects={projects}
+          pendingKey={pendingClientKey}
+          onPendingConsumed={() => setPendingClientKey(null)}
+          onProjectClick={handleCardClick}
+        />
       )}
 
       {selectedProject && (
@@ -304,7 +322,9 @@ export default function App() {
         onClose={() => setPaletteOpen(false)}
         onRefresh={refresh}
         projects={projects}
+        companies={companies}
         onSelectProject={(p) => setSelectedProjectId(p.id)}
+        onSelectCompany={(key) => { setPaletteOpen(false); openClientPanel(key); }}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
       />

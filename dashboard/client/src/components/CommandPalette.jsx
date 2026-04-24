@@ -22,7 +22,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onT
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, onSelectProject, theme, onToggleTheme }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, theme, onToggleTheme }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -144,6 +144,23 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
     return scored.slice(0, 8).map((s) => s.p);
   }, [query, projects]);
 
+  const filteredCompanies = useMemo(() => {
+    if (!query || !companies) return [];
+    const q = query.toLowerCase();
+    const scored = [];
+    for (const c of companies) {
+      let score = 0;
+      if ((c.companyName || "").toLowerCase().includes(q)) score += 3;
+      if ((c.companyShort || "").toLowerCase().includes(q)) score += 3;
+      if (score > 0) {
+        if (c.openProjects.length > 0) score += 2;
+        scored.push({ c, score });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 5).map((s) => s.c);
+  }, [query, companies]);
+
   const filtered = useMemo(() => {
     const projectItems = filteredProjects.map((p) => ({
       id: `project-${p.id}`,
@@ -153,8 +170,17 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, onS
       tmux: p.tmux_session || "",
       action: () => { onSelectProject(p); onClose(); },
     }));
-    return [...filteredActions, ...projectItems];
-  }, [filteredActions, filteredProjects, onSelectProject, onClose]);
+    const companyItems = filteredCompanies.map((c) => ({
+      id: `company-${c.key}`,
+      icon: "\u{1F3E2}",
+      label: c.companyName,
+      sublabel: c.openProjects.length > 0
+        ? `Client \u00b7 ${c.openProjects.length} open`
+        : "Client \u00b7 no open work",
+      action: () => { onSelectCompany(c.key); },
+    }));
+    return [...filteredActions, ...projectItems, ...companyItems];
+  }, [filteredActions, filteredProjects, filteredCompanies, onSelectProject, onSelectCompany, onClose]);
 
   useEffect(() => {
     setActiveIndex(0);
