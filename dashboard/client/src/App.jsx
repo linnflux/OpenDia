@@ -1,4 +1,34 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+
+function BoardIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="3.5" height="12" rx="1" fill="currentColor" opacity="0.9" />
+      <rect x="5.25" y="1" width="3.5" height="9" rx="1" fill="currentColor" opacity="0.9" />
+      <rect x="9.5" y="1" width="3.5" height="11" rx="1" fill="currentColor" opacity="0.9" />
+    </svg>
+  );
+}
+
+function InboxIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 9h3l1.5 2.5h3L10 9h3V12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V9z" />
+      <path d="M4 5l3 3 3-3M7 1v7" />
+    </svg>
+  );
+}
+
+function ClientsIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="5" cy="4.5" r="2" />
+      <path d="M1 12c0-2.2 1.8-4 4-4s4 1.8 4 4" />
+      <circle cx="10.5" cy="4.5" r="1.5" />
+      <path d="M13 12c0-1.7-1.1-3.1-2.5-3.5" />
+    </svg>
+  );
+}
 import { useProjects } from "./hooks/useProjects.js";
 import { useInbox } from "./hooks/useInbox.js";
 import { useCompanies } from "./hooks/useCompanies.js";
@@ -171,6 +201,22 @@ export default function App() {
           <img src="/opendia_mark.svg" alt="OpenDia" className="app-mark" />
           <h1 className="app-wordmark"><span className="wm-open">Open</span><span className="wm-dia">Dia</span></h1>
         </div>
+        <nav className="view-toggle view-toggle-centered" aria-label="View">
+          <button className={`view-toggle-btn${view === "board" ? " active" : ""}`} onClick={() => setView("board")}>
+            <BoardIcon />
+            <span>Board</span>
+          </button>
+          <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
+            <InboxIcon />
+            <span>Inbox</span>
+            {pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
+          </button>
+          <button className={`view-toggle-btn${view === "clients" ? " active" : ""}`} onClick={() => setView("clients")}>
+            <ClientsIcon />
+            <span>Clients</span>
+          </button>
+        </nav>
+
         <div className="app-header-actions">
           {view === "inbox" && (
             <div className="filter-dropdown-wrap">
@@ -253,14 +299,6 @@ export default function App() {
               )}
             </div>
           )}
-          {/* View toggle */}
-          <div className="view-toggle">
-            <button className={`view-toggle-btn${view === "board" ? " active" : ""}`} onClick={() => setView("board")}>Board</button>
-            <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
-              Inbox{pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
-            </button>
-            <button className={`view-toggle-btn${view === "clients" ? " active" : ""}`} onClick={() => setView("clients")}>Clients</button>
-          </div>
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>
             <kbd className="cp-trigger-kbd">Ctrl+K</kbd>
