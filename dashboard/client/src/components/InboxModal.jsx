@@ -386,19 +386,25 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
         )}
 
         {/* Server-work gate */}
-        {isServerWork && item.status === "classified" && (
+        {isServerWork && ["classified", "error"].includes(item.status) && (
           <div className="inbox-server-gate">
             <div className="inbox-server-gate-body">
               <span className="inbox-card-server-flag">SERVER</span>
               <span className="inbox-server-gate-info">
-                This task requires server access. Review the directive above, then approve to dispatch.
+                {item.status === "error"
+                  ? "Previous server-work run errored. Review the directive and notes above, then re-dispatch."
+                  : "This task requires server access. Review the directive above, then approve to dispatch."}
               </span>
               <button
                 className="inbox-approve-btn"
                 onClick={handleApproveServer}
                 disabled={approving}
               >
-                {approving ? "Dispatching…" : "Approve & Dispatch"}
+                {approving
+                  ? "Dispatching…"
+                  : item.status === "error"
+                    ? "↺ Re-dispatch"
+                    : "Approve & Dispatch"}
               </button>
             </div>
             {approveResult?.ok && (
