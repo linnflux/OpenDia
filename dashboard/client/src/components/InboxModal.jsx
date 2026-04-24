@@ -9,6 +9,7 @@ const STATUS_COLORS = {
   dispatched: { bg: "#1a3a2a", text: "#4ade80", label: "Running" },
   done:       { bg: "#1a2e1a", text: "#86efac", label: "Done" },
   error:      { bg: "#3b1a1a", text: "#f87171", label: "Error" },
+  deployed:   { bg: "#1a2a3a", text: "#38bdf8", label: "Deployed" },
 };
 
 function extractDomain(fromAddr) {
@@ -45,6 +46,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   const [aliasSaved, setAliasSaved] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveResult, setApproveResult] = useState(null); // { ok } | { error }
+  const [deployApproving, setDeployApproving] = useState(false);
+  const [deployResult, setDeployResult] = useState(null); // { ok } | { error }
   const [logLines, setLogLines] = useState("");
   const [logExists, setLogExists] = useState(false);
 
@@ -59,6 +62,7 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
     setAliasPrompt(null);
     setAliasSaved(false);
     setApproveResult(null);
+    setDeployResult(null);
     setLogLines("");
     setLogExists(false);
   }, [item.id]);
@@ -174,6 +178,26 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
 
   const isServerWork = item.requires_server_access === 1 || item.requires_server_access === true;
   const canRedispatch = ["classified", "done", "error", "dispatched"].includes(item.status) && !isServerWork;
+  const hasPreview = !!item.dev_preview_url;
+
+  async function handleApproveDeploy() {
+    setDeployApproving(true);
+    setDeployResult(null);
+    try {
+      const r = await fetch(`/api/inbox/${item.id}/approve-deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Deploy failed");
+      setDeployResult({ ok: true });
+    } catch (e) {
+      setDeployResult({ error: e.message || "Deploy failed" });
+    } finally {
+      setDeployApproving(false);
+    }
+  }
 
   async function handleApproveServer() {
     setApproving(true);
@@ -320,6 +344,44 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
           <div className="modal-section">
             <span className="modal-label">Session Log</span>
             <LogPanel lines={logLines} exists={logExists} />
+          </div>
+        )}
+
+        {/* FluxCC dev preview + deploy */}
+        {hasPreview && (
+          <div className="inbox-server-gate">
+            <div className="inbox-server-gate-body">
+              <span className="inbox-card-server-flag" style={{ background: "#1e3a5f", color: "#60a5fa" }}>PREVIEW</span>
+              <span className="inbox-server-gate-info">
+                <a href={item.dev_preview_url} target="_blank" rel="noopener noreferrer" style={{ color: "#38bdf8", wordBreak: "break-all" }}>
+                  {item.dev_preview_url}
+                </a>
+                {item.dev_branch && <span style={{ marginLeft: "0.5em", opacity: 0.6, fontSize: "0.85em" }}>({item.dev_branch})</span>}
+              </span>
+              {item.status !== "deployed" && (
+                <button
+                  className="inbox-approve-btn"
+                  style={{ background: "#166534", color: "#4ade80" }}
+                  onClick={handleApproveDeploy}
+                  disabled={deployApproving}
+                >
+                  {deployApproving ? "Deploying…" : "Approve & Deploy"}
+                </button>
+              )}
+              {item.status === "deployed" && (
+                <span className="inbox-card-status" style={{ background: "#1a2a3a", color: "#38bdf8" }}>Deployed</span>
+              )}
+            </div>
+            {deployResult?.ok && (
+              <div className="inbox-server-result inbox-server-result-ok">
+                Merged to main — production deploy triggered.
+              </div>
+            )}
+            {deployResult?.error && (
+              <div className="inbox-server-result inbox-server-result-err">
+                {deployResult.error}
+              </div>
+            )}
           </div>
         )}
 

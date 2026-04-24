@@ -131,6 +131,22 @@ else
     info "Drive db verified: ${DRIVE_SIZE} bytes"
 fi
 
+# --- Step 5: Sync FluxCC templates + client builds ---
+info "Syncing ~/FluxCC/ to gdrive:FluxCC/ ..."
+
+FLUXCC_DIR="$HOME/FluxCC"
+if [ -d "$FLUXCC_DIR" ]; then
+    rclone sync "$FLUXCC_DIR/" "gdrive:FluxCC/" \
+        --exclude "node_modules/**" \
+        --exclude "dist/**" \
+        --exclude ".astro/**" \
+        --exclude "package-lock.json" \
+        --exclude ".git/**" \
+        -v 2>&1 | tail -5
+else
+    warn "~/FluxCC not found — skipping"
+fi
+
 # --- Summary ---
 echo ""
 info "Export complete. Drive contents:"
@@ -140,5 +156,8 @@ rclone ls "gdrive:Claude-Config/" 2>/dev/null | wc -l | xargs -I{} echo "    {} 
 echo ""
 echo "  gdrive:OpenDia/"
 rclone ls "gdrive:OpenDia/" 2>/dev/null | wc -l | xargs -I{} echo "    {} files"
+echo ""
+echo "  gdrive:FluxCC/"
+rclone ls "gdrive:FluxCC/" 2>/dev/null | wc -l | xargs -I{} echo "    {} files"
 echo ""
 info "Ready to run migrate-setup.sh on the new machine."

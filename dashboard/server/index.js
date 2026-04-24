@@ -3,7 +3,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop } from "./db.js";
-import { spawn } from "child_process";
+import { spawn, exec } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
@@ -441,6 +441,53 @@ app.post("/api/inbox/:id/approve-server", (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("POST /api/inbox/:id/approve-server error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/inbox/:id/preview", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { dev_preview_url, dev_branch, repo_path } = req.body;
+    if (!dev_preview_url) return res.status(400).json({ error: "dev_preview_url required" });
+    const updated = updateInboxItem(id, { dev_preview_url, dev_branch, repo_path });
+    if (!updated) return res.status(404).json({ error: "inbox item not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("PATCH /api/inbox/:id/preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/inbox/:id/approve-deploy", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const item = getInboxItemById(id);
+    if (!item) return res.status(404).json({ error: "inbox item not found" });
+    if (!item.dev_branch) return res.status(400).json({ error: "No dev branch recorded for this item" });
+    if (!item.repo_path) return res.status(400).json({ error: "No repo_path recorded for this item" });
+
+    const repoDir = resolve(process.env.HOME, "FluxCC", item.repo_path);
+    const script = [
+      `cd "${repoDir}"`,
+      `git checkout main`,
+      `git pull origin main`,
+      `git merge ${item.dev_branch} --no-edit`,
+      `git push origin main`,
+      `git branch -d ${item.dev_branch}`,
+      `git push origin --delete ${item.dev_branch}`,
+    ].join(" && ");
+
+    exec(script, (err, stdout, stderr) => {
+      if (err) {
+        console.error("approve-deploy exec error:", stderr);
+        return res.status(500).json({ error: stderr || err.message });
+      }
+      updateInboxItem(id, { status: "deployed" });
+      res.json({ ok: true, output: stdout });
+    });
+  } catch (err) {
+    console.error("POST /api/inbox/:id/approve-deploy error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
