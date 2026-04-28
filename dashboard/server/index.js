@@ -1,7 +1,9 @@
+import http from "http";
 import express from "express";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
+import { mountTerminal } from "./terminal.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop } from "./db.js";
 import { spawn, exec } from "child_process";
 import { readFileSync, existsSync } from "fs";
@@ -601,6 +603,10 @@ app.get("/api/inbox/:id/log", (req, res) => {
   }
 });
 
+// Terminal WebSocket + REST endpoints (must be before static catch-all)
+const server = http.createServer(app);
+mountTerminal(server, app);
+
 // Serve static files in production
 const distPath = resolve(__dirname, "..", "client", "dist");
 app.use(express.static(distPath));
@@ -608,6 +614,6 @@ app.get("*", (_req, res) => {
   res.sendFile(resolve(distPath, "index.html"));
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`OpenDia Dashboard API listening on http://0.0.0.0:${PORT}`);
 });

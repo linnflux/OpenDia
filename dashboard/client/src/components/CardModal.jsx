@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import TerminalPanel from "./TerminalPanel.jsx";
 
 const STATUSES = [
   { key: "in_progress", label: "In Progress", color: "#3b82f6" },
@@ -117,6 +118,7 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [syncData, setSyncData] = useState(null);
   const [notionTitle, setNotionTitle] = useState(null);
   const [divisionOpen, setDivisionOpen] = useState(false);
+  const [tab, setTab] = useState("details");
   const backdropRef = useRef(null);
   const notesRef = useRef(null);
 
@@ -460,6 +462,25 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
           )}
         </div>
 
+        <div className="modal-tabs">
+          <button className={`modal-tab${tab === "details" ? " active" : ""}`} onClick={() => setTab("details")}>
+            Details
+          </button>
+          <button
+            className={`modal-tab${tab === "terminal" ? " active" : ""}`}
+            onClick={() => setTab("terminal")}
+            disabled={!project.tmux_session}
+            title={project.tmux_session ? undefined : "Set a tmux session to enable"}
+          >
+            Terminal
+            {project.tmux_session && <span className="modal-tab-dot" />}
+          </button>
+        </div>
+
+        {tab === "terminal" && <TerminalPanel project={project} hasActiveTimer={hasActiveTimer} />}
+
+        {tab === "details" && <>
+
         <div className="modal-section">
           <label className="modal-label">Status</label>
           <div className="modal-status-row">
@@ -794,6 +815,8 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
             )}
           </div>
         )}
+
+        </>}
 
         <div className="modal-footer">
           <span className="modal-id">ID: {project.id}</span>
