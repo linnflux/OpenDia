@@ -484,6 +484,19 @@ export function moveProjectToTop(projectId, newStatus) {
   })();
 }
 
+export function getStaleInProgressProjects(days = 14) {
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.updated_at, p.next_step,
+           c.name AS company_name, d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE p.status = 'in_progress'
+      AND p.updated_at < datetime('now', ?)
+    ORDER BY p.updated_at ASC
+  `).all(`-${parseInt(days, 10)} days`);
+}
+
 export function reorderProjects(status, ids) {
   if (!VALID_STATUSES.has(status)) {
     throw new Error(`Invalid status: ${status}`);

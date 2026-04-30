@@ -223,6 +223,21 @@ Returns `{ "source": "loopback" }` for local script requests.
 | `GET` | `/api/client-aliases` | All learned sender → client mappings. |
 | `POST` | `/api/client-aliases` | Add or update an alias. Body: `{ match_type, match_value, client_hint, division_hint, note }` |
 | `GET` | `/api/file` | Serve files under `~/OpenDia/` by `?path=` |
+| `GET` | `/api/analytics/hours-by-client` | Hours grouped by client × ISO week. `?from=YYYY-MM-DD&to=YYYY-MM-DD`. Returns `[{ client, weeks: [{ week, billable_min, nonbillable_min, entries }] }]` sorted by total hours desc. |
+| `GET` | `/api/analytics/estimate-variance` | Estimate vs actual variance per project. `?from=&to=`. Returns `[{ client, project, estimated_min, actual_min, variance_min, variance_pct, entries }]` sorted by abs(variance) desc. |
+| `GET` | `/api/analytics/stale` | In-progress cards not updated in `?days=` (default 14). Returns `[{ id, name, company_name, division, updated_at, next_step }]`. |
+
+## Analytics View
+
+An internal-only analytics screen accessible via **Ctrl+K → Open Analytics**. It does not appear in the top nav (intentionally obfuscated).
+
+Three sections, filterable by date range (defaults to last 8 weeks):
+
+- **Hours by Client × Week** — billable and non-billable minutes per client per ISO week, sourced from daily `.md` timer files. Useful for weekly billing review.
+- **Estimate vs Actual** — compares `estimated_minutes` from timer entries against actual `duration`, per project. Top variances surfaced first. Useful for spotting scope creep or systematic mis-estimation.
+- **Stale in-progress cards** — board cards with `status = in_progress` and `updated_at` older than the configured threshold (default 14 days). Useful for pruning abandoned work.
+
+Exit by clicking any top-nav button (Board / Inbox / Clients).
 
 ## `/od-go` and `/od-stop` Integration
 

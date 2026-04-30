@@ -38,6 +38,7 @@ import InboxCard from "./components/InboxCard.jsx";
 import InboxModal from "./components/InboxModal.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
 import Clients from "./components/Clients.jsx";
+import Analytics from "./components/Analytics.jsx";
 
 const DIVISION_COLORS = {
   WordFlux: { bg: "#3b82f6", text: "#0a1628" },
@@ -336,6 +337,8 @@ export default function App() {
             </div>
           )}
         </div>
+      ) : view === "analytics" ? (
+        <Analytics />
       ) : (
         <Clients
           projects={projects}
@@ -375,6 +378,7 @@ export default function App() {
         onSelectCompany={(key) => { setPaletteOpen(false); openClientPanel(key); }}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        onOpenAnalytics={() => { setPaletteOpen(false); setView("analytics"); }}
       />
     </div>
   );

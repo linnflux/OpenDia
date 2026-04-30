@@ -5,10 +5,10 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects } from "./db.js";
 import { spawn, exec } from "child_process";
 import { readFileSync, existsSync } from "fs";
-import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries } from "./timers.js";
+import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getHoursByClientWeek, getEstimateVariance } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
 import { analyzeSync } from "./ai.js";
@@ -292,6 +292,40 @@ app.post("/api/timers/backfill", async (_req, res) => {
     });
   } catch (err) {
     console.error("POST /api/timers/backfill error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Analytics endpoints ───────────────────────────────────────────────────────
+
+app.get("/api/analytics/hours-by-client", async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const data = await getHoursByClientWeek({ from, to });
+    res.json(data);
+  } catch (err) {
+    console.error("GET /api/analytics/hours-by-client error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/analytics/estimate-variance", async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const data = await getEstimateVariance({ from, to });
+    res.json(data);
+  } catch (err) {
+    console.error("GET /api/analytics/estimate-variance error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/analytics/stale", (req, res) => {
+  try {
+    const days = parseInt(req.query.days || "14", 10);
+    res.json(getStaleInProgressProjects(days));
+  } catch (err) {
+    console.error("GET /api/analytics/stale error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

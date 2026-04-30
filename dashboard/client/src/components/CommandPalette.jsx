@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 const BG_STORAGE_KEY = "opendia-bg-image";
 const BG_POSITION_KEY = "opendia-bg-position";
 
-function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onToggleTheme, theme }) {
+function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onToggleTheme, theme, onOpenAnalytics }) {
   return [
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", shortcut: "R", action: onRefresh },
     {
@@ -12,6 +12,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onT
       label: theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode",
       action: onToggleTheme,
     },
+    { id: "analytics", icon: "\u{1F4CA}", label: "Open Analytics", action: onOpenAnalytics },
     { id: "upload-bg", icon: "\u{1F5BC}", label: "Upload Background Image", action: onUploadBg },
     ...(hasBg
       ? [
@@ -22,7 +23,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onT
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, theme, onToggleTheme }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, theme, onToggleTheme, onOpenAnalytics }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -118,8 +119,9 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
       hasBg: !!bgImage,
       onToggleTheme: () => { onToggleTheme(); onClose(); },
       theme,
+      onOpenAnalytics: () => { onOpenAnalytics?.(); onClose(); },
     }),
-    [bgImage, bgPosition, onRefresh, onClose, onToggleTheme, theme]
+    [bgImage, bgPosition, onRefresh, onClose, onToggleTheme, theme, onOpenAnalytics]
   );
 
   const filteredActions = useMemo(() => {
