@@ -533,9 +533,9 @@ body.has-bg::before {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  width: 90%;
-  max-width: 520px;
-  max-height: 85vh;
+  width: 95%;
+  max-width: 780px;
+  height: 92vh;
   overflow-y: auto;
   padding: 1.5rem;
   position: relative;
@@ -1120,6 +1120,20 @@ body.has-bg::before {
   border-radius: 4px;
   border: 1px solid var(--border);
   color: var(--text-faint);
+}
+
+.app-user-pill {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 0.2rem 0.65rem;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Command Palette dialog */
@@ -2690,31 +2704,37 @@ body.has-bg::before {
 /* ── Modal tabs ──────────────────────────────────────────────────────────── */
 .modal-tabs {
   display: flex;
-  gap: 0;
+  gap: 0.25rem;
   border-bottom: 1px solid var(--border);
-  margin: 0.5rem 0 0;
-  padding: 0 1.25rem;
+  margin: 0.75rem 0 1.25rem;
+  padding: 0 0.5rem;
 }
 .modal-tab {
   position: relative;
-  padding: 0.45rem 1rem;
+  padding: 0.5rem 1rem;
   font-size: 0.78rem;
   font-weight: 500;
   color: var(--text-muted);
   background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
   margin-bottom: -1px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  transition: color 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
-.modal-tab:hover { color: var(--text-primary); }
+.modal-tab:hover:not(.active):not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
 .modal-tab.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--bg-card);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-card);
 }
 .modal-tab:disabled {
   opacity: 0.35;
@@ -2801,7 +2821,18 @@ body.has-bg::before {
 .tp-btn-stop    { background: #ef4444; color: #fff; }
 .tp-btn-release { background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border); }
 .tp-btn-cancel  { background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border); }
+.tp-btn-redraw  { background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border); }
 .tp-locked-hint, .tp-busy-hint { font-size: 0.68rem; color: var(--text-muted); }
+.tp-stopping-banner {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  border-radius: 999px;
+}
 
 .tp-confirm-bar {
   display: flex;
@@ -2846,11 +2877,29 @@ body.has-bg::before {
 
 .tp-xterm-wrap {
   flex: 1;
-  min-height: 320px;
+  min-height: 420px;
   overflow: hidden;
   padding: 0.5rem 0.25rem 0.25rem;
   background: #0d1117;
+  position: relative;
 }
 /* Let xterm own its own scroll */
 .tp-xterm-wrap .xterm { height: 100%; }
 .tp-xterm-wrap .xterm-viewport { overflow-y: auto !important; }
+.tp-dead-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #6e7681);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+.tp-dead-overlay code {
+  color: #ff7b72;
+  background: rgba(255,123,114,0.1);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 3px;
+}

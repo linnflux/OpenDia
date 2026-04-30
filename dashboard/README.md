@@ -4,9 +4,9 @@ A Kanban-style project board for OpenDia. Displays projects from the SQLite data
 
 ## Stack
 
-- **Frontend:** React 18, Vite, @dnd-kit (drag-and-drop)
-- **Backend:** Express, better-sqlite3
-- **Port:** 8038 (serves API + static files in production)
+- **Frontend:** React 18, Vite, @dnd-kit (drag-and-drop), @xterm/xterm (terminal)
+- **Backend:** Express, better-sqlite3, ws (WebSocket), node-pty (tmux pty streams)
+- **Port:** 8038 (serves API + static files + WebSocket upgrades in production)
 
 ## Setup
 
@@ -76,6 +76,9 @@ Drag a card between columns to update its status.
 
 Click a card to open a detail modal with:
 
+The modal has two tabs:
+
+**Details tab** (default):
 - **Status** — click to change column
 - **Name** — click to edit inline
 - **Tmux Session** — click to edit
@@ -87,6 +90,8 @@ Click a card to open a detail modal with:
 - **Sync** — pulls Notion task data, recent Gmail threads, and runs AI analysis to suggest next steps and surface change requests
 - **Footer** — shows inbox-origin subject if the project was auto-created by the inbox pipeline
 
+**Terminal tab** (enabled only when `tmux_session` is set — see below).
+
 ## Active Timer Indicators
 
 Cards with a running timer display a Linnflux green (`#54af4d`) border. The board fetches active timer state from `/api/timers/active` on mount and on window focus, so the indicators update when switching back to the dashboard after starting or stopping a timer.
@@ -94,6 +99,97 @@ Cards with a running timer display a Linnflux green (`#54af4d`) border. The boar
 Timer state is read from `.timer-*.json` files in `~/OpenDia/Time/`. Files without an `end` field are considered active.
 
 Opening a card with an active timer shows a subtle rotating conic-gradient border on the modal, built with a CSS `@property`-registered angle and a 6s linear animation. Users with `prefers-reduced-motion: reduce` get a static solid green border instead.
+
+## Terminal Tab
+
+The Terminal tab embeds the project's live tmux session directly in the card modal using a browser-based xterm.js terminal streamed over WebSocket.
+
+### States
+
+| Pill | Meaning |
+|------|---------|
+| Watching · read-only | Connected; pty spawned with `tmux attach -r` — keystrokes cannot reach the session even if WS code is bypassed |
+| Interactive · live | This tab holds the control lock; input is forwarded to tmux |
+| Locked by another tab | Another browser session holds control — pill shows `By user@linnflux.com · Taken HH:MM` |
+| Connecting | Transient state during lock acquire |
+| Disconnected | WS closed; auto-reconnects with 1s → 2s → 5s → 10s backoff |
+
+### Take Control
+
+Clicking **Take Control** (with an optional one-line task description):
+1. `POST /api/projects/:id/terminal/take-control` — acquires the server-side lock.
+2. If no timer is already running for the session, one is started automatically (pulls client, division, and next_step from the card — same as `/od-go`).
+3. The pty is upgraded from `tmux attach -r` to `tmux attach` (read-write) and a `claim-control` WS message binds the socket to the lock.
+4. A second tab trying to Take Control receives a 409 and shows "Locked by another tab."
+
+The lock auto-releases after 5 minutes of keyboard inactivity, with a warning at 4:00 remaining.
+
+### Stop & Exit
+
+Clicking **Stop & Exit** and confirming:
+1. `POST /api/projects/:id/terminal/send-od-stop` — injects `/od-stop\n` into the tmux session via `tmux send-keys`.
+2. The server polls for the timer state file to be deleted (proof that the embedded Claude Code session finished `/od-stop`) — 2s interval, 3-minute timeout.
+3. On success, the control lock is released and all viewers drop back to Watching.
+4. On timeout, a fallback dialog appears — the operator can enter notes manually to close the timer without Notion sync.
+
+**Release** discards the control lock without stopping the timer, for context-switching between sessions.
+
+### Redraw
+
+The **Redraw** button (always visible) fixes display corruption that can occur when an external `tmux attach` client was open at a different terminal size. It sets `aggressive-resize on` for the session, calls `tmux refresh-client`, and nudges the pty dimensions to force a full frame repaint.
+
+### Security
+
+- `tmux attach -r` provides pty-level read-only in watch mode — no input reaches the session from this pty regardless of frontend state.
+- The server-side control lock (`controlHolder.ws`) is the single source of truth; `{type:"input"}` WS messages are silently dropped unless the sending socket holds the lock.
+- Only one socket can hold the interactive lock at a time.
+- All take/release/od-stop events are appended to `dashboard/server/terminal-audit.log` with timestamp, event type, project_id, session, Tailscale user identity, and IP.
+
+## Authentication
+
+The dashboard uses **Tailscale identity headers** for access control. The server binds to `127.0.0.1` (loopback only) and must be exposed via `tailscale serve`, which injects trusted identity headers on every request.
+
+### Setup (one-time)
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8038
+```
+
+This exposes the dashboard at `https://opendia.taild43937.ts.net/` (MagicDNS hostname) with auto-issued TLS. Tailscale persists this config across reboots. To remove: `tailscale serve reset`.
+
+After this, the dashboard is only reachable from Tailscale-enrolled devices. Direct TCP to port 8038 from the LAN is blocked (loopback bind).
+
+### How it works
+
+`tailscale serve` strips any client-supplied `Tailscale-User-*` headers and re-injects its own from the enrolled device's identity. The Express middleware (`server/auth.js`) reads `Tailscale-User-Login` and verifies the domain matches `AUTH_ALLOWED_DOMAINS` (default: `linnflux.com`). Unauthorized requests get a 403. WebSocket upgrades (Terminal tab) go through the same check before the upgrade completes.
+
+The allowed domain list is configured in `.env`:
+```
+AUTH_ALLOWED_DOMAINS=linnflux.com
+```
+
+### Loopback bypass
+
+Requests from `127.0.0.1` / `::1` skip the Tailscale check. This keeps local scripts (`/od-go`, `/od-stop`, server-to-server curl calls) working without Tailscale headers.
+
+### Adding a user
+
+1. Create `user@linnflux.com` in Google Workspace admin.
+2. Invite their device to the tailnet (Tailscale admin console → Users → Invite).
+3. They sign into Tailscale with their Workspace account — their device joins the tailnet.
+4. They visit `https://opendia.taild43937.ts.net/` — access is granted automatically.
+
+No per-user configuration needed. All `@linnflux.com` accounts get equal full access.
+
+### `GET /api/me`
+
+Returns the current user's identity as seen by the server:
+
+```json
+{ "login": "nick@linnflux.com", "name": "Nick Linn", "source": "tailscale" }
+```
+
+Returns `{ "source": "loopback" }` for local script requests.
 
 ## API
 
@@ -112,6 +208,13 @@ Opening a card with an active timer shows a subtle rotating conic-gradient borde
 | `GET` | `/api/timers/active` | Returns array of project IDs with running timers |
 | `POST` | `/api/projects/:id/log-timer` | Append a single timer entry to the project's Notion task as a toggle block. Body: `{ start, task, duration, notes }`. Silently no-ops if the project has no `notion_id`. |
 | `POST` | `/api/timers/backfill` | One-shot sync of all historical daily `.md` entries to their matching Notion tasks. Idempotent (dedupes by start-time marker in existing toggle titles). Throttled to stay under Notion's rate limit. |
+| `WS`  | `/api/projects/:id/terminal` | Stream pty output; send input/resize/ping when holding control lock |
+| `GET` | `/api/projects/:id/terminal/status` | `{ session, alive, watchers, controlHolder }` |
+| `POST` | `/api/projects/:id/terminal/take-control` | Acquire interactive lock; starts timer if none running; writes `started_by` (Tailscale identity) to timer state file. Body: `{ task? }` |
+| `POST` | `/api/projects/:id/terminal/release-control` | Release lock; writes `ended_by` to timer state file; downgrade pty to read-only |
+| `POST` | `/api/projects/:id/terminal/send-od-stop` | Writes `ended_by` to timer state file, injects `/od-stop` into tmux session; polls for state-file deletion (3-min timeout) |
+| `POST` | `/api/projects/:id/terminal/stop-local` | Fallback: write notes directly to daily file + delete state file. Body: `{ notes }` |
+| `POST` | `/api/projects/:id/terminal/redraw` | Force `tmux refresh-client` + resize-nudge to fix multi-client display corruption |
 | `GET` | `/api/inbox` | All inbox items (joined with project name). |
 | `PATCH` | `/api/inbox/:id` | Update classification fields. Re-links `project_id` automatically when `client_hint` or `division_hint` changes. |
 | `DELETE` | `/api/inbox/:id` | Soft-delete: sets `status = dismissed` (preserves project FK and audit trail). |
@@ -137,4 +240,6 @@ Toggle block title format in Notion: `YYYY-MM-DD HH:MM — Task Title (1h 30m)`.
 
 - `.env` and `*.db` files are gitignored — no credentials or business data in the repo
 - The frontend is a pure shell; all data comes from the API at runtime
-- Bind address is `0.0.0.0` for Tailscale access — ensure the server is not exposed to the public internet
+- Server binds to `127.0.0.1` — only reachable via `tailscale serve` (see Authentication above); direct LAN access to port 8038 is blocked
+- `tailscale serve` strips and re-injects identity headers — header spoofing is not possible from outside the local process
+- Loopback requests (local scripts) bypass the identity check but cannot be forged from non-local sockets

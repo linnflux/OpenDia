@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-const WS_PORT = 8038;
 const RETRY_DELAYS = [1000, 2000, 5000, 10000];
 
 function modePill(mode) {
@@ -12,8 +11,8 @@ function modePill(mode) {
     case "interactive":   return { label: "Interactive · live", cls: "tp-pill tp-pill-interactive" };
     case "locked-by-other": return { label: "Locked by another tab", cls: "tp-pill tp-pill-locked" };
     case "acquiring":     return { label: "Connecting…", cls: "tp-pill tp-pill-busy" };
-    case "stopping":      return { label: "Stopping…", cls: "tp-pill tp-pill-busy" };
     case "disconnected":  return { label: "Disconnected", cls: "tp-pill tp-pill-disconnected" };
+    case "session_dead":  return { label: "Session not found", cls: "tp-pill tp-pill-disconnected" };
     default:              return { label: mode, cls: "tp-pill" };
   }
 }
@@ -31,6 +30,7 @@ export default function TerminalPanel({ project }) {
   const [controlHolder, setControlHolder] = useState(null);
   const [taskInput, setTaskInput] = useState("");
   const [stopConfirming, setStopConfirming] = useState(false);
+  const [stopInProgress, setStopInProgress] = useState(false);
   const [fallback, setFallback] = useState(null); // { stateFile }
   const [fallbackNotes, setFallbackNotes] = useState("");
   const [savingFallback, setSavingFallback] = useState(false);
@@ -43,7 +43,7 @@ export default function TerminalPanel({ project }) {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.hostname}:${WS_PORT}/api/projects/${project.id}/terminal`);
+    const ws = new WebSocket(`${proto}://${location.host}/api/projects/${project.id}/terminal`);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -63,11 +63,16 @@ export default function TerminalPanel({ project }) {
         case "state":
           updateMode(msg.mode);
           setControlHolder(msg.controlHolder ?? null);
+          if (msg.mode === "watching") setStopInProgress(false);
+          break;
+        case "stop_in_progress":
+          setStopInProgress(true);
           break;
         case "error":
-          termRef.current?.writeln(`\r\n\x1b[31m[Dashboard] ${msg.message}\x1b[0m`);
-          if (msg.fallback) {
-            // od-stop timed out — this state comes from the REST call, not WS
+          if (msg.fatal) {
+            updateMode("session_dead");
+          } else {
+            termRef.current?.writeln(`\r\n\x1b[31m[Dashboard] ${msg.message}\x1b[0m`);
           }
           break;
         case "idle_warning":
@@ -184,19 +189,28 @@ export default function TerminalPanel({ project }) {
     // Mode will update via WS
   }
 
+  async function handleRedraw() {
+    try {
+      await fetch(`/api/projects/${project.id}/terminal/redraw`, { method: "POST" });
+      fitRef.current?.fit();
+      const { cols, rows } = termRef.current || {};
+      if (cols && rows) wsRef.current?.send(JSON.stringify({ type: "resize", cols, rows }));
+    } catch {}
+  }
+
   async function handleStopConfirm() {
     setStopConfirming(false);
-    updateMode("stopping");
+    setStopInProgress(true);
     try {
       const res = await fetch(`/api/projects/${project.id}/terminal/send-od-stop`, { method: "POST" });
       const d = await res.json();
       if (!d.ok && d.fallback) {
+        setStopInProgress(false);
         setFallback({ stateFile: d.stateFile });
-        updateMode("interactive"); // stay interactive until fallback resolved
       }
-      // Success: WS broadcasts the new "watching" state
+      // Success: WS broadcasts mode:"watching" which clears stopInProgress
     } catch {
-      updateMode("interactive");
+      setStopInProgress(false);
     }
   }
 
@@ -234,6 +248,9 @@ export default function TerminalPanel({ project }) {
           </span>
         )}
         <div className="tp-actions">
+          <button className="tp-btn tp-btn-redraw" onClick={handleRedraw} title="Force tmux redraw">
+            Redraw
+          </button>
           {mode === "watching" && (
             <div className="tp-take-row">
               <input
@@ -248,12 +265,29 @@ export default function TerminalPanel({ project }) {
               </button>
             </div>
           )}
+          {mode === "session_dead" && (
+            <button
+              className="tp-btn tp-btn-take"
+              onClick={() => {
+                updateMode("watching");
+                wsRef.current?.send(JSON.stringify({ type: "retry" }));
+              }}
+            >
+              Retry
+            </button>
+          )}
           {mode === "locked-by-other" && (
             <span className="tp-locked-hint">
+              {controlHolder?.startedBy ? `By ${controlHolder.startedBy} · ` : ""}
               Taken {controlHolder?.takenAt ? new Date(controlHolder.takenAt).toLocaleTimeString() : ""}
             </span>
           )}
-          {mode === "interactive" && !stopConfirming && !fallback && (
+          {mode === "interactive" && stopInProgress && (
+            <span className="tp-stopping-banner" title="/od-stop is running — answer any prompts in the terminal">
+              Stopping… answer prompts in terminal
+            </span>
+          )}
+          {mode === "interactive" && !stopConfirming && !fallback && !stopInProgress && (
             <>
               <button className="tp-btn tp-btn-release" onClick={handleRelease} title="Release without stopping timer">
                 Release
@@ -262,9 +296,6 @@ export default function TerminalPanel({ project }) {
                 Stop &amp; Exit
               </button>
             </>
-          )}
-          {mode === "stopping" && (
-            <span className="tp-busy-hint">Waiting for /od-stop…</span>
           )}
         </div>
       </div>
@@ -304,7 +335,13 @@ export default function TerminalPanel({ project }) {
         </div>
       )}
 
-      <div className="tp-xterm-wrap" ref={containerRef} />
+      <div className="tp-xterm-wrap" ref={containerRef}>
+        {mode === "session_dead" && (
+          <div className="tp-dead-overlay">
+            tmux session <code>{project.tmux_session}</code> not found
+          </div>
+        )}
+      </div>
     </div>
   );
 }

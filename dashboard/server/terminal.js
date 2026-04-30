@@ -8,6 +8,7 @@ import {
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getProjectById } from "./db.js";
+import { verifyRequest } from "./auth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOME = process.env.HOME || "/home/linnflux";
@@ -23,9 +24,17 @@ const GRACE_MS = 60_000;
 // Map<String(projectId), SessionState>
 const sessions = new Map();
 
-function auditLog(event, projectId, session, ip = "") {
-  const line = `${new Date().toISOString()} ${event} project_id=${projectId} session=${session} ip=${ip}\n`;
+function auditLog(event, projectId, session, ip = "", user = "") {
+  const line = `${new Date().toISOString()} ${event} project_id=${projectId} session=${session} user=${user} ip=${ip}\n`;
   try { appendFileSync(AUDIT_LOG, line); } catch {}
+}
+
+function setTimerAttribution(session, fields) {
+  const t = findTimerForSession(session);
+  if (!t) return;
+  if (fields.started_by && t.data.started_by) delete fields.started_by;
+  Object.assign(t.data, fields);
+  try { writeFileSync(t.file, JSON.stringify(t.data, null, 2)); } catch {}
 }
 
 function send(ws, msg) {
@@ -47,7 +56,7 @@ function broadcastState(state) {
       type: "state",
       mode: isHolder ? "interactive" : (state.holder ? "locked-by-other" : "watching"),
       controlHolder: state.holder
-        ? { takenAt: state.holder.takenAt, idleSec: Math.floor((Date.now() - state.holder.lastInputAt) / 1000) }
+        ? { takenAt: state.holder.takenAt, idleSec: Math.floor((Date.now() - state.holder.lastInputAt) / 1000), startedBy: state.holder.startedBy }
         : null
     }));
   }
@@ -57,7 +66,32 @@ function tmuxAlive(session) {
   return spawnSync("tmux", ["has-session", "-t", session], { stdio: "ignore" }).status === 0;
 }
 
+function forceRedraw(state) {
+  // Make tmux size to the active client (us), not the smallest of all clients.
+  // Idempotent — safe to call repeatedly.
+  spawnSync("tmux", ["set-window-option", "-t", state.session, "aggressive-resize", "on"], { stdio: "ignore" });
+  spawnSync("tmux", ["refresh-client", "-t", state.session], { stdio: "ignore" });
+  // Resize-nudge our pty so tmux pushes a fresh frame.
+  if (state.pty) {
+    try {
+      state.pty.resize(state.cols, Math.max(1, state.rows - 1));
+      setTimeout(() => { try { state.pty?.resize(state.cols, state.rows); } catch {} }, 40);
+    } catch {}
+  }
+}
+
 function spawnPty(state, readOnly) {
+  if (!tmuxAlive(state.session)) {
+    state.sessionDead = true;
+    broadcast(state, {
+      type: "error",
+      message: `tmux session '${state.session}' not found — start it and click Retry.`,
+      fatal: true
+    });
+    return false;
+  }
+  state.sessionDead = false;
+
   const args = readOnly
     ? ["attach-session", "-r", "-t", state.session]
     : ["attach-session", "-t", state.session];
@@ -88,6 +122,16 @@ function spawnPty(state, readOnly) {
         state.holder = null;
         broadcastState(state);
       }
+      // Don't respawn if the session is gone — stops the retry loop
+      if (!tmuxAlive(state.session)) {
+        state.sessionDead = true;
+        broadcast(state, {
+          type: "error",
+          message: `tmux session '${state.session}' ended — click Retry if you restart it.`,
+          fatal: true
+        });
+        return;
+      }
       broadcast(state, { type: "error", message: `tmux session '${state.session}' ended (exit ${exitCode})` });
       // Respawn as watch-only if there are still viewers
       if (state.subs.size > 0) {
@@ -99,6 +143,7 @@ function spawnPty(state, readOnly) {
 
     state.pty = p;
     state.ptyReadOnly = readOnly;
+    setTimeout(() => { if (state.pty === p) forceRedraw(state); }, 250);
     return true;
   } catch (err) {
     broadcast(state, { type: "error", message: `Failed to attach to tmux: ${err.message}` });
@@ -114,11 +159,11 @@ function killPty(state) {
   }
 }
 
-function releaseControl(state, projectId) {
+function releaseControl(state, projectId, user = "") {
   if (!state.holder) return;
   const { session } = state;
   state.holder = null;
-  auditLog("release", projectId, session);
+  auditLog("release", projectId, session, "", user);
   killPty(state);
   if (state.subs.size > 0) {
     setTimeout(() => {
@@ -259,6 +304,12 @@ export function mountTerminal(server, app) {
   server.on("upgrade", (req, socket, head) => {
     const m = req.url?.match(/^\/api\/projects\/(\d+)\/terminal$/);
     if (!m) { socket.destroy(); return; }
+    const auth = verifyRequest(req);
+    if (!auth.ok) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req, m[1]);
     });
@@ -285,7 +336,8 @@ export function mountTerminal(server, app) {
         rows: 50,
         refCount: 0,
         idleInterval: null,
-        graceTimer: null
+        graceTimer: null,
+        sessionDead: false
       };
       sessions.set(projectId, state);
     }
@@ -295,7 +347,16 @@ export function mountTerminal(server, app) {
     state.refCount++;
     state.subs.add(ws);
 
-    if (!state.pty) spawnPty(state, true);
+    if (state.sessionDead) {
+      // Session was already found dead — tell this subscriber immediately instead of spawning
+      send(ws, {
+        type: "error",
+        message: `tmux session '${state.session}' not found — start it and click Retry.`,
+        fatal: true
+      });
+    } else if (!state.pty) {
+      spawnPty(state, true);
+    }
 
     // Idle checker
     if (!state.idleInterval) {
@@ -368,6 +429,10 @@ export function mountTerminal(server, app) {
           if (state.pty) try { state.pty.resize(cols, rows); } catch {}
           break;
         }
+
+        case "retry":
+          if (!state.pty) spawnPty(state, true);
+          break;
       }
     });
 
@@ -405,7 +470,7 @@ export function mountTerminal(server, app) {
       alive: tmuxAlive(session),
       watchers: state?.refCount ?? 0,
       controlHolder: state?.holder
-        ? { takenAt: state.holder.takenAt, idleSec: Math.floor((Date.now() - state.holder.lastInputAt) / 1000) }
+        ? { takenAt: state.holder.takenAt, idleSec: Math.floor((Date.now() - state.holder.lastInputAt) / 1000), startedBy: state.holder.startedBy }
         : null
     });
   });
@@ -446,25 +511,40 @@ export function mountTerminal(server, app) {
       return res.status(500).json({ error: "failed to spawn interactive pty" });
     }
 
+    const user = req.headers["tailscale-user-login"] || "";
     state.holder = {
       ws: null, // filled by "claim-control" WS message
       takenAt: Date.now(),
       lastInputAt: Date.now(),
-      stateFile: timerInfo.file
+      stateFile: timerInfo.file,
+      startedBy: user
     };
 
-    auditLog("take", projectId, project.tmux_session, ip);
+    setTimerAttribution(project.tmux_session, { started_by: user });
+    auditLog("take", projectId, project.tmux_session, ip, user);
     broadcastState(state);
     res.json({ ok: true, timerStarted, session: project.tmux_session });
   });
 
   // POST /api/projects/:id/terminal/release-control
-  app.post("/api/projects/:id/terminal/release-control", (req, res) => {
+  // POST /api/projects/:id/terminal/redraw  (force a tmux redraw — fixes multi-client artifacting)
+  app.post("/api/projects/:id/terminal/redraw", (req, res) => {
     const { id: projectId } = req.params;
     const state = sessions.get(projectId);
-    if (!state?.holder) return res.json({ ok: true });
-    releaseControl(state, projectId);
+    if (!state) return res.status(400).json({ error: "no active viewer" });
+    forceRedraw(state);
     res.json({ ok: true });
+  });
+
+  app.post("/api/projects/:id/terminal/release-control", (req, res) => {
+    const { id: projectId } = req.params;
+    const user = req.headers["tailscale-user-login"] || "";
+    const state = sessions.get(projectId);
+    if (!state?.holder) return res.json({ ok: true });
+    const { session } = state;
+    setTimerAttribution(session, { ended_by: user });
+    releaseControl(state, projectId, user);
+    res.json({ ok: true, endedBy: user });
   });
 
   // POST /api/projects/:id/terminal/send-od-stop
@@ -479,17 +559,19 @@ export function mountTerminal(server, app) {
     const timerInfo = findTimerForSession(session);
     if (!timerInfo) return res.status(400).json({ error: "no running timer for this session" });
 
+    const user = req.headers["tailscale-user-login"] || "";
+    setTimerAttribution(session, { ended_by: user });
     spawnSync("tmux", ["send-keys", "-t", session, "/od-stop", "Enter"], { stdio: "ignore" });
-    auditLog("od-stop-sent", projectId, session, ip);
+    auditLog("od-stop-sent", projectId, session, ip, user);
 
     const state = sessions.get(projectId);
-    if (state) broadcast(state, { type: "state", mode: "stopping", controlHolder: null });
+    if (state) broadcast(state, { type: "stop_in_progress" });
 
     try {
-      await pollForStateFileDeletion(timerInfo.file, 90_000);
-      if (state?.holder) releaseControl(state, projectId);
+      await pollForStateFileDeletion(timerInfo.file, 180_000);
+      if (state?.holder) releaseControl(state, projectId, user);
       else if (state) broadcastState(state);
-      auditLog("od-stop-complete", projectId, session, ip);
+      auditLog("od-stop-complete", projectId, session, ip, user);
       res.json({ ok: true });
     } catch {
       res.json({ ok: false, fallback: true, stateFile: timerInfo.file, message: "od-stop timed out — use fallback" });
@@ -518,9 +600,10 @@ export function mountTerminal(server, app) {
 
     try { unlinkSync(timerInfo.file); } catch {}
 
+    const user = req.headers["tailscale-user-login"] || "";
     const state = sessions.get(projectId);
-    if (state?.holder) releaseControl(state, projectId);
-    auditLog("stop-local", projectId, session || "");
+    if (state?.holder) releaseControl(state, projectId, user);
+    auditLog("stop-local", projectId, session || "", "", user);
     res.json({ ok: true });
   });
 }

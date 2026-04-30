@@ -70,6 +70,7 @@ export default function App() {
   const [inboxFilter, setInboxFilter] = useState("active");
   const [inboxFilterOpen, setInboxFilterOpen] = useState(false);
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
+  const [me, setMe] = useState(null);
 
   // Derive the live project object from the current projects list so the open
   // modal automatically reflects status/next-step/notes changes pushed in by
@@ -82,6 +83,10 @@ export default function App() {
     document.documentElement.className = theme === "light" ? "light-theme" : "";
     localStorage.setItem("opendia-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    fetch("/api/me").then(r => r.ok ? r.json() : null).then(setMe).catch(() => {});
+  }, []);
 
   const fetchActiveTimers = useCallback(() => {
     fetch("/api/timers/active")
@@ -298,6 +303,11 @@ export default function App() {
                 </div>
               )}
             </div>
+          )}
+          {me?.source === "tailscale" && (
+            <span className="app-user-pill" title={me.login}>
+              {me.name || me.login}
+            </span>
           )}
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>

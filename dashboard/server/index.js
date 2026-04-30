@@ -4,6 +4,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
+import { requireLinnfluxUser } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop } from "./db.js";
 import { spawn, exec } from "child_process";
 import { readFileSync, existsSync } from "fs";
@@ -16,6 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(express.json());
+app.use(requireLinnfluxUser);
+app.get("/api/me", (req, res) => res.json(req.user));
 
 // API routes
 app.get("/api/projects", (req, res) => {
@@ -614,6 +617,6 @@ app.get("*", (_req, res) => {
   res.sendFile(resolve(distPath, "index.html"));
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`OpenDia Dashboard API listening on http://0.0.0.0:${PORT}`);
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(`OpenDia Dashboard API listening on http://127.0.0.1:${PORT}`);
 });
