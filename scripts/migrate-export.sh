@@ -89,18 +89,18 @@ info "Syncing ~/OpenDia/ to gdrive:OpenDia/ ..."
 
 OPENDIA_FILTER=$(mktemp)
 cat > "$OPENDIA_FILTER" <<'FILTER'
-+ scripts/**
-+ Time/**
-+ Projects/**
-+ Debug/**
-+ www/**
-+ opendia.db
-+ requirements.txt
-+ .claude/**
+- repo/**
 - venv/**
 - __pycache__/**
 - *.pyc
-- *
+- .wrangler/**
+- **/node_modules/**
+- **/.git/**
+- **/dist/**
+- **/.astro/**
+- **/.next/**
+- **/.cache/**
++ **
 FILTER
 
 # --- Step 4b: Versioned db backup BEFORE sync (safety net) ---
