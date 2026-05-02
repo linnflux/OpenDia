@@ -208,16 +208,6 @@ export async function getTimerEntriesForProject(project, limit = 20) {
 
 // ── Analytics helpers ─────────────────────────────────────────────────────────
 
-export function parseDurationMinutes(s) {
-  if (!s) return 0;
-  let mins = 0;
-  const h = s.match(/(\d+)h/);
-  const m = s.match(/(\d+)m/);
-  if (h) mins += parseInt(h[1], 10) * 60;
-  if (m) mins += parseInt(m[1], 10);
-  return mins;
-}
-
 function isoWeekKey(isoStart) {
   // Returns "2026-W18" — Monday-based ISO 8601 week.
   const d = new Date(isoStart + ":00");
@@ -229,65 +219,77 @@ function isoWeekKey(isoStart) {
   return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-export async function getHoursByClientWeek({ from, to } = {}) {
-  const all = await getAllTimerEntries();
-  const filtered = all.filter((e) =>
-    (!from || e.start >= from) && (!to || e.start <= to + "T23:59")
-  );
-  const byClient = new Map();
-  for (const e of filtered) {
-    const wk = isoWeekKey(e.start);
-    const min = parseDurationMinutes(e.duration);
-    const clientKey = e.client || "(unknown)";
-    const c = byClient.get(clientKey) ?? new Map();
-    const w = c.get(wk) ?? { billable_min: 0, nonbillable_min: 0, entries: 0 };
-    if (e.billable) w.billable_min += min; else w.nonbillable_min += min;
-    w.entries += 1;
-    c.set(wk, w);
-    byClient.set(clientKey, c);
-  }
-  return [...byClient.entries()]
-    .map(([client, weeks]) => ({
-      client,
-      weeks: [...weeks.entries()]
-        .map(([week, v]) => ({ week, ...v }))
-        .sort((a, b) => b.week.localeCompare(a.week)),
-    }))
-    .sort((a, b) => {
-      const ta = a.weeks.reduce((s, w) => s + w.billable_min + w.nonbillable_min, 0);
-      const tb = b.weeks.reduce((s, w) => s + w.billable_min + w.nonbillable_min, 0);
-      return tb - ta;
-    });
+function weekStartFromKey(weekKey) {
+  // "2026-W18" → Monday of that ISO week (UTC Date).
+  const [year, w] = weekKey.split("-W").map((s) => parseInt(s, 10));
+  // Jan 4 is always in ISO week 1.
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const week1Mon = new Date(jan4);
+  week1Mon.setUTCDate(jan4.getUTCDate() - jan4Day + 1);
+  const target = new Date(week1Mon);
+  target.setUTCDate(week1Mon.getUTCDate() + (w - 1) * 7);
+  return target;
 }
 
-export async function getEstimateVariance({ from, to } = {}) {
+function shiftWeekKey(weekKey, deltaWeeks) {
+  const start = weekStartFromKey(weekKey);
+  start.setUTCDate(start.getUTCDate() + deltaWeeks * 7);
+  return isoWeekKey(`${start.toISOString().slice(0, 10)}T00:00`);
+}
+
+export function currentWeekKey() {
+  const now = new Date();
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return isoWeekKey(iso);
+}
+
+export async function getWeekDetail({ week } = {}) {
+  const targetWeek = week || currentWeekKey();
   const all = await getAllTimerEntries();
-  const filtered = all.filter((e) =>
-    (!from || e.start >= from) && (!to || e.start <= to + "T23:59")
-  );
-  const byKey = new Map();
+  const filtered = all.filter((e) => isoWeekKey(e.start) === targetWeek);
+
+  const byClient = new Map();
   for (const e of filtered) {
-    const key = `${e.client ?? ""}::${e.project || e.task || ""}`;
-    const v = byKey.get(key) ?? {
-      client: e.client || "(unknown)",
-      project: e.project || e.task || "(untitled)",
-      estimated_min: 0,
-      actual_min: 0,
-      entries: 0,
+    const k = e.client || "(unknown)";
+    const c = byClient.get(k) ?? {
+      client: k,
+      billable_min: 0,
+      nonbillable_min: 0,
+      total_min: 0,
+      entries: [],
     };
-    v.estimated_min += e.estimated_minutes ?? 0;
-    v.actual_min += parseDurationMinutes(e.duration);
-    v.entries += 1;
-    byKey.set(key, v);
+    const est = e.estimated_minutes ?? 0;
+    if (e.billable) c.billable_min += est;
+    else c.nonbillable_min += est;
+    c.total_min += est;
+    c.entries.push({
+      date: e.start.slice(0, 10),
+      start: e.start,
+      task: e.task,
+      project: e.project,
+      division: e.division,
+      estimated_minutes: e.estimated_minutes,
+      billable: e.billable,
+    });
+    byClient.set(k, c);
   }
-  return [...byKey.values()]
-    .map((v) => ({
-      ...v,
-      variance_min: v.actual_min - v.estimated_min,
-      variance_pct:
-        v.estimated_min > 0
-          ? Math.round(((v.actual_min - v.estimated_min) / v.estimated_min) * 100)
-          : null,
-    }))
-    .sort((a, b) => Math.abs(b.variance_min) - Math.abs(a.variance_min));
+
+  const clients = [...byClient.values()].sort((a, b) => b.total_min - a.total_min);
+  for (const c of clients) {
+    c.entries.sort((a, b) => a.start.localeCompare(b.start));
+  }
+
+  const start = weekStartFromKey(targetWeek);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+
+  return {
+    week: targetWeek,
+    weekStart: start.toISOString().slice(0, 10),
+    weekEnd: end.toISOString().slice(0, 10),
+    prevWeek: shiftWeekKey(targetWeek, -1),
+    nextWeek: shiftWeekKey(targetWeek, 1),
+    clients,
+  };
 }

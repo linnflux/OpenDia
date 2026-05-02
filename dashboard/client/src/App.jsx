@@ -39,9 +39,11 @@ import InboxModal from "./components/InboxModal.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
 import Clients from "./components/Clients.jsx";
 import Analytics from "./components/Analytics.jsx";
+import Billing from "./components/Billing.jsx";
+import Newsletter from "./components/Newsletter.jsx";
 
 const DIVISION_COLORS = {
-  WordFlux: { bg: "#3b82f6", text: "#0a1628" },
+  WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
   WatchThreat: { bg: "#5e97f2", text: "#fff" },
   AmPen: { bg: "#5a7a94", text: "#fff" },
   "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
@@ -86,7 +88,11 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    fetch("/api/me").then(r => r.ok ? r.json() : null).then(setMe).catch(() => {});
+    fetch("/api/me").then(r => r.ok ? r.json() : null).then(user => {
+      setMe(user);
+      // Snap non-admins off the billing view if they somehow land on it
+      if (user && !user.is_admin && (view === "billing" || view === "newsletter")) setView("board");
+    }).catch(() => {});
   }, []);
 
   const fetchActiveTimers = useCallback(() => {
@@ -339,6 +345,10 @@ export default function App() {
         </div>
       ) : view === "analytics" ? (
         <Analytics />
+      ) : view === "billing" && me?.is_admin ? (
+        <Billing />
+      ) : view === "newsletter" && me?.is_admin ? (
+        <Newsletter />
       ) : (
         <Clients
           projects={projects}
@@ -379,6 +389,9 @@ export default function App() {
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onOpenAnalytics={() => { setPaletteOpen(false); setView("analytics"); }}
+        isAdmin={!!me?.is_admin}
+        onOpenBilling={() => { setPaletteOpen(false); setView("billing"); }}
+        onOpenNewsletter={() => { setPaletteOpen(false); setView("newsletter"); }}
       />
     </div>
   );

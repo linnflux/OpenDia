@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 const BG_STORAGE_KEY = "opendia-bg-image";
 const BG_POSITION_KEY = "opendia-bg-position";
 
-function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onToggleTheme, theme, onOpenAnalytics }) {
+function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onToggleTheme, theme, onOpenAnalytics, isAdmin, onOpenBilling, onOpenNewsletter }) {
   return [
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", shortcut: "R", action: onRefresh },
     {
@@ -13,6 +13,10 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onT
       action: onToggleTheme,
     },
     { id: "analytics", icon: "\u{1F4CA}", label: "Open Analytics", action: onOpenAnalytics },
+    ...(isAdmin ? [
+      { id: "billing", icon: "\u{1F4B0}", label: "Open Billing", action: onOpenBilling },
+      { id: "newsletter", icon: "\u{1F4F0}", label: "Open Newsletter", action: onOpenNewsletter },
+    ] : []),
     { id: "upload-bg", icon: "\u{1F5BC}", label: "Upload Background Image", action: onUploadBg },
     ...(hasBg
       ? [
@@ -23,7 +27,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onT
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, theme, onToggleTheme, onOpenAnalytics }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, theme, onToggleTheme, onOpenAnalytics, isAdmin, onOpenBilling, onOpenNewsletter }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -120,8 +124,11 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
       onToggleTheme: () => { onToggleTheme(); onClose(); },
       theme,
       onOpenAnalytics: () => { onOpenAnalytics?.(); onClose(); },
+      isAdmin,
+      onOpenBilling: () => { onOpenBilling?.(); onClose(); },
+      onOpenNewsletter: () => { onOpenNewsletter?.(); onClose(); },
     }),
-    [bgImage, bgPosition, onRefresh, onClose, onToggleTheme, theme, onOpenAnalytics]
+    [bgImage, bgPosition, onRefresh, onClose, onToggleTheme, theme, onOpenAnalytics, isAdmin, onOpenBilling, onOpenNewsletter]
   );
 
   const filteredActions = useMemo(() => {

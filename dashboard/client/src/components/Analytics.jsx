@@ -9,235 +9,224 @@ function fmtMin(min) {
   return `${h}h ${m}m`;
 }
 
-function defaultFrom() {
-  const d = new Date();
-  d.setDate(d.getDate() - 56); // 8 weeks
-  return d.toISOString().slice(0, 10);
-}
-
-function defaultTo() {
-  return new Date().toISOString().slice(0, 10);
+function fmtWeekLabel(weekStart, weekEnd, weekKey) {
+  const opts = { month: "short", day: "numeric", timeZone: "UTC" };
+  const s = new Date(weekStart + "T00:00:00Z").toLocaleDateString("en-US", opts);
+  const e = new Date(weekEnd + "T00:00:00Z").toLocaleDateString("en-US", opts);
+  return `Week of ${s} – ${e} (${weekKey})`;
 }
 
 function ageDays(isoDate) {
-  const ms = Date.now() - new Date(isoDate).getTime();
-  return Math.floor(ms / 86400000);
+  return Math.floor((Date.now() - new Date(isoDate).getTime()) / 86400000);
 }
 
 export default function Analytics() {
-  const [from, setFrom] = useState(defaultFrom);
-  const [to, setTo] = useState(defaultTo);
-  const [staleDays, setStaleDays] = useState(14);
-
-  const [hours, setHours] = useState(null);
-  const [variance, setVariance] = useState(null);
-  const [stale, setStale] = useState(null);
-  const [loadingHours, setLoadingHours] = useState(true);
-  const [loadingVariance, setLoadingVariance] = useState(true);
-  const [loadingStale, setLoadingStale] = useState(true);
+  // Hours accordion state
+  const [hoursOpen, setHoursOpen] = useState(true);
+  const [week, setWeek] = useState(null); // null = current week
+  const [weekData, setWeekData] = useState(null);
+  const [loadingHours, setLoadingHours] = useState(false);
   const [errorHours, setErrorHours] = useState(null);
-  const [errorVariance, setErrorVariance] = useState(null);
+  const [expanded, setExpanded] = useState({}); // client → bool
+
+  // Stale accordion state
+  const [staleOpen, setStaleOpen] = useState(false);
+  const [staleData, setStaleData] = useState(null);
+  const [staleDays, setStaleDays] = useState(14);
+  const [loadingStale, setLoadingStale] = useState(false);
   const [errorStale, setErrorStale] = useState(null);
+  const [staleFetched, setStaleFetched] = useState(false);
 
-  const fetchAll = useCallback(() => {
-    const params = new URLSearchParams({ from, to });
-
+  const fetchHours = useCallback(() => {
     setLoadingHours(true);
     setErrorHours(null);
-    fetch(`/api/analytics/hours-by-client?${params}`)
+    const params = week ? `?week=${week}` : "";
+    fetch(`/api/analytics/week${params}`)
       .then((r) => r.json())
-      .then((d) => { setHours(d); setLoadingHours(false); })
+      .then((d) => { setWeekData(d); setLoadingHours(false); })
       .catch((e) => { setErrorHours(e.message); setLoadingHours(false); });
+  }, [week]);
 
-    setLoadingVariance(true);
-    setErrorVariance(null);
-    fetch(`/api/analytics/estimate-variance?${params}`)
-      .then((r) => r.json())
-      .then((d) => { setVariance(d); setLoadingVariance(false); })
-      .catch((e) => { setErrorVariance(e.message); setLoadingVariance(false); });
-
+  const fetchStale = useCallback(() => {
     setLoadingStale(true);
     setErrorStale(null);
     fetch(`/api/analytics/stale?days=${staleDays}`)
       .then((r) => r.json())
-      .then((d) => { setStale(d); setLoadingStale(false); })
+      .then((d) => { setStaleData(d); setLoadingStale(false); setStaleFetched(true); })
       .catch((e) => { setErrorStale(e.message); setLoadingStale(false); });
-  }, [from, to, staleDays]);
+  }, [staleDays]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    if (hoursOpen) fetchHours();
+  }, [fetchHours, hoursOpen]);
 
-  // Flatten hours data into rows for the table
-  const hoursRows = hours
-    ? hours.flatMap((c) =>
-        c.weeks.map((w) => ({
-          client: c.client,
-          week: w.week,
-          billable_min: w.billable_min,
-          nonbillable_min: w.nonbillable_min,
-          total_min: w.billable_min + w.nonbillable_min,
-          entries: w.entries,
-        }))
-      )
-    : [];
+  useEffect(() => {
+    if (staleOpen && !staleFetched) fetchStale();
+  }, [staleOpen, staleFetched, fetchStale]);
+
+  function toggleClient(client) {
+    setExpanded((prev) => ({ ...prev, [client]: !prev[client] }));
+  }
+
+  function handleStaleOpen() {
+    setStaleOpen((v) => !v);
+  }
+
+  function handleStaleDaysChange(e) {
+    setStaleDays(parseInt(e.target.value, 10) || 14);
+    setStaleFetched(false);
+  }
+
+  function handleStaleFetch() {
+    fetchStale();
+  }
 
   return (
     <div className="analytics-page">
-      <div className="analytics-controls">
-        <label className="analytics-label">
-          From
-          <input
-            type="date"
-            className="analytics-date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-        </label>
-        <label className="analytics-label">
-          To
-          <input
-            type="date"
-            className="analytics-date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </label>
-        <button className="analytics-refresh-btn" onClick={fetchAll}>
-          Refresh
-        </button>
-      </div>
 
       {/* Hours by Client × Week */}
-      <section className="analytics-section">
-        <h2 className="analytics-heading">Hours by Client × Week</h2>
-        {loadingHours && <div className="analytics-loading">Loading…</div>}
-        {errorHours && <div className="analytics-error">{errorHours}</div>}
-        {!loadingHours && !errorHours && hoursRows.length === 0 && (
-          <div className="analytics-empty">No completed timer entries in this range.</div>
-        )}
-        {!loadingHours && !errorHours && hoursRows.length > 0 && (
-          <table className="analytics-table">
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Week</th>
-                <th className="analytics-num">Billable</th>
-                <th className="analytics-num">Non-bill</th>
-                <th className="analytics-num">Total</th>
-                <th className="analytics-num">Entries</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hoursRows.map((r, i) => (
-                <tr key={i}>
-                  <td>{r.client}</td>
-                  <td className="analytics-mono">{r.week}</td>
-                  <td className="analytics-num analytics-billable">{fmtMin(r.billable_min)}</td>
-                  <td className="analytics-num analytics-nonbill">{fmtMin(r.nonbillable_min)}</td>
-                  <td className="analytics-num analytics-bold">{fmtMin(r.total_min)}</td>
-                  <td className="analytics-num">{r.entries}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <div className="analytics-accordion-section">
+        <button
+          className={`analytics-accordion-header${hoursOpen ? " open" : ""}`}
+          onClick={() => setHoursOpen((v) => !v)}
+        >
+          <span className="analytics-caret">{hoursOpen ? "▾" : "▸"}</span>
+          Hours by Client × Week
+        </button>
 
-      {/* Estimate vs Actual */}
-      <section className="analytics-section">
-        <h2 className="analytics-heading">Estimate vs Actual (top variances)</h2>
-        {loadingVariance && <div className="analytics-loading">Loading…</div>}
-        {errorVariance && <div className="analytics-error">{errorVariance}</div>}
-        {!loadingVariance && !errorVariance && (!variance || variance.length === 0) && (
-          <div className="analytics-empty">No entries with estimates in this range.</div>
+        {hoursOpen && (
+          <div className="analytics-accordion-body">
+            <div className="analytics-week-nav">
+              <button
+                className="analytics-week-btn"
+                onClick={() => { setWeek(weekData?.prevWeek ?? null); setExpanded({}); }}
+                disabled={loadingHours}
+              >
+                ◀
+              </button>
+              <span className="analytics-week-label">
+                {weekData ? fmtWeekLabel(weekData.weekStart, weekData.weekEnd, weekData.week) : "Loading…"}
+              </span>
+              <button
+                className="analytics-week-btn"
+                onClick={() => { setWeek(weekData?.nextWeek ?? null); setExpanded({}); }}
+                disabled={loadingHours}
+              >
+                ▶
+              </button>
+              <button
+                className="analytics-week-btn analytics-today-btn"
+                onClick={() => { setWeek(null); setExpanded({}); }}
+                disabled={loadingHours || !week}
+              >
+                Today
+              </button>
+            </div>
+
+            {loadingHours && <div className="analytics-loading">Loading…</div>}
+            {errorHours && <div className="analytics-error">{errorHours}</div>}
+            {!loadingHours && !errorHours && weekData && weekData.clients.length === 0 && (
+              <div className="analytics-empty">No timer entries for this week.</div>
+            )}
+            {!loadingHours && !errorHours && weekData && weekData.clients.map((c) => (
+              <div key={c.client} className="analytics-client-group">
+                <button
+                  className={`analytics-client-row${expanded[c.client] ? " open" : ""}`}
+                  onClick={() => toggleClient(c.client)}
+                >
+                  <span className="analytics-caret">{expanded[c.client] ? "▾" : "▸"}</span>
+                  <span className="analytics-client-name">{c.client}</span>
+                  <span className="analytics-client-totals">
+                    <span className="analytics-billable">{fmtMin(c.billable_min)}</span>
+                    {c.nonbillable_min > 0 && (
+                      <span className="analytics-nonbill"> + {fmtMin(c.nonbillable_min)} nb</span>
+                    )}
+                    <span className="analytics-total"> = {fmtMin(c.total_min)}</span>
+                  </span>
+                </button>
+                {expanded[c.client] && (
+                  <div className="analytics-entries">
+                    {c.entries.map((e, i) => (
+                      <div key={i} className="analytics-entry-row">
+                        <span className="analytics-entry-date">{e.date}</span>
+                        <span className="analytics-entry-task">{e.task || "—"}</span>
+                        <span className="analytics-entry-est">{fmtMin(e.estimated_minutes)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
-        {!loadingVariance && !errorVariance && variance && variance.length > 0 && (
-          <table className="analytics-table">
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Project / Task</th>
-                <th className="analytics-num">Est</th>
-                <th className="analytics-num">Actual</th>
-                <th className="analytics-num">Δ</th>
-                <th className="analytics-num">%</th>
-                <th className="analytics-num">Entries</th>
-              </tr>
-            </thead>
-            <tbody>
-              {variance.map((v, i) => {
-                const over = v.variance_min > 0;
-                const under = v.variance_min < 0;
-                return (
-                  <tr key={i}>
-                    <td>{v.client}</td>
-                    <td>{v.project}</td>
-                    <td className="analytics-num">{fmtMin(v.estimated_min)}</td>
-                    <td className="analytics-num">{fmtMin(v.actual_min)}</td>
-                    <td className={`analytics-num ${over ? "analytics-over" : under ? "analytics-under" : ""}`}>
-                      {v.variance_min > 0 ? "+" : ""}{fmtMin(Math.abs(v.variance_min))}
-                      {v.variance_min < 0 ? " under" : v.variance_min > 0 ? " over" : ""}
-                    </td>
-                    <td className={`analytics-num ${over ? "analytics-over" : under ? "analytics-under" : ""}`}>
-                      {v.variance_pct !== null ? `${v.variance_pct > 0 ? "+" : ""}${v.variance_pct}%` : "—"}
-                    </td>
-                    <td className="analytics-num">{v.entries}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
+      </div>
 
       {/* Stale in_progress cards */}
-      <section className="analytics-section">
-        <h2 className="analytics-heading">
+      <div className="analytics-accordion-section">
+        <button
+          className={`analytics-accordion-header${staleOpen ? " open" : ""}`}
+          onClick={handleStaleOpen}
+        >
+          <span className="analytics-caret">{staleOpen ? "▾" : "▸"}</span>
           Stale in-progress cards
-          <label className="analytics-stale-days">
-            (&gt;
+          <span className="analytics-stale-days-inline">
+            {" "}(&gt;
             <input
               type="number"
               className="analytics-days-input"
               value={staleDays}
               min={1}
               max={365}
-              onChange={(e) => setStaleDays(parseInt(e.target.value, 10) || 14)}
+              onClick={(e) => e.stopPropagation()}
+              onChange={handleStaleDaysChange}
             />
-            days)
-          </label>
-        </h2>
-        {loadingStale && <div className="analytics-loading">Loading…</div>}
-        {errorStale && <div className="analytics-error">{errorStale}</div>}
-        {!loadingStale && !errorStale && (!stale || stale.length === 0) && (
-          <div className="analytics-empty">No stale in-progress cards.</div>
+            days
+            <button
+              className="analytics-stale-go"
+              onClick={(e) => { e.stopPropagation(); setStaleFetched(false); setTimeout(handleStaleFetch, 0); }}
+            >
+              Go
+            </button>)
+          </span>
+        </button>
+
+        {staleOpen && (
+          <div className="analytics-accordion-body">
+            {loadingStale && <div className="analytics-loading">Loading…</div>}
+            {errorStale && <div className="analytics-error">{errorStale}</div>}
+            {!loadingStale && !errorStale && staleData && staleData.length === 0 && (
+              <div className="analytics-empty">No stale in-progress cards.</div>
+            )}
+            {!loadingStale && !errorStale && staleData && staleData.length > 0 && (
+              <table className="analytics-table">
+                <thead>
+                  <tr>
+                    <th>Card</th>
+                    <th>Client</th>
+                    <th>Division</th>
+                    <th className="analytics-num">Last update</th>
+                    <th>Next step</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staleData.map((s) => (
+                    <tr key={s.id}>
+                      <td>{s.name}</td>
+                      <td>{s.company_name || "—"}</td>
+                      <td>{s.division || "—"}</td>
+                      <td className="analytics-num analytics-stale-age">
+                        {ageDays(s.updated_at)}d ago
+                      </td>
+                      <td className="analytics-next-step">{s.next_step || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
-        {!loadingStale && !errorStale && stale && stale.length > 0 && (
-          <table className="analytics-table">
-            <thead>
-              <tr>
-                <th>Card</th>
-                <th>Client</th>
-                <th>Division</th>
-                <th className="analytics-num">Last update</th>
-                <th>Next step</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stale.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.name}</td>
-                  <td>{s.company_name || "—"}</td>
-                  <td>{s.division || "—"}</td>
-                  <td className="analytics-num analytics-stale-age">
-                    {ageDays(s.updated_at)}d ago
-                  </td>
-                  <td className="analytics-next-step">{s.next_step || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      </div>
+
     </div>
   );
 }

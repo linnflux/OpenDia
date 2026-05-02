@@ -4,11 +4,11 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
-import { requireLinnfluxUser } from "./auth.js";
+import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects } from "./db.js";
 import { spawn, exec } from "child_process";
-import { readFileSync, existsSync } from "fs";
-import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getHoursByClientWeek, getEstimateVariance } from "./timers.js";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
+import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
 import { analyzeSync } from "./ai.js";
@@ -298,24 +298,12 @@ app.post("/api/timers/backfill", async (_req, res) => {
 
 // ── Analytics endpoints ───────────────────────────────────────────────────────
 
-app.get("/api/analytics/hours-by-client", async (req, res) => {
+app.get("/api/analytics/week", async (req, res) => {
   try {
-    const { from, to } = req.query;
-    const data = await getHoursByClientWeek({ from, to });
+    const data = await getWeekDetail({ week: req.query.week });
     res.json(data);
   } catch (err) {
-    console.error("GET /api/analytics/hours-by-client error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/analytics/estimate-variance", async (req, res) => {
-  try {
-    const { from, to } = req.query;
-    const data = await getEstimateVariance({ from, to });
-    res.json(data);
-  } catch (err) {
-    console.error("GET /api/analytics/estimate-variance error:", err.message);
+    console.error("GET /api/analytics/week error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -328,6 +316,119 @@ app.get("/api/analytics/stale", (req, res) => {
     console.error("GET /api/analytics/stale error:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Billing endpoints (admin-only) ───────────────────────────────────────────
+
+function lastMonthYYYYMM() {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+app.get("/api/billing/preview", requireAdmin, (req, res) => {
+  const month = req.query.month || lastMonthYYYYMM();
+  const script = resolve(process.env.HOME, "OpenDia", "scripts", "monthly_billing.py");
+  const proc = spawn("python3", [script, "--month", month, "--json"]);
+  let out = "", err = "";
+  proc.stdout.on("data", d => { out += d; });
+  proc.stderr.on("data", d => { err += d; });
+  proc.on("close", code => {
+    if (code !== 0) {
+      console.error("billing preview error:", err);
+      return res.status(500).json({ error: err || "script failed" });
+    }
+    try {
+      res.json(JSON.parse(out));
+    } catch {
+      res.status(500).json({ error: "failed to parse billing output" });
+    }
+  });
+});
+
+app.post("/api/billing/push", requireAdmin, (_req, res) => {
+  res.status(501).json({ error: "not_implemented", note: "Push-to-sheet coming in follow-up plan" });
+});
+
+// ── Newsletter endpoints (admin-only) ─────────────────────────────────────────
+
+const NEWSLETTER_DIR = resolve(process.env.HOME, "OpenDia", "newsletters");
+const NEWSLETTER_NAME_RE = /^newsletter-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.md$/;
+
+function safeNewsletterPath(name) {
+  if (typeof name !== "string" || !NEWSLETTER_NAME_RE.test(name))
+    throw new Error("invalid newsletter name");
+  return resolve(NEWSLETTER_DIR, name);
+}
+
+app.get("/api/newsletter/list", requireAdmin, (_req, res) => {
+  if (!existsSync(NEWSLETTER_DIR)) return res.json([]);
+  const files = readdirSync(NEWSLETTER_DIR)
+    .filter(n => NEWSLETTER_NAME_RE.test(n))
+    .map(n => {
+      const st = statSync(resolve(NEWSLETTER_DIR, n));
+      const m = n.match(/^newsletter-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.md$/);
+      return { name: n, from: m[1], to: m[2], mtime: st.mtimeMs, size: st.size };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+  res.json(files);
+});
+
+app.get("/api/newsletter/file", requireAdmin, (req, res) => {
+  try {
+    const path = safeNewsletterPath(req.query.name);
+    if (!existsSync(path)) return res.status(404).json({ error: "not found" });
+    res.json({ name: req.query.name, content: readFileSync(path, "utf8") });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put("/api/newsletter/file", requireAdmin, (req, res) => {
+  try {
+    const { name, content } = req.body;
+    const path = safeNewsletterPath(name);
+    writeFileSync(path, content ?? "", "utf8");
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post("/api/newsletter/generate", requireAdmin, (req, res) => {
+  const { from, to, notes } = req.body || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to))
+    return res.status(400).json({ error: "invalid date format" });
+  if (from > to)
+    return res.status(400).json({ error: "from must be on or before to" });
+
+  const targetName = `newsletter-${from}-to-${to}.md`;
+  const targetPath = resolve(NEWSLETTER_DIR, targetName);
+
+  const notesLine = notes && notes.trim()
+    ? `\nIncorporate these user-provided notes during composition:\n${notes.trim()}`
+    : "";
+  const prompt = `Run /newsletter ${from} ${to}.\n\nThe user invoked this from the OpenDia dashboard and has already confirmed the date range — skip Step 2 (AskUserQuestion) and proceed directly to Step 3.${notesLine}`;
+
+  const claudeBin = resolve(process.env.HOME, ".local", "bin", "claude");
+  const proc = spawn(claudeBin, [
+    "-p", prompt,
+    "--permission-mode", "bypassPermissions",
+    "--output-format", "json",
+  ], { cwd: resolve(process.env.HOME, "OpenDia") });
+
+  let stderr = "";
+  proc.stderr.on("data", d => { stderr += d; });
+  proc.on("error", err => {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  });
+  proc.on("close", code => {
+    if (res.headersSent) return;
+    if (code !== 0) {
+      console.error("newsletter generate exit", code, stderr);
+      return res.status(500).json({ error: `claude exited ${code}`, stderr });
+    }
+    if (!existsSync(targetPath))
+      return res.status(500).json({ error: "newsletter file not produced", stderr });
+    res.json({ name: targetName, content: readFileSync(targetPath, "utf8") });
+  });
 });
 
 app.get("/api/projects/:id/timers", async (req, res) => {

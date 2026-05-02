@@ -179,17 +179,35 @@ Requests from `127.0.0.1` / `::1` skip the Tailscale check. This keeps local scr
 3. They sign into Tailscale with their Workspace account — their device joins the tailnet.
 4. They visit `https://opendia.taild43937.ts.net/` — access is granted automatically.
 
-No per-user configuration needed. All `@linnflux.com` accounts get equal full access.
+No per-user configuration needed. All `@linnflux.com` accounts get equal access to the standard views (Board, Inbox, Clients, Analytics). Admin-only views (Billing, Newsletter) require an additional allowlist — see below.
+
+### Roles (admin allowlist)
+
+Most views are open to any authenticated `@linnflux.com` user. A small number of admin-only views (Billing, Newsletter — see [Admin-only Views](#admin-only-views) below) are gated by an email allowlist in `.env`:
+
+```
+AUTH_ADMIN_EMAILS=nick@linnflux.com
+```
+
+Comma-separated, case-insensitive. The middleware in `server/auth.js`:
+
+- Sets `req.user.is_admin = true` if `req.user.login` is in the allowlist (or the request is loopback)
+- Exposes `is_admin` on `GET /api/me` for the frontend to gate UI accordingly
+- Exports `requireAdmin` middleware that returns 403 `{ error: "forbidden", reason: "admin_only" }` for non-admins
+
+`requireAdmin` is mounted on each admin-only route individually; it is **not** a global gate. Existing routes remain unchanged. Loopback requests are always admin so local scripts (`/od-stop backfill`, etc.) keep working.
+
+The frontend snaps any non-admin who lands on `view = "billing"` or `view = "newsletter"` back to Board, and the command palette omits the corresponding actions for non-admins.
 
 ### `GET /api/me`
 
 Returns the current user's identity as seen by the server:
 
 ```json
-{ "login": "nick@linnflux.com", "name": "Nick Linn", "source": "tailscale" }
+{ "login": "nick@linnflux.com", "name": "Nick Linn", "source": "tailscale", "is_admin": true }
 ```
 
-Returns `{ "source": "loopback" }` for local script requests.
+Returns `{ "source": "loopback", "is_admin": true }` for local script requests.
 
 ## API
 
@@ -223,21 +241,46 @@ Returns `{ "source": "loopback" }` for local script requests.
 | `GET` | `/api/client-aliases` | All learned sender → client mappings. |
 | `POST` | `/api/client-aliases` | Add or update an alias. Body: `{ match_type, match_value, client_hint, division_hint, note }` |
 | `GET` | `/api/file` | Serve files under `~/OpenDia/` by `?path=` |
-| `GET` | `/api/analytics/hours-by-client` | Hours grouped by client × ISO week. `?from=YYYY-MM-DD&to=YYYY-MM-DD`. Returns `[{ client, weeks: [{ week, billable_min, nonbillable_min, entries }] }]` sorted by total hours desc. |
-| `GET` | `/api/analytics/estimate-variance` | Estimate vs actual variance per project. `?from=&to=`. Returns `[{ client, project, estimated_min, actual_min, variance_min, variance_pct, entries }]` sorted by abs(variance) desc. |
+| `GET` | `/api/analytics/week` | One week of timer data grouped by client. `?week=YYYY-Wnn` (omit for current week). Returns `{ week, weekStart, weekEnd, prevWeek, nextWeek, clients[{ client, billable_min, nonbillable_min, total_min, entries[] }] }`. Aggregates use `estimated_minutes`. |
 | `GET` | `/api/analytics/stale` | In-progress cards not updated in `?days=` (default 14). Returns `[{ id, name, company_name, division, updated_at, next_step }]`. |
+| `GET` | `/api/billing/preview` | **Admin only.** Shells out to `~/OpenDia/scripts/monthly_billing.py --month YYYY-MM --json` (dry-run) and returns per-client estimated billable / nonbillable minutes plus per-entry breakdown. Defaults to last calendar month. |
+| `POST` | `/api/billing/push` | **Admin only.** Stub (returns 501) — push-to-Billing-Master sheet wiring is the follow-up plan. |
+| `GET` | `/api/newsletter/list` | **Admin only.** Returns `[{ name, from, to, mtime, size }]` for every file in `~/OpenDia/newsletters/` matching `^newsletter-YYYY-MM-DD-to-YYYY-MM-DD\.md$`, sorted desc by mtime. |
+| `GET` | `/api/newsletter/file` | **Admin only.** Returns `{ name, content }` for the requested newsletter. `?name=` is validated against the canonical filename regex (path traversal blocked). |
+| `PUT` | `/api/newsletter/file` | **Admin only.** Body: `{ name, content }`. Writes the markdown back to disk for in-dashboard editing. |
+| `POST` | `/api/newsletter/generate` | **Admin only.** Body: `{ from, to, notes? }`. Shells out to `~/.local/bin/claude -p "/newsletter $from $to ..."` with `--permission-mode bypassPermissions` and `--output-format json` to invoke the `/newsletter` skill non-interactively. The wrapper prompt forwards the user's notes for incorporation during composition. Blocks 30–90s; returns the resulting file's `{ name, content }`. |
 
 ## Analytics View
 
 An internal-only analytics screen accessible via **Ctrl+K → Open Analytics**. It does not appear in the top nav (intentionally obfuscated).
 
-Three sections, filterable by date range (defaults to last 8 weeks):
+Two collapsible accordion sections:
 
-- **Hours by Client × Week** — billable and non-billable minutes per client per ISO week, sourced from daily `.md` timer files. Useful for weekly billing review.
-- **Estimate vs Actual** — compares `estimated_minutes` from timer entries against actual `duration`, per project. Top variances surfaced first. Useful for spotting scope creep or systematic mis-estimation.
-- **Stale in-progress cards** — board cards with `status = in_progress` and `updated_at` older than the configured threshold (default 14 days). Useful for pruning abandoned work.
+- **Hours by Client × Week** (expanded by default) — week navigator with ◀ / ▶ to step between ISO weeks. Within a week, each client shows total estimated time (billable highlighted green); click to expand and see individual entries (date · task · estimated minutes). All aggregation uses `estimated_minutes`, not wall-clock duration. Sourced from daily `.md` timer files.
+- **Stale in-progress cards** (collapsed by default, lazy-fetched on open) — board cards with `status = in_progress` and `updated_at` older than the configured threshold (default 14 days). Adjustable with an inline days input + Go button. Useful for pruning abandoned work.
 
 Exit by clicking any top-nav button (Board / Inbox / Clients).
+
+## Admin-only Views
+
+Two views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles-admin-allowlist) above). They are not in the top nav — both are reachable only via **Ctrl+K**, and the palette omits their actions for non-admins. Backend routes are guarded by `requireAdmin` independently of the UI gate.
+
+### Billing
+
+**Ctrl+K → Open Billing.** Pick a month, click *Generate Preview*. The server shells out to `~/OpenDia/scripts/monthly_billing.py --month YYYY-MM --json` (dry-run) and returns per-client billable / non-billable estimated minutes (sourced from the timer ledger). Each client expands to show individual entries. A *Push to Billing Master* button is stubbed pending the follow-up plan; for now, run `/monthly-billing` in a terminal to write to the sheet.
+
+### Newsletter
+
+**Ctrl+K → Open Newsletter.** Pick a date range (defaults to last calendar month) and optionally add notes, then click *Generate Newsletter*. The server shells out to `~/.local/bin/claude -p "/newsletter $from $to ..."` with `--permission-mode bypassPermissions` and `--output-format json` — this invokes the `/newsletter` Claude Code skill non-interactively. The wrapper prompt:
+
+1. Tells the skill the user has already confirmed the date range (skip Step 2's `AskUserQuestion`)
+2. Forwards any user-provided notes for incorporation during composition
+
+`/newsletter` writes the markdown to `~/OpenDia/newsletters/newsletter-{from}-to-{to}.md`; the dashboard reads it back and loads it into a split-pane editor with live preview (rendered via `marked`). Past newsletters are listed in the left rail and can be loaded for editing. Edits save back to the same file via PUT. *Copy Markdown* puts the source on the clipboard for pasting into a Gmail draft.
+
+Generation blocks 30–90s and costs ~$0.20 in API tokens (Sonnet 4.6). Concurrent generations for the same date range race on the file — the UI disables the button mid-run, but no server-side lock is enforced. Distribution is manual (no send button).
+
+The systemd user service runs as `linnflux`, so `~/.claude/` credentials, MCP config, and the `claude` binary on `~/.local/bin/` all resolve from the spawned process.
 
 ## `/od-go` and `/od-stop` Integration
 

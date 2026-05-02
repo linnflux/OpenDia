@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 const DIVISION_COLORS = {
-  WordFlux: { bg: "#3b82f6", text: "#0a1628" },
+  WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
   WatchThreat: { bg: "#5e97f2", text: "#fff" },
   AmPen: { bg: "#5a7a94", text: "#fff" },
   "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
@@ -46,7 +46,7 @@ export default function Card({ project, onClick, hasActiveTimer }) {
       </div>
       <div className="card-badges">
         {project.division && (
-          <span className="card-division" style={{ backgroundColor: div.bg, color: div.text }}>
+          <span className="card-division" style={{ backgroundColor: div.bg, color: div.text, ...(div.uppercase ? { textTransform: "uppercase" } : {}) }}>
             {project.division}
           </span>
         )}
