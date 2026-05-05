@@ -75,6 +75,8 @@ FILTER
 
 rclone sync "$CLAUDE_DIR/" "gdrive:Claude-Config/" \
     --filter-from "$CLAUDE_FILTER" \
+    --tpslimit 8 --tpslimit-burst 8 \
+    --retries 5 --low-level-retries 20 \
     -v 2>&1 | tail -5
 rm -f "$CLAUDE_FILTER"
 
@@ -100,6 +102,7 @@ cat > "$OPENDIA_FILTER" <<'FILTER'
 - **/.astro/**
 - **/.next/**
 - **/.cache/**
+- db-backups/**
 + **
 FILTER
 
@@ -109,7 +112,8 @@ DB_SIZE=$(stat -c%s "$DB_LOCAL" 2>/dev/null || echo 0)
 if [ "$DB_SIZE" -gt 10000 ]; then
     DB_STAMP=$(date +%Y%m%d)
     info "Versioned db backup → gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db ..."
-    rclone copyto "$DB_LOCAL" "gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db" 2>&1 | tail -2
+    rclone copyto "$DB_LOCAL" "gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db" \
+        --tpslimit 8 --tpslimit-burst 8 --retries 5 2>&1 | tail -2
     # Clean up backup copies older than 7 days
     rclone delete "gdrive:OpenDia/db-backups/" --min-age 7d 2>/dev/null || true
 else
@@ -120,6 +124,8 @@ fi
 
 rclone sync "$OPENDIA_DIR/" "gdrive:OpenDia/" \
     --filter-from "$OPENDIA_FILTER" \
+    --tpslimit 8 --tpslimit-burst 8 \
+    --retries 5 --low-level-retries 20 \
     -v 2>&1 | tail -5
 rm -f "$OPENDIA_FILTER"
 
@@ -142,6 +148,8 @@ if [ -d "$FLUXCC_DIR" ]; then
         --exclude ".astro/**" \
         --exclude "package-lock.json" \
         --exclude ".git/**" \
+        --tpslimit 8 --tpslimit-burst 8 \
+        --retries 5 --low-level-retries 20 \
         -v 2>&1 | tail -5
 else
     warn "~/FluxCC not found — skipping"
@@ -161,3 +169,4 @@ echo "  gdrive:FluxCC/"
 rclone ls "gdrive:FluxCC/" 2>/dev/null | wc -l | xargs -I{} echo "    {} files"
 echo ""
 info "Ready to run migrate-setup.sh on the new machine."
+touch "$OPENDIA_DIR/logs/.last-backup-success"
