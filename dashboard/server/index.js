@@ -17,6 +17,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(express.json());
+
+const DEFAULT_THEME_DIR = resolve(__dirname, "..", "themes");
+
+app.get("/api/theme", (req, res) => {
+  const name = req.query.name || "dark";
+  if (!/^[a-z0-9-]+$/.test(name)) return res.status(400).json({ error: "invalid theme name" });
+  const themePath = process.env.OPENDIA_THEME || resolve(DEFAULT_THEME_DIR, `${name}.json`);
+  try {
+    res.json(JSON.parse(readFileSync(themePath, "utf8")));
+  } catch {
+    res.status(404).json({ error: "theme not found" });
+  }
+});
+
 app.use(requireLinnfluxUser);
 app.get("/api/me", (req, res) => res.json(req.user));
 
@@ -347,8 +361,67 @@ app.get("/api/billing/preview", requireAdmin, (req, res) => {
   });
 });
 
-app.post("/api/billing/push", requireAdmin, (_req, res) => {
-  res.status(501).json({ error: "not_implemented", note: "Push-to-sheet coming in follow-up plan" });
+app.post("/api/billing/push", requireAdmin, (req, res) => {
+  const month = (req.body && req.body.month) || lastMonthYYYYMM();
+  if (!/^\d{4}-\d{2}$/.test(month))
+    return res.status(400).json({ error: "invalid month format (expected YYYY-MM)" });
+  const script = resolve(process.env.HOME, "OpenDia", "scripts", "monthly_billing.py");
+  const proc = spawn("python3", [script, "--month", month, "--write-sheet"]);
+  let out = "", err = "";
+  proc.stdout.on("data", d => { out += d; });
+  proc.stderr.on("data", d => { err += d; });
+  proc.on("close", code => {
+    if (code !== 0) {
+      console.error("billing push error:", err);
+      return res.status(500).json({ error: err.trim() || "script failed" });
+    }
+    const rowMatch = out.match(/Wrote (\d+) rows/);
+    res.json({
+      ok: true,
+      month,
+      rows: rowMatch ? parseInt(rowMatch[1], 10) : null,
+      sheet_url: "https://docs.google.com/spreadsheets/d/1VowYnKQG3lM-RZIVqgtlCHc2QSx364epvdiRlSMsLFY/edit#gid=0",
+      stdout: out.trim(),
+    });
+  });
+});
+
+const TIME_DIR = resolve(process.env.HOME, "OpenDia", "Time");
+const ENTRY_START_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+app.patch("/api/billing/entry", requireAdmin, (req, res) => {
+  const { start, billable } = req.body || {};
+  if (!ENTRY_START_RE.test(start || ""))
+    return res.status(400).json({ error: "invalid start (expected YYYY-MM-DDTHH:MM)" });
+  if (typeof billable !== "boolean")
+    return res.status(400).json({ error: "billable must be a boolean" });
+
+  const [date] = start.split("T");
+  const [yyyy, mm] = date.split("-");
+  const dailyFile = resolve(TIME_DIR, yyyy, mm, `${date}.md`);
+  if (!existsSync(dailyFile))
+    return res.status(404).json({ error: "daily file not found" });
+
+  const original = readFileSync(dailyFile, "utf8");
+  const marker = `<!-- entry:${start} -->`;
+  const idx = original.indexOf(marker);
+  if (idx === -1)
+    return res.status(404).json({ error: "entry not found in daily file" });
+
+  // Find the end of this entry block (next standalone ---)
+  const after = original.slice(idx);
+  const blockEndRel = after.search(/\n---\s*$/m);
+  if (blockEndRel === -1)
+    return res.status(500).json({ error: "could not locate end of entry block" });
+
+  const block = after.slice(0, blockEndRel);
+  const newBlock = block.replace(/^billable:\s*(true|false)\s*$/m, `billable: ${billable}`);
+  if (newBlock === block)
+    return res.status(500).json({ error: "billable line not found in entry" });
+
+  const updated = original.slice(0, idx) + newBlock + after.slice(blockEndRel);
+  writeFileSync(dailyFile, updated, "utf8");
+  res.json({ ok: true, start, billable });
 });
 
 // ── Newsletter endpoints (admin-only) ─────────────────────────────────────────

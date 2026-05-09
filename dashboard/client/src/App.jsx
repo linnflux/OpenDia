@@ -83,8 +83,21 @@ export default function App() {
     : null;
 
   useEffect(() => {
-    document.documentElement.className = theme === "light" ? "light-theme" : "";
     localStorage.setItem("opendia-theme", theme);
+    fetch(`/api/theme?name=${theme}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        const root = document.documentElement;
+        for (const [k, v] of Object.entries(data.colors || {}))
+          root.style.setProperty(`--${k}`, v);
+        for (const [k, v] of Object.entries(data.radius || {}))
+          root.style.setProperty(`--radius-${k}`, v);
+        if (data.fonts?.sans) root.style.setProperty("--font-sans", data.fonts.sans);
+        if (data.fonts?.mono) root.style.setProperty("--font-mono", data.fonts.mono);
+        if (data.fonts?.["size-base"]) root.style.setProperty("--font-size-base", data.fonts["size-base"]);
+      })
+      .catch(() => {});
   }, [theme]);
 
   useEffect(() => {
