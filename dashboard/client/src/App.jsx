@@ -68,6 +68,8 @@ export default function App() {
   const [view, setView] = useState("board"); // "board" | "inbox" | "clients"
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
+  const [themes, setThemes] = useState([]);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [filter, setFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [inboxFilter, setInboxFilter] = useState("active");
@@ -81,6 +83,10 @@ export default function App() {
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) || null
     : null;
+
+  useEffect(() => {
+    fetch("/api/themes").then((r) => r.ok ? r.json() : []).then(setThemes).catch(() => {});
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("opendia-theme", theme);
@@ -328,6 +334,31 @@ export default function App() {
             <span className="app-user-pill" title={me.login}>
               {me.name || me.login}
             </span>
+          )}
+          {themes.length > 0 && (
+            <div className="theme-picker-wrap">
+              {themePickerOpen && <div className="theme-picker-backdrop" onClick={() => setThemePickerOpen(false)} />}
+              <button className="theme-picker-btn" onClick={() => setThemePickerOpen((o) => !o)}>
+                <span className="theme-picker-dot" style={{ background: themes.find((t) => t.name === theme)?.bg }} />
+                <span className="theme-picker-name">{themes.find((t) => t.name === theme)?.label ?? theme}</span>
+                <span className="theme-picker-caret">▾</span>
+              </button>
+              {themePickerOpen && (
+                <div className="theme-picker-menu">
+                  {themes.map((t) => (
+                    <button
+                      key={t.name}
+                      className={`theme-picker-option${theme === t.name ? " active" : ""}`}
+                      onClick={() => { setTheme(t.name); setThemePickerOpen(false); }}
+                    >
+                      <span className="theme-picker-swatch" style={{ background: t.bg }} />
+                      <span className="theme-picker-label">{t.label}</span>
+                      {theme === t.name && <span className="theme-picker-check">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <button className="cp-trigger" onClick={() => setPaletteOpen(true)}>
             <span className="cp-trigger-icon">&#x2315;</span>

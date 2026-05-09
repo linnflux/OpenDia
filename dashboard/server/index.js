@@ -31,6 +31,25 @@ app.get("/api/theme", (req, res) => {
   }
 });
 
+app.get("/api/themes", (req, res) => {
+  try {
+    const dir = DEFAULT_THEME_DIR;
+    const themes = readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          const data = JSON.parse(readFileSync(resolve(dir, f), "utf8"));
+          return { name: f.replace(".json", ""), label: data.meta?.name || f.replace(".json", ""), bg: data.colors?.["bg-body"] || "#000" };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.label.localeCompare(b.label));
+    res.json(themes);
+  } catch {
+    res.status(500).json({ error: "could not list themes" });
+  }
+});
+
 app.use(requireLinnfluxUser);
 app.get("/api/me", (req, res) => res.json(req.user));
 
