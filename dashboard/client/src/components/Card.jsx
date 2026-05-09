@@ -63,7 +63,9 @@ export default function Card({ project, onClick, hasActiveTimer }) {
         </div>
       )}
       {project.tmux_session && (
-        <div className="card-tmux">{project.tmux_session}</div>
+        <div className="card-tmux-row">
+          <span className="card-tmux">{project.tmux_session}</span>
+        </div>
       )}
     </div>
   );

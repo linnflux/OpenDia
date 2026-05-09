@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { marked } from "marked";
 import TerminalPanel from "./TerminalPanel.jsx";
+
+marked.setOptions({ breaks: true, gfm: true });
 
 const STATUSES = [
   { key: "in_progress", label: "In Progress", color: "#3b82f6" },
@@ -551,9 +554,18 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
               <button className="modal-save-btn" onMouseDown={saveNotes}>Save</button>
             </div>
           ) : (
-            <div className="modal-value clickable" onClick={() => setEditingNotes(true)}>
+            <div
+              className="modal-value clickable"
+              onClick={(e) => {
+                if (e.target.tagName === "A") return;
+                setEditingNotes(true);
+              }}
+            >
               {project.notes ? (
-                <p className="modal-notes-text">{project.notes}</p>
+                <div
+                  className="modal-notes-rendered"
+                  dangerouslySetInnerHTML={{ __html: marked.parse(project.notes) }}
+                />
               ) : (
                 <span className="modal-empty">Click to add notes</span>
               )}
