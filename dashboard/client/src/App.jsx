@@ -37,6 +37,7 @@ import CardModal from "./components/CardModal.jsx";
 import InboxCard from "./components/InboxCard.jsx";
 import InboxModal from "./components/InboxModal.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
+import ThemeModal from "./components/ThemeModal.jsx";
 import Clients from "./components/Clients.jsx";
 import Analytics from "./components/Analytics.jsx";
 import Billing from "./components/Billing.jsx";
@@ -69,6 +70,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [themes, setThemes] = useState([]);
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
 
   const [filter, setFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -405,14 +407,20 @@ export default function App() {
         companies={companies}
         onSelectProject={(p) => setSelectedProjectId(p.id)}
         onSelectCompany={(key) => { setPaletteOpen(false); openClientPanel(key); }}
-        theme={theme}
-        themes={themes}
-        onSetTheme={setTheme}
+        onOpenThemeModal={() => { setPaletteOpen(false); setThemeModalOpen(true); }}
         onOpenAnalytics={() => { setPaletteOpen(false); setView("analytics"); }}
         isAdmin={!!me?.is_admin}
         onOpenBilling={() => { setPaletteOpen(false); setView("billing"); }}
         onOpenNewsletter={() => { setPaletteOpen(false); setView("newsletter"); }}
       />
+      {themeModalOpen && (
+        <ThemeModal
+          themes={themes}
+          currentTheme={theme}
+          onSelect={setTheme}
+          onClose={() => setThemeModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

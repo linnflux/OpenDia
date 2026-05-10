@@ -39,7 +39,18 @@ app.get("/api/themes", (req, res) => {
       .map((f) => {
         try {
           const data = JSON.parse(readFileSync(resolve(dir, f), "utf8"));
-          return { name: f.replace(".json", ""), label: data.meta?.name || f.replace(".json", ""), bg: data.colors?.["bg-body"] || "#000" };
+          return {
+            name: f.replace(".json", ""),
+            label: data.meta?.name || f.replace(".json", ""),
+            bg: data.colors?.["bg-body"] || "#000",
+            preview: {
+              bg:      data.colors?.["bg-body"]    || "#000",
+              surface: data.colors?.["bg-surface"] || "#111",
+              accent:  data.colors?.["accent"]     || "#3b82f6",
+              text:    data.colors?.["text-primary"] || "#fff",
+              border:  data.colors?.["border"]     || "#333",
+            },
+          };
         } catch { return null; }
       })
       .filter(Boolean)
