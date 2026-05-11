@@ -628,7 +628,7 @@ body.has-bg::before {
 .modal {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   width: 95%;
   max-width: 780px;
   height: 92vh;
