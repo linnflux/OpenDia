@@ -107,6 +107,13 @@ function matchSharedTokens(a, b) {
   return n;
 }
 
+// Word-boundary client match — prevents "part" (short name) matching inside "partners".
+function clientContains(haystack, needle) {
+  if (!haystack || !needle) return false;
+  const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${esc}\\b`, "i").test(haystack);
+}
+
 export function matchProject(client, division, task, project) {
   const clientLower = (client || "").toLowerCase();
   const divisionLower = (division || "").toLowerCase();
@@ -145,8 +152,8 @@ export function matchProject(client, division, task, project) {
     const clientMatch = clientLower && (
       companyLower === clientLower ||
       shortLower === clientLower ||
-      (companyLower && (companyLower.includes(clientLower) || clientLower.includes(companyLower))) ||
-      (shortLower && (shortLower.includes(clientLower) || clientLower.includes(shortLower)))
+      (companyLower && (clientContains(companyLower, clientLower) || clientContains(clientLower, companyLower))) ||
+      (shortLower && (clientContains(shortLower, clientLower) || clientContains(clientLower, shortLower)))
     );
     if (!clientMatch) continue;
 
@@ -198,8 +205,8 @@ export function matchProjectCandidates(client, division, task, limit = 3) {
     const clientMatch = clientLower && (
       companyLower === clientLower ||
       shortLower === clientLower ||
-      (companyLower && (companyLower.includes(clientLower) || clientLower.includes(companyLower))) ||
-      (shortLower && (shortLower.includes(clientLower) || clientLower.includes(shortLower)))
+      (companyLower && (clientContains(companyLower, clientLower) || clientContains(clientLower, companyLower))) ||
+      (shortLower && (clientContains(shortLower, clientLower) || clientContains(clientLower, shortLower)))
     );
     if (!clientMatch) continue;
 
