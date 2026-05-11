@@ -52,10 +52,15 @@ export async function analyzeSync({ project, emails, notion }) {
         .join("\n---\n")
     : "No recent emails found.";
 
+  const today = new Date().toISOString().slice(0, 10);
+  const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   const prompt = `You are a project management assistant for Linnflux, a web services company. Analyze the following project context, Notion task, and recent emails to determine:
 
 1. Whether any emails contain new requests, change requests, or action items from the client
 2. What the updated "next step" should be for this project (one concise sentence)
+
+Today: ${today}
 
 PROJECT:
 ${projectContext}
@@ -68,7 +73,7 @@ ${emailContext}
 
 Respond in JSON only (no markdown fencing):
 {
-  "nextStep": "the recommended next step (concise, actionable)",
+  "nextStep": "the recommended next step — if there is a clear by-when (external dependency, scheduled event, soft deadline), prepend YYYY-MM-DD: to the action text (e.g. '${nextWeek}: Follow up with client if no response'). Default for waiting-on-someone with no specific date: today +1 week (${nextWeek}). Skip the prefix for pure work-continuation items. Max 100 chars total.",
   "changeRequests": [
     {
       "summary": "one-line summary of the change/request",
