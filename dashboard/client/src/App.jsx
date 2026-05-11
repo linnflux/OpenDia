@@ -32,7 +32,8 @@ function ClientsIcon() {
 import { useProjects } from "./hooks/useProjects.js";
 import { useInbox } from "./hooks/useInbox.js";
 import { useCompanies } from "./hooks/useCompanies.js";
-import Board from "./components/Board.jsx";
+import StatusSidebar from "./components/StatusSidebar.jsx";
+import StatusGrid from "./components/StatusGrid.jsx";
 import CardModal from "./components/CardModal.jsx";
 import InboxCard from "./components/InboxCard.jsx";
 import InboxModal from "./components/InboxModal.jsx";
@@ -59,8 +60,14 @@ function getInitialTheme() {
   return "dark";
 }
 
+function getInitialStatus() {
+  const saved = localStorage.getItem("opendia.activeStatus");
+  const valid = ["in_progress", "wfhuman", "ice", "completed"];
+  return valid.includes(saved) ? saved : "in_progress";
+}
+
 export default function App() {
-  const { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh } = useProjects();
+  const { grouped, projects, loading, moveProject, updateProject, refresh } = useProjects();
   const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
   const companies = useCompanies(projects);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -72,6 +79,8 @@ export default function App() {
   const [themes, setThemes] = useState([]);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
 
+  const [activeStatus, setActiveStatus] = useState(getInitialStatus);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [filter, setFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [inboxFilter, setInboxFilter] = useState("active");
@@ -189,6 +198,16 @@ export default function App() {
 
   function handleCardClick(project) {
     setSelectedProjectId(project.id);
+  }
+
+  function handleStatusChange(projectId, newStatus) {
+    moveProject(projectId, newStatus);
+  }
+
+  function handleActiveStatusChange(status) {
+    setActiveStatus(status);
+    localStorage.setItem("opendia.activeStatus", status);
+    setSidebarOpen(false);
   }
 
   function handleModalUpdate(id, fields) {
@@ -348,7 +367,35 @@ export default function App() {
         loading ? (
           <div className="loading">Loading projects...</div>
         ) : (
-          <Board grouped={filtered} moveProject={moveProject} reorderColumn={reorderColumn} onCardClick={handleCardClick} activeTimerIds={activeTimerIds} />
+          <div className="board-layout">
+            <StatusSidebar
+              active={activeStatus}
+              counts={{
+                in_progress: filtered.in_progress?.length ?? 0,
+                wfhuman:     filtered.wfhuman?.length ?? 0,
+                ice:         filtered.ice?.length ?? 0,
+                completed:   filtered.completed?.length ?? 0,
+              }}
+              onChange={handleActiveStatusChange}
+              mobileOpen={sidebarOpen}
+              onMobileClose={() => setSidebarOpen(false)}
+            />
+            <div className="board-main">
+              <div className="board-main-toolbar">
+                <button className="sidebar-hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open status menu">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                    <path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <StatusGrid
+                projects={filtered[activeStatus] || []}
+                onCardClick={handleCardClick}
+                activeTimerIds={activeTimerIds}
+                onStatusChange={handleStatusChange}
+              />
+            </div>
+          </div>
         )
       ) : view === "inbox" ? (
         <div className="inbox-view">

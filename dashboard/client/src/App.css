@@ -4007,3 +4007,241 @@ body.has-bg::before {
 .newsletter-action-copy {
   margin-left: auto;
 }
+
+/* ── Sidebar layout ──────────────────────────────────────────── */
+.board-layout {
+  display: flex;
+  height: calc(100vh - 3.75rem);
+  overflow: hidden;
+}
+
+.status-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0;
+  gap: 0.125rem;
+  overflow-y: auto;
+}
+
+.status-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  border: none;
+  border-left: 3px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.status-sidebar-item:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.status-sidebar-item.active {
+  background: var(--bg-card);
+  font-weight: 700;
+}
+
+.status-sidebar-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.status-sidebar-label {
+  flex: 1;
+}
+
+.status-sidebar-count {
+  background: var(--badge-bg);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-pill);
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+/* ── Board main area ─────────────────────────────────────────── */
+.board-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.board-main-toolbar {
+  display: none;
+}
+
+/* ── Status card grid ────────────────────────────────────────── */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  max-width: 1200px;
+  align-content: start;
+}
+
+.status-grid-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 2rem 0;
+}
+
+/* ── Card status pill ────────────────────────────────────────── */
+.card-status-pill-wrap {
+  position: relative;
+}
+
+.card-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  background: none;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: opacity 0.12s;
+}
+
+.card-status-pill:hover {
+  opacity: 0.75;
+}
+
+.card-status-caret {
+  font-size: 0.6rem;
+  opacity: 0.8;
+}
+
+.card-status-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 130px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.card-status-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border: none;
+  background: none;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.card-status-option:hover {
+  background: var(--bg-card);
+}
+
+.card-status-option.active {
+  background: var(--bg-card);
+  font-weight: 700;
+}
+
+.card-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Sidebar backdrop / drawer (mobile) ──────────────────────── */
+.sidebar-backdrop {
+  display: none;
+}
+
+/* ── Mobile: hamburger + drawer ──────────────────────────────── */
+@media (max-width: 900px) {
+  .board-layout {
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+
+  .status-sidebar {
+    position: fixed;
+    top: 0;
+    left: -260px;
+    width: 240px;
+    height: 100vh;
+    z-index: 500;
+    transition: left 0.2s ease;
+    box-shadow: none;
+    padding-top: 1rem;
+  }
+
+  .status-sidebar.open {
+    left: 0;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 499;
+    background: rgba(0,0,0,0.4);
+  }
+
+  .board-main {
+    padding: 0.75rem 1rem;
+  }
+
+  .board-main-toolbar {
+    display: flex;
+    align-items: center;
+  }
+
+  .sidebar-hamburger {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .sidebar-hamburger:hover {
+    color: var(--text-primary);
+    background: var(--bg-card);
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+}
