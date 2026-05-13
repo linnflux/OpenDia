@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies } from "./db.js";
 import { spawn, exec } from "child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
@@ -731,6 +731,15 @@ app.post("/api/inbox/:id/approve-deploy", (req, res) => {
     });
   } catch (err) {
     console.error("POST /api/inbox/:id/approve-deploy error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/companies", requireLinnfluxUser, (req, res) => {
+  try {
+    res.json({ companies: getAllCompanies() });
+  } catch (err) {
+    console.error("GET /api/companies error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

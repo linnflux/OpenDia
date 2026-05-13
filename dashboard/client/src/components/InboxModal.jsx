@@ -1,4 +1,84 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
+import useCompaniesList from "../hooks/useCompaniesList.js";
+
+function ClientAutocomplete({ value, onChange, companies }) {
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  const matches = useMemo(() => {
+    if (!value || !companies?.length) return [];
+    const q = value.toLowerCase();
+    const scored = [];
+    for (const c of companies) {
+      let score = 0;
+      if ((c.short_name || "").toLowerCase().includes(q)) score += 3;
+      if ((c.name || "").toLowerCase().includes(q)) score += 2;
+      if (score > 0) scored.push({ c, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    const results = scored.slice(0, 8).map((s) => s.c);
+    // Hide if the current value is already an exact match
+    if (results.length === 1 && results[0].name.toLowerCase() === q) return [];
+    return results;
+  }, [value, companies]);
+
+  const showList = open && matches.length > 0;
+
+  function select(name) {
+    onChange(name);
+    setOpen(false);
+    setActiveIdx(0);
+  }
+
+  function handleKeyDown(e) {
+    if (!showList) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => (i + 1) % matches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => (i - 1 + matches.length) % matches.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      select(matches[activeIdx].name);
+    } else if (e.key === "Escape" || e.key === "Tab") {
+      setOpen(false);
+    }
+  }
+
+  // Reset active index when matches change
+  useEffect(() => { setActiveIdx(0); }, [matches.length]);
+
+  return (
+    <div className="client-autocomplete-wrap">
+      <input
+        className="inbox-edit-input"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        placeholder="Client name"
+      />
+      {showList && (
+        <ul className="client-autocomplete-list">
+          {matches.map((c, i) => (
+            <li
+              key={c.id}
+              className={`client-autocomplete-item${i === activeIdx ? " active" : ""}`}
+              onMouseDown={() => select(c.name)}
+            >
+              {c.name}
+              {c.short_name && c.short_name !== c.name && (
+                <span className="client-autocomplete-short">{c.short_name}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const DIVISIONS = [
   "WordFlux", "WatchThreat", "AmPen", "Bedford AI", "ADA Web Work", "Linnflux", "FluxCC", "unknown",
@@ -50,6 +130,7 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   const [deployResult, setDeployResult] = useState(null); // { ok } | { error }
   const [logLines, setLogLines] = useState("");
   const [logExists, setLogExists] = useState(false);
+  const { companies } = useCompaniesList();
 
   // Reset draft when item changes (modal reused for different items)
   useEffect(() => {
@@ -252,11 +333,10 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
           <div className="inbox-edit-grid">
             <div className="inbox-edit-field">
               <label className="inbox-edit-label">Client</label>
-              <input
-                className="inbox-edit-input"
+              <ClientAutocomplete
                 value={draft.client_hint}
-                onChange={(e) => setDraft((d) => ({ ...d, client_hint: e.target.value }))}
-                placeholder="Client name"
+                onChange={(v) => setDraft((d) => ({ ...d, client_hint: v }))}
+                companies={companies}
               />
             </div>
             <div className="inbox-edit-field">

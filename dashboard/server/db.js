@@ -504,6 +504,14 @@ export function getStaleInProgressProjects(days = 14) {
   `).all(`-${parseInt(days, 10)} days`);
 }
 
+export function getAllCompanies() {
+  return getDb().prepare(`
+    SELECT id, name, short_name
+    FROM companies
+    ORDER BY name COLLATE NOCASE ASC
+  `).all();
+}
+
 export function reorderProjects(status, ids) {
   if (!VALID_STATUSES.has(status)) {
     throw new Error(`Invalid status: ${status}`);

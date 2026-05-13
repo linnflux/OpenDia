@@ -1841,6 +1841,45 @@ body.has-bg::before {
   border-color: var(--accent);
 }
 
+.client-autocomplete-wrap {
+  position: relative;
+}
+
+.client-autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 50;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 4px 0;
+}
+
+.client-autocomplete-item {
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.client-autocomplete-item.active,
+.client-autocomplete-item:hover {
+  background: var(--bg-input);
+  color: var(--accent);
+}
+
+.client-autocomplete-short {
+  opacity: 0.55;
+  margin-left: 0.5em;
+  font-size: 0.78em;
+}
+
 .inbox-edit-notes {
   background: var(--bg-input);
   border: 1px solid var(--border);
