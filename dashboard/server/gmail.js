@@ -84,6 +84,16 @@ async function fetchMessageDetails(messages) {
 }
 
 /**
+ * List the top N messages from the primary inbox category.
+ */
+export async function listPrimaryInboxTop(n = 5) {
+  const query = "in:inbox category:primary";
+  const result = await gmailFetch(`/messages?q=${encodeURIComponent(query)}&maxResults=${n}`);
+  if (!result?.messages) return [];
+  return fetchMessageDetails(result.messages.slice(0, n));
+}
+
+/**
  * Search Gmail for recent emails related to a company.
  * Runs multiple queries (company name, short name, sender domain) and deduplicates.
  * Returns an array of { subject, from, date, snippet, threadUrl }.

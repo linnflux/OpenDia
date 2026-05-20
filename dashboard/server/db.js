@@ -527,3 +527,36 @@ export function reorderProjects(status, ids) {
   });
   run();
 }
+
+export function getWfHumanProjects() {
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.updated_at,
+           c.name AS company_name, d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE p.status = 'wfhuman'
+    ORDER BY p.updated_at DESC
+    LIMIT 25
+  `).all();
+}
+
+export function getOpenInboxCount() {
+  ensureInboxTable();
+  const row = getDb().prepare(
+    "SELECT COUNT(*) AS count FROM inbox_items WHERE status NOT IN ('done','dismissed')"
+  ).get();
+  return row.count;
+}
+
+export function getRecentInbox(n = 5) {
+  ensureInboxTable();
+  return getDb().prepare(`
+    SELECT i.id, i.subject, i.client_hint, i.from_addr, i.priority, i.status, i.created_at,
+           p.name AS project_name
+    FROM inbox_items i
+    LEFT JOIN projects p ON i.project_id = p.id
+    WHERE i.status NOT IN ('done','dismissed')
+    ORDER BY i.created_at DESC LIMIT ?
+  `).all(n);
+}

@@ -29,6 +29,16 @@ function ClientsIcon() {
     </svg>
   );
 }
+
+function TodayIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1" y="2.5" width="12" height="10" rx="1.5" />
+      <path d="M4.5 1v3M9.5 1v3M1 6h12" />
+      <path d="M4.5 9h1.5M7.5 9H9M4.5 11.5h1.5" />
+    </svg>
+  );
+}
 import { useProjects } from "./hooks/useProjects.js";
 import { useInbox } from "./hooks/useInbox.js";
 import { useCompanies } from "./hooks/useCompanies.js";
@@ -43,6 +53,7 @@ import Clients from "./components/Clients.jsx";
 import Analytics from "./components/Analytics.jsx";
 import Billing from "./components/Billing.jsx";
 import Newsletter from "./components/Newsletter.jsx";
+import Today from "./components/Today.jsx";
 
 const DIVISION_COLORS = {
   WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
@@ -258,6 +269,10 @@ export default function App() {
             <BoardIcon />
             <span>Board</span>
           </button>
+          <button className={`view-toggle-btn${view === "today" ? " active" : ""}`} onClick={() => setView("today")}>
+            <TodayIcon />
+            <span>Today</span>
+          </button>
           <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
             <InboxIcon />
             <span>Inbox</span>
@@ -411,6 +426,8 @@ export default function App() {
             </div>
           )}
         </div>
+      ) : view === "today" ? (
+        <Today onOpenProject={handleProjectClick} />
       ) : view === "analytics" ? (
         <Analytics />
       ) : view === "billing" && me?.is_admin ? (
@@ -456,6 +473,7 @@ export default function App() {
         onSelectCompany={(key) => { setPaletteOpen(false); openClientPanel(key); }}
         onOpenThemeModal={() => { setPaletteOpen(false); setThemeModalOpen(true); }}
         onOpenAnalytics={() => { setPaletteOpen(false); setView("analytics"); }}
+        onOpenToday={() => { setPaletteOpen(false); setView("today"); }}
         isAdmin={!!me?.is_admin}
         onOpenBilling={() => { setPaletteOpen(false); setView("billing"); }}
         onOpenNewsletter={() => { setPaletteOpen(false); setView("newsletter"); }}

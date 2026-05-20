@@ -86,7 +86,64 @@ if [ -f "$CLAUDE_JSON" ]; then
     rclone copyto "$CLAUDE_JSON" "gdrive:Claude-Config/.claude.json" -v 2>&1 | tail -3
 fi
 
+# --- Step 4: Dump crontab (picked up by rclone sync below) ---
+info "Saving crontab snapshot..."
+crontab -l > "$OPENDIA_DIR/crontab.backup" 2>/dev/null || true
+
+# --- Step 4a: WAL-consistent SQLite snapshot ---
+# opendia.db is in WAL mode; the main .db file may be stale.
+# Python's sqlite3.backup() reads through the WAL and produces a full snapshot
+# without modifying the source files.
+info "Creating WAL-consistent SQLite snapshot..."
+DB_LOCAL="$OPENDIA_DIR/opendia.db"
+DB_SNAPSHOT="$OPENDIA_DIR/.opendia-backup-snapshot.db"
+rm -f "$DB_SNAPSHOT"
+
+if python3 - "$DB_LOCAL" "$DB_SNAPSHOT" <<'PYEOF'
+import sys, sqlite3
+src = sqlite3.connect(sys.argv[1])
+dst = sqlite3.connect(sys.argv[2])
+src.backup(dst)
+dst.close()
+src.close()
+PYEOF
+then
+    SNAPSHOT_SIZE=$(stat -c%s "$DB_SNAPSHOT" 2>/dev/null || echo 0)
+    MAIN_SIZE=$(stat -c%s "$DB_LOCAL" 2>/dev/null || echo 0)
+    info "  Snapshot: ${SNAPSHOT_SIZE} bytes (main file: ${MAIN_SIZE} bytes)"
+    if [ "$SNAPSHOT_SIZE" -lt "$MAIN_SIZE" ]; then
+        warn "  Snapshot (${SNAPSHOT_SIZE}B) is smaller than main db file (${MAIN_SIZE}B) — backup may be incomplete"
+    fi
+    if [ "$SNAPSHOT_SIZE" -lt 10000 ]; then
+        fail "Snapshot is suspiciously tiny (${SNAPSHOT_SIZE} bytes) — aborting to protect Drive copy"
+    fi
+else
+    fail "SQLite snapshot failed — aborting to protect Drive copy"
+fi
+
+# --- Step 4b: Versioned db backup ---
+DB_STAMP=$(date +%Y%m%d)
+DB_VERSIONED_KEY="gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db"
+info "Versioned db backup → ${DB_VERSIONED_KEY} ..."
+rclone copyto "$DB_SNAPSHOT" "$DB_VERSIONED_KEY" \
+    --tpslimit 8 --tpslimit-burst 8 --retries 5 -v 2>&1 | tail -5
+
+# Verify the dated file actually landed on Drive
+if ! rclone lsf "$DB_VERSIONED_KEY" &>/dev/null; then
+    warn "Versioned backup not confirmed on Drive after upload — check manually!"
+fi
+
+# Prune old versioned backups: keep the 14 most-recent dated files
+info "Pruning old versioned backups (keeping 14)..."
+rclone lsf "gdrive:OpenDia/db-backups/" --include "opendia-*.db" 2>/dev/null \
+    | sort -r | tail -n +15 \
+    | while read -r OLD; do
+        info "  Deleting old backup: $OLD"
+        rclone deletefile "gdrive:OpenDia/db-backups/$OLD" 2>/dev/null || true
+    done
+
 # --- Step 4: Sync OpenDia data to Google Drive ---
+# opendia.db is excluded here; the WAL-consistent snapshot is uploaded below.
 info "Syncing ~/OpenDia/ to gdrive:OpenDia/ ..."
 
 OPENDIA_FILTER=$(mktemp)
@@ -103,24 +160,12 @@ cat > "$OPENDIA_FILTER" <<'FILTER'
 - **/.next/**
 - **/.cache/**
 - db-backups/**
+- .opendia-backup-snapshot.db
+- opendia.db
+- opendia.db-shm
+- opendia.db-wal
 + **
 FILTER
-
-# --- Step 4b: Versioned db backup BEFORE sync (safety net) ---
-DB_LOCAL="$OPENDIA_DIR/opendia.db"
-DB_SIZE=$(stat -c%s "$DB_LOCAL" 2>/dev/null || echo 0)
-if [ "$DB_SIZE" -gt 10000 ]; then
-    DB_STAMP=$(date +%Y%m%d)
-    info "Versioned db backup → gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db ..."
-    rclone copyto "$DB_LOCAL" "gdrive:OpenDia/db-backups/opendia-${DB_STAMP}.db" \
-        --tpslimit 8 --tpslimit-burst 8 --retries 5 2>&1 | tail -2
-    # Clean up backup copies older than 7 days
-    rclone delete "gdrive:OpenDia/db-backups/" --min-age 7d 2>/dev/null || true
-else
-    warn "Local db looks empty or missing (${DB_SIZE} bytes) — skipping versioned backup and db sync"
-    # Exclude opendia.db from the rclone sync below to protect Drive copy
-    echo "- opendia.db" >> "$OPENDIA_FILTER"
-fi
 
 rclone sync "$OPENDIA_DIR/" "gdrive:OpenDia/" \
     --filter-from "$OPENDIA_FILTER" \
@@ -129,12 +174,19 @@ rclone sync "$OPENDIA_DIR/" "gdrive:OpenDia/" \
     -v 2>&1 | tail -5
 rm -f "$OPENDIA_FILTER"
 
-# --- Step 4c: Verify Drive db backup isn't empty ---
-DRIVE_SIZE=$(rclone size "gdrive:OpenDia/opendia.db" --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('bytes',0))" 2>/dev/null || echo 0)
-if [ "$DRIVE_SIZE" -lt 50000 ]; then
-    warn "Drive db backup looks suspiciously small (${DRIVE_SIZE} bytes) — check immediately!"
+# Upload the WAL-consistent snapshot as the canonical opendia.db on Drive
+info "Uploading WAL-consistent snapshot as gdrive:OpenDia/opendia.db ..."
+rclone copyto "$DB_SNAPSHOT" "gdrive:OpenDia/opendia.db" \
+    --tpslimit 8 --tpslimit-burst 8 --retries 5 -v 2>&1 | tail -3
+rm -f "$DB_SNAPSHOT"
+
+# --- Step 4c: Verify Drive db matches snapshot size ---
+DRIVE_SIZE=$(rclone size "gdrive:OpenDia/opendia.db" --json 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('bytes',0))" 2>/dev/null || echo 0)
+if [ "$DRIVE_SIZE" -ne "$SNAPSHOT_SIZE" ]; then
+    warn "Drive db size (${DRIVE_SIZE} bytes) doesn't match snapshot (${SNAPSHOT_SIZE} bytes) — upload may have failed!"
 else
-    info "Drive db verified: ${DRIVE_SIZE} bytes"
+    info "Drive db verified: ${DRIVE_SIZE} bytes (matches snapshot)"
 fi
 
 # --- Step 5: Sync FluxCC templates + client builds ---

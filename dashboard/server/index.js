@@ -5,12 +5,13 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox } from "./db.js";
 import { spawn, exec } from "child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
-import { searchRecentEmails } from "./gmail.js";
+import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
+import { readDeadlineCache } from "./deadlines.js";
 import { analyzeSync } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -238,6 +239,13 @@ app.post("/api/projects/:id/sync", async (req, res) => {
 app.get("/api/timers/active", async (req, res) => {
   try {
     const timers = await getActiveTimers();
+    if (req.query.detail === "full") {
+      const now = Date.now();
+      return res.json(timers.map(t => ({
+        ...t,
+        elapsed_seconds: t.start ? Math.floor((now - new Date(t.start).getTime()) / 1000) : null,
+      })));
+    }
     const projectIds = new Set();
     for (const timer of timers) {
       const project = matchProject(timer.client, timer.division, timer.task, timer.project);
@@ -336,6 +344,40 @@ app.post("/api/timers/backfill", async (_req, res) => {
     });
   } catch (err) {
     console.error("POST /api/timers/backfill error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Today / heads-up endpoint ─────────────────────────────────────────────────
+
+app.get("/api/today", async (req, res) => {
+  try {
+    const now = Date.now();
+    const [timersResult, gmailResult] = await Promise.allSettled([
+      getActiveTimers(),
+      listPrimaryInboxTop(5),
+    ]);
+
+    const timers = timersResult.status === "fulfilled" ? timersResult.value : [];
+    const gmailMessages = gmailResult.status === "fulfilled" ? gmailResult.value : null;
+
+    const wfhumanItems = getWfHumanProjects();
+
+    res.json({
+      deadlines: readDeadlineCache(),
+      wfhuman: { count: wfhumanItems.length, items: wfhumanItems },
+      stale: getStaleInProgressProjects(14),
+      active_timers: timers.map(t => ({
+        ...t,
+        elapsed_seconds: t.start ? Math.floor((now - new Date(t.start).getTime()) / 1000) : null,
+      })),
+      inbox: { open_count: getOpenInboxCount(), recent: getRecentInbox(5) },
+      gmail: gmailMessages === null
+        ? { error: gmailResult.reason?.message || "unavailable", messages: [] }
+        : { messages: gmailMessages },
+    });
+  } catch (err) {
+    console.error("GET /api/today error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
