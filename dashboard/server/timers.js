@@ -183,7 +183,7 @@ export async function getTimerEntriesForProject(project, limit = 20) {
         const projectNameMatch =
           nameLower && (entryProject.includes(nameLower) || entryTask.includes(nameLower));
 
-        if (companyDivMatch || projectNameMatch) {
+        if (projectNameMatch || (companyDivMatch && !nameLower)) {
           results.push({
             date: entry.start?.slice(0, 10) || file.replace(".md", ""),
             start: entry.start || null,
