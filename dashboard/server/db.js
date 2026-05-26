@@ -248,6 +248,9 @@ export function matchProjectCandidates(client, division, task, limit = 3) {
 
 export function createProject({ name, companyName, divisionName, status = "in_progress", notionId = null }) {
   const db = getDb();
+  const sanitizedName = (name || "").replace(/^[-_\s]+/, "").trim();
+  if (!sanitizedName) throw new Error("Project name cannot be empty or consist only of dashes/underscores");
+  name = sanitizedName;
 
   let companyId = null;
   if (companyName) {
@@ -447,7 +450,7 @@ export function insertClientAlias({ match_type, match_value, client_hint, divisi
 
 export function ensureProjectForInbox(clientHint, divisionHint, shortSlug, subject) {
   const db = getDb();
-  const name = (shortSlug || "inbox-item").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const name = ((shortSlug || "inbox-item").replace(/^[-_]+/, "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())).trim() || "Inbox Item";
 
   let companyId = null;
   if (clientHint && clientHint.toLowerCase() !== "unknown") {
