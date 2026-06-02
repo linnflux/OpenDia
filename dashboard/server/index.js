@@ -161,6 +161,19 @@ app.get("/api/projects/match-candidates", (req, res) => {
   }
 });
 
+app.get("/api/projects/:id", (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid id" });
+    const project = getProjectById(id);
+    if (!project) return res.status(404).json({ error: "not found" });
+    res.json(project);
+  } catch (err) {
+    console.error("GET /api/projects/:id error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/projects/:id/sync", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
