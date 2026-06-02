@@ -84,6 +84,15 @@ fi
 
 info "Drive sync complete."
 
+# Clone dashboard repo (excluded from Drive sync; git is the source of truth)
+if [ ! -d "$HOME/OpenDia/repo/.git" ]; then
+    info "Cloning OpenDia dashboard repo..."
+    git clone git@github.com:linnflux/OpenDia.git "$HOME/OpenDia/repo"
+else
+    info "OpenDia repo already present — pulling latest..."
+    git -C "$HOME/OpenDia/repo" pull
+fi
+
 # ============================================================
 phase "C — Build MCP Servers"
 # ============================================================
