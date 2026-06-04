@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenDia Dashboard (Express + SQLite)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/linnflux/OpenDia/repo/dashboard
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+MemoryMax=512M
+EnvironmentFile=/home/linnflux/OpenDia/repo/dashboard/.env
+
+[Install]
+WantedBy=default.target
