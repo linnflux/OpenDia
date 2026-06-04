@@ -93,6 +93,19 @@ else
     git -C "$HOME/OpenDia/repo" pull
 fi
 
+# Install systemd user unit for the dashboard
+UNIT_SRC="$HOME/OpenDia/repo/systemd/opendia-dashboard.service"
+UNIT_DEST="$HOME/.config/systemd/user/opendia-dashboard.service"
+if [ -f "$UNIT_SRC" ]; then
+    mkdir -p "$HOME/.config/systemd/user"
+    cp "$UNIT_SRC" "$UNIT_DEST"
+    systemctl --user daemon-reload
+    systemctl --user enable --now opendia-dashboard.service
+    info "Dashboard service installed and started."
+else
+    warn "systemd unit not found at $UNIT_SRC — start dashboard manually."
+fi
+
 # ============================================================
 phase "C — Build MCP Servers"
 # ============================================================
