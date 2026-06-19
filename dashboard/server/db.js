@@ -507,6 +507,22 @@ export function getStaleInProgressProjects(days = 14) {
   `).all(`-${parseInt(days, 10)} days`);
 }
 
+export function getProjectsByNotionIds(notionIds) {
+  if (!notionIds || notionIds.length === 0) return new Map();
+  const db = getDb();
+  const placeholders = notionIds.map(() => "?").join(",");
+  const rows = db.prepare(`
+    SELECT p.id AS project_id, p.notion_id,
+           c.name AS company_name, c.short_name AS company_short,
+           d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE p.notion_id IN (${placeholders})
+  `).all(...notionIds);
+  return new Map(rows.map((r) => [r.notion_id, r]));
+}
+
 export function getAllCompanies() {
   return getDb().prepare(`
     SELECT id, name, short_name

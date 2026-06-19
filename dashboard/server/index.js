@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds } from "./db.js";
 import { spawn, exec } from "child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
@@ -376,8 +376,25 @@ app.get("/api/today", async (req, res) => {
 
     const wfhumanItems = getWfHumanProjects();
 
+    const deadlines = readDeadlineCache();
+    if (!deadlines.error) {
+      const allIds = [
+        ...(deadlines.overdue || []),
+        ...(deadlines.imminent || []),
+      ].map((t) => t.id).filter(Boolean);
+      const projectMap = getProjectsByNotionIds(allIds);
+      const enrich = (t) => {
+        const p = projectMap.get(t.id);
+        return p
+          ? { ...t, company_name: p.company_name, company_short: p.company_short, division: p.division, project_id: p.project_id }
+          : t;
+      };
+      deadlines.overdue = (deadlines.overdue || []).map(enrich);
+      deadlines.imminent = (deadlines.imminent || []).map(enrich);
+    }
+
     res.json({
-      deadlines: readDeadlineCache(),
+      deadlines,
       wfhuman: { count: wfhumanItems.length, items: wfhumanItems },
       stale: getStaleInProgressProjects(14),
       active_timers: timers.map(t => ({

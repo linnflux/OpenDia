@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 function fmtElapsed(seconds) {
   if (!seconds) return "0m";
@@ -38,6 +38,7 @@ export default function Today({ onOpenProject }) {
     inbox: true,
     gmail: true,
   });
+  const [deadlineSort, setDeadlineSort] = useState({ key: "due", dir: "asc" });
 
   useEffect(() => {
     fetch("/api/today")
@@ -49,6 +50,41 @@ export default function Today({ onOpenProject }) {
   function toggle(key) {
     setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   }
+
+  function sortDeadlineBy(key) {
+    setDeadlineSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" }
+    );
+  }
+
+  const deadlineRows = useMemo(() => {
+    const overdue = data?.deadlines?.overdue || [];
+    const imminent = data?.deadlines?.imminent || [];
+    const rows = [
+      ...overdue.map((t) => ({ ...t, _overdue: true })),
+      ...imminent.map((t) => ({ ...t, _overdue: false })),
+    ];
+    const { key, dir } = deadlineSort;
+    const mult = dir === "asc" ? 1 : -1;
+    const getVal = (r) => {
+      switch (key) {
+        case "task": return (r.name || "").toLowerCase();
+        case "client": return (r.company_name || r.company || "").toLowerCase();
+        case "division": return (r.division || "").toLowerCase();
+        case "notion": return r.id || "";
+        case "due":
+        default: return r.due_end || r.due_start || "";
+      }
+    };
+    return rows.sort((a, b) => {
+      const av = getVal(a), bv = getVal(b);
+      if (av < bv) return -1 * mult;
+      if (av > bv) return 1 * mult;
+      return 0;
+    });
+  }, [data, deadlineSort]);
 
   if (loading) return <div className="analytics-loading">Loading…</div>;
   if (error) return <div className="analytics-error">{error}</div>;
@@ -95,36 +131,50 @@ export default function Today({ onOpenProject }) {
             {!deadlines.error && totalDeadlines === 0 && (
               <div className="analytics-empty">No upcoming deadlines.</div>
             )}
-            {overdueCount > 0 && (
-              <div>
-                <div style={{ color: "#ef4444", fontWeight: 600, fontSize: "0.78em", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Overdue
-                </div>
-                {deadlines.overdue.map((t) => (
-                  <div key={t.id} className="analytics-entry-row">
-                    <span className="analytics-entry-task">{t.name}</span>
-                    <span style={{ color: "#888", fontSize: "0.8em" }}>{t.company || ""}</span>
-                    <span className="analytics-entry-date" style={{ color: "#ef4444" }}>
-                      {fmtDue(t.due_start, t.due_end)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {imminentCount > 0 && (
-              <div style={{ marginTop: overdueCount > 0 ? 12 : 0 }}>
-                <div style={{ color: "#f59e0b", fontWeight: 600, fontSize: "0.78em", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Due Soon (24h)
-                </div>
-                {deadlines.imminent.map((t) => (
-                  <div key={t.id} className="analytics-entry-row">
-                    <span className="analytics-entry-task">{t.name}</span>
-                    <span style={{ color: "#888", fontSize: "0.8em" }}>{t.company || ""}</span>
-                    <span className="analytics-entry-date">{fmtDue(t.due_start, t.due_end)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {!deadlines.error && deadlineRows.length > 0 && (() => {
+              const SortTh = ({ label, k }) => (
+                <th onClick={() => sortDeadlineBy(k)} title={`Sort by ${label}`}>
+                  {label}{deadlineSort.key === k && (deadlineSort.dir === "asc" ? " ▲" : " ▼")}
+                </th>
+              );
+              return (
+                <table className="analytics-table">
+                  <thead>
+                    <tr>
+                      <SortTh label="Task" k="task" />
+                      <SortTh label="Client" k="client" />
+                      <SortTh label="Division" k="division" />
+                      <SortTh label="Notion" k="notion" />
+                      <SortTh label="Due" k="due" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deadlineRows.map((t) => (
+                      <tr key={t.id} className={t._overdue ? "deadline-overdue-row" : ""}>
+                        <td>{t.name}</td>
+                        <td>{t.company_name || t.company || "—"}</td>
+                        <td>{t.division || "—"}</td>
+                        <td>
+                          {t.id ? (
+                            <a
+                              href={`https://www.notion.so/${t.id.replace(/-/g, "")}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title="Open in Notion"
+                              className="deadline-notion-link"
+                            >↗</a>
+                          ) : "—"}
+                        </td>
+                        <td style={{ color: t._overdue ? "#ef4444" : undefined, whiteSpace: "nowrap" }}>
+                          {fmtDue(t.due_start, t.due_end)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
           </div>
         )}
       </div>
