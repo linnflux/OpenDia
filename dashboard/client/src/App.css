@@ -3291,6 +3291,24 @@ body.has-bg::before {
   background: var(--bg-hover, rgba(255,255,255,0.03));
 }
 
+.today-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.today-toolbar-btn {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary, inherit);
+  cursor: pointer;
+}
+.today-toolbar-btn:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.05));
+}
+
 .gmail-thread-row {
   display: block;
   padding: 0.4rem 0.5rem;

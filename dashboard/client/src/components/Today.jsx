@@ -53,6 +53,13 @@ export default function Today({ onOpenProject }) {
     setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
+  function collapseAll() {
+    setOpen({ deadlines: false, timers: false, wfhuman: false, stale: false, inbox: false, gmail: false });
+  }
+  function expandAll() {
+    setOpen({ deadlines: true, timers: true, wfhuman: true, stale: true, inbox: true, gmail: true });
+  }
+
   async function handleStatusChange(notionId, status) {
     setPendingIds((prev) => new Set(prev).add(notionId));
     try {
@@ -160,6 +167,11 @@ export default function Today({ onOpenProject }) {
 
   return (
     <div className="analytics-page">
+
+      <div className="today-toolbar">
+        <button className="today-toolbar-btn" onClick={collapseAll}>Collapse all</button>
+        <button className="today-toolbar-btn" onClick={expandAll}>Expand all</button>
+      </div>
 
       {/* Deadlines */}
       <div className="analytics-accordion-section">
