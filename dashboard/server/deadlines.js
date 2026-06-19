@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
+import { execFile } from "child_process";
 
 const ALERTS_FILE = resolve(process.env.HOME, "OpenDia", "Time", ".deadline-alerts.json");
 const STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -20,6 +21,22 @@ export function readDeadlineCache() {
   } catch (err) {
     return { overdue: [], imminent: [], today: [], generated: null, stale: true, error: err.message };
   }
+}
+
+export function refreshDeadlineCache() {
+  return new Promise((resolve, reject) => {
+    const script = `${process.env.HOME}/OpenDia/scripts/deadline_check.py`;
+    execFile("python3", [script, "--hello"], { timeout: 60000 }, (err, stdout) => {
+      if (err) return reject(err);
+      try {
+        const data = JSON.parse(stdout);
+        writeFileSync(ALERTS_FILE, JSON.stringify(data, null, 2));
+        resolve(data);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
 }
 
 export function removeFromDeadlineCache(notionId) {

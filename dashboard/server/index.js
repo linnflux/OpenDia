@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus } from "./notion.js";
 import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
-import { readDeadlineCache, removeFromDeadlineCache } from "./deadlines.js";
+import { readDeadlineCache, removeFromDeadlineCache, refreshDeadlineCache } from "./deadlines.js";
 import { analyzeSync } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -408,6 +408,16 @@ app.get("/api/today", async (req, res) => {
     });
   } catch (err) {
     console.error("GET /api/today error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/deadlines/refresh", async (_req, res) => {
+  try {
+    const data = await refreshDeadlineCache();
+    res.json({ ok: true, overdue: data.overdue?.length || 0, imminent: data.imminent?.length || 0, generated: data.generated });
+  } catch (err) {
+    console.error("deadline refresh error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -40,6 +40,7 @@ export default function Today({ onOpenProject }) {
   });
   const [deadlineSort, setDeadlineSort] = useState({ key: "due", dir: "asc" });
   const [pendingIds, setPendingIds] = useState(() => new Set());
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     fetch("/api/today")
@@ -68,6 +69,20 @@ export default function Today({ onOpenProject }) {
         return next;
       });
       alert(`Failed to set ${status}: ${e.message}`);
+    }
+  }
+
+  async function refreshDeadlines() {
+    setRefreshing(true);
+    try {
+      await fetch("/api/deadlines/refresh", { method: "POST" });
+      const d = await fetch("/api/today").then((r) => r.json());
+      setData(d);
+      setPendingIds(new Set());
+    } catch (e) {
+      alert(`Refresh failed: ${e.message}`);
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -120,29 +135,37 @@ export default function Today({ onOpenProject }) {
 
       {/* Deadlines */}
       <div className="analytics-accordion-section">
-        <button
-          className={`analytics-accordion-header${open.deadlines ? " open" : ""}`}
-          onClick={() => toggle("deadlines")}
-        >
-          <span className="analytics-caret">{open.deadlines ? "▾" : "▸"}</span>
-          Deadlines
-          {overdueCount > 0 && (
-            <span style={{ color: "#ef4444", marginLeft: 8, fontWeight: "bold" }}>
-              {overdueCount} overdue
-            </span>
-          )}
-          {imminentCount > 0 && (
-            <span style={{ color: "#f59e0b", marginLeft: 8 }}>
-              {imminentCount} soon
-            </span>
-          )}
-          {totalDeadlines === 0 && !deadlines.error && (
-            <span style={{ color: "#22c55e", marginLeft: 8, fontSize: "0.85em" }}>✓ clear</span>
-          )}
-          {deadlines.stale && (
-            <span style={{ color: "#f59e0b", marginLeft: 8, fontSize: "0.78em" }}>(cache stale)</span>
-          )}
-        </button>
+        <div className="analytics-accordion-header-row">
+          <button
+            className={`analytics-accordion-header${open.deadlines ? " open" : ""}`}
+            onClick={() => toggle("deadlines")}
+          >
+            <span className="analytics-caret">{open.deadlines ? "▾" : "▸"}</span>
+            Deadlines
+            {overdueCount > 0 && (
+              <span style={{ color: "#ef4444", marginLeft: 8, fontWeight: "bold" }}>
+                {overdueCount} overdue
+              </span>
+            )}
+            {imminentCount > 0 && (
+              <span style={{ color: "#f59e0b", marginLeft: 8 }}>
+                {imminentCount} soon
+              </span>
+            )}
+            {totalDeadlines === 0 && !deadlines.error && (
+              <span style={{ color: "#22c55e", marginLeft: 8, fontSize: "0.85em" }}>✓ clear</span>
+            )}
+            {deadlines.stale && (
+              <span style={{ color: "#f59e0b", marginLeft: 8, fontSize: "0.78em" }}>(cache stale)</span>
+            )}
+          </button>
+          <button
+            className="deadline-refresh-btn"
+            onClick={refreshDeadlines}
+            disabled={refreshing}
+            title="Re-fetch deadlines from Notion (~15s)"
+          >{refreshing ? "…" : "↻"}</button>
+        </div>
         {open.deadlines && (
           <div className="analytics-accordion-body">
             {deadlines.error && (

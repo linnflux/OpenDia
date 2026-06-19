@@ -3427,6 +3427,27 @@ body.has-bg::before {
   color: var(--text-primary);
 }
 
+.analytics-accordion-header-row {
+  display: flex;
+  align-items: center;
+}
+.analytics-accordion-header-row .analytics-accordion-header {
+  flex: 1;
+}
+.deadline-refresh-btn {
+  background: transparent;
+  border: 1px solid #374151;
+  color: #6b7280;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 1em;
+  cursor: pointer;
+  margin-left: 6px;
+  line-height: 1;
+}
+.deadline-refresh-btn:hover:not(:disabled) { color: #d1d5db; border-color: #6b7280; }
+.deadline-refresh-btn:disabled { opacity: 0.4; cursor: default; }
+
 .deadline-actions-cell { white-space: nowrap; }
 .deadline-action-btn {
   background: transparent;
