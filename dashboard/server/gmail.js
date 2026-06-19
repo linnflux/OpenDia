@@ -84,13 +84,39 @@ async function fetchMessageDetails(messages) {
 }
 
 /**
- * List the top N messages from the primary inbox category.
+ * List the top N threads from the primary inbox category.
+ * Returns one entry per conversation (most recent reply), ordered by latest activity.
  */
 export async function listPrimaryInboxTop(n = 5) {
   const query = "in:inbox category:primary";
-  const result = await gmailFetch(`/messages?q=${encodeURIComponent(query)}&maxResults=${n}`);
-  if (!result?.messages) return [];
-  return fetchMessageDetails(result.messages.slice(0, n));
+  const result = await gmailFetch(
+    `/threads?q=${encodeURIComponent(query)}&maxResults=${n}`
+  );
+  if (!result?.threads) return [];
+
+  const out = [];
+  for (const t of result.threads.slice(0, n)) {
+    const full = await gmailFetch(
+      `/threads/${t.id}?format=metadata` +
+      `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`
+    );
+    if (!full?.messages?.length) continue;
+    const lastMsg = full.messages[full.messages.length - 1];
+    const headers = lastMsg.payload?.headers || [];
+    const subject = headers.find((h) => h.name === "Subject")?.value || "(no subject)";
+    const from = headers.find((h) => h.name === "From")?.value || "";
+    const date = headers.find((h) => h.name === "Date")?.value || "";
+    out.push({
+      id: lastMsg.id,
+      threadId: t.id,
+      subject,
+      from,
+      date,
+      snippet: full.snippet || lastMsg.snippet || "",
+      threadUrl: `https://mail.google.com/mail/u/0/#inbox/${t.id}`,
+    });
+  }
+  return out;
 }
 
 /**

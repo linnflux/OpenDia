@@ -3291,6 +3291,23 @@ body.has-bg::before {
   background: var(--bg-hover, rgba(255,255,255,0.03));
 }
 
+.gmail-thread-row {
+  display: block;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+.gmail-thread-row + .gmail-thread-row {
+  border-top: 1px solid var(--border);
+}
+.gmail-thread-row:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.03));
+}
+.gmail-thread-row a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
 .analytics-entry-date {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;

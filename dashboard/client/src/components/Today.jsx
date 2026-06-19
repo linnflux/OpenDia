@@ -470,18 +470,13 @@ export default function Today({ onOpenProject }) {
               <div className="analytics-empty">No messages.</div>
             ) : (
               gmail.messages.map((m) => (
-                <div key={m.id} className="analytics-entry-row">
-                  <a
-                    href={m.threadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ textDecoration: "none", color: "inherit", display: "block" }}
-                  >
+                <div key={m.id} className="gmail-thread-row">
+                  <a href={m.threadUrl} target="_blank" rel="noreferrer">
                     <div className="analytics-entry-task">{m.subject}</div>
                     <div style={{ color: "#888", fontSize: "0.8em" }}>{m.from}</div>
                     {m.snippet && (
                       <div style={{ color: "#666", fontSize: "0.75em", marginTop: 2 }}>
-                        {m.snippet.slice(0, 120)}
+                        {m.snippet.slice(0, 240)}
                       </div>
                     )}
                   </a>
