@@ -39,6 +39,7 @@ export default function Today({ onOpenProject }) {
     gmail: true,
   });
   const [deadlineSort, setDeadlineSort] = useState({ key: "due", dir: "asc" });
+  const [pendingIds, setPendingIds] = useState(() => new Set());
 
   useEffect(() => {
     fetch("/api/today")
@@ -49,6 +50,25 @@ export default function Today({ onOpenProject }) {
 
   function toggle(key) {
     setOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  async function handleStatusChange(notionId, status) {
+    setPendingIds((prev) => new Set(prev).add(notionId));
+    try {
+      const r = await fetch(`/api/deadlines/${notionId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (e) {
+      setPendingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(notionId);
+        return next;
+      });
+      alert(`Failed to set ${status}: ${e.message}`);
+    }
   }
 
   function sortDeadlineBy(key) {
@@ -65,7 +85,7 @@ export default function Today({ onOpenProject }) {
     const rows = [
       ...overdue.map((t) => ({ ...t, _overdue: true })),
       ...imminent.map((t) => ({ ...t, _overdue: false })),
-    ];
+    ].filter((t) => !pendingIds.has(t.id));
     const { key, dir } = deadlineSort;
     const mult = dir === "asc" ? 1 : -1;
     const getVal = (r) => {
@@ -84,7 +104,7 @@ export default function Today({ onOpenProject }) {
       if (av > bv) return 1 * mult;
       return 0;
     });
-  }, [data, deadlineSort]);
+  }, [data, deadlineSort, pendingIds]);
 
   if (loading) return <div className="analytics-loading">Loading…</div>;
   if (error) return <div className="analytics-error">{error}</div>;
@@ -146,6 +166,7 @@ export default function Today({ onOpenProject }) {
                       <SortTh label="Division" k="division" />
                       <SortTh label="Notion" k="notion" />
                       <SortTh label="Due" k="due" />
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -168,6 +189,22 @@ export default function Today({ onOpenProject }) {
                         </td>
                         <td style={{ color: t._overdue ? "#ef4444" : undefined, whiteSpace: "nowrap" }}>
                           {fmtDue(t.due_start, t.due_end)}
+                        </td>
+                        <td className="deadline-actions-cell">
+                          {t._overdue && t.id ? (
+                            <>
+                              <button
+                                className="deadline-action-btn deadline-action-done"
+                                title="Mark Completed in Notion"
+                                onClick={() => handleStatusChange(t.id, "Completed")}
+                              >✓ Done</button>
+                              <button
+                                className="deadline-action-btn deadline-action-ref"
+                                title="Mark Reference in Notion"
+                                onClick={() => handleStatusChange(t.id, "Reference")}
+                              >Ref</button>
+                            </>
+                          ) : null}
                         </td>
                       </tr>
                     ))}

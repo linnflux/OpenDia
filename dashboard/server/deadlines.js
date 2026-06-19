@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 const ALERTS_FILE = resolve(process.env.HOME, "OpenDia", "Time", ".deadline-alerts.json");
@@ -19,5 +19,21 @@ export function readDeadlineCache() {
     };
   } catch (err) {
     return { overdue: [], imminent: [], today: [], generated: null, stale: true, error: err.message };
+  }
+}
+
+export function removeFromDeadlineCache(notionId) {
+  if (!notionId) return false;
+  try {
+    const raw = readFileSync(ALERTS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    const filter = (arr) => (arr || []).filter((t) => t.id !== notionId);
+    data.overdue = filter(data.overdue);
+    data.imminent = filter(data.imminent);
+    data.today = filter(data.today);
+    writeFileSync(ALERTS_FILE, JSON.stringify(data, null, 2));
+    return true;
+  } catch {
+    return false;
   }
 }

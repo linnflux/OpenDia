@@ -132,6 +132,22 @@ export async function fetchNotionTitle(notionId) {
 }
 
 /**
+ * Update a Notion Tasks-DB page's Status select field.
+ * Returns true on success, false on failure or missing token.
+ */
+export async function updateNotionTaskStatus(pageId, statusName) {
+  if (!notionToken || !pageId || !statusName) return false;
+  const res = await notionFetch(`/pages/${pageId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      properties: { Status: { select: { name: statusName } } },
+    }),
+  });
+  return res !== null;
+}
+
+/**
  * Fetch a Notion page and extract useful info for a project refresh.
  */
 export async function fetchNotionPage(notionId) {

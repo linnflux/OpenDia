@@ -3427,6 +3427,21 @@ body.has-bg::before {
   color: var(--text-primary);
 }
 
+.deadline-actions-cell { white-space: nowrap; }
+.deadline-action-btn {
+  background: transparent;
+  border: 1px solid #4b5563;
+  color: #d1d5db;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.78em;
+  cursor: pointer;
+  margin-right: 4px;
+}
+.deadline-action-btn:hover { background: #1f2937; color: #fff; }
+.deadline-action-done:hover { border-color: #22c55e; color: #22c55e; }
+.deadline-action-ref:hover  { border-color: #6b7280; color: #9ca3af; }
+
 .analytics-next-step {
   color: var(--text-secondary);
   font-size: 0.75rem;

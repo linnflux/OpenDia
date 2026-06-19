@@ -9,9 +9,9 @@ import { getAllProjects, updateProject, getProjectById, reorderProjects, matchPr
 import { spawn, exec } from "child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
-import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers } from "./notion.js";
+import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus } from "./notion.js";
 import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
-import { readDeadlineCache } from "./deadlines.js";
+import { readDeadlineCache, removeFromDeadlineCache } from "./deadlines.js";
 import { analyzeSync } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -410,6 +410,19 @@ app.get("/api/today", async (req, res) => {
     console.error("GET /api/today error:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.patch("/api/deadlines/:notionId/status", async (req, res) => {
+  const { notionId } = req.params;
+  const { status } = req.body || {};
+  const ALLOWED = new Set(["Completed", "Reference"]);
+  if (!ALLOWED.has(status)) {
+    return res.status(400).json({ error: "status must be Completed or Reference" });
+  }
+  const ok = await updateNotionTaskStatus(notionId, status);
+  if (!ok) return res.status(502).json({ error: "Notion update failed" });
+  removeFromDeadlineCache(notionId);
+  res.json({ ok: true, notionId, status });
 });
 
 // ── Analytics endpoints ───────────────────────────────────────────────────────
