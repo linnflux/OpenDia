@@ -9,9 +9,9 @@ import { getAllProjects, updateProject, getProjectById, reorderProjects, matchPr
 import { spawn, exec } from "child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
-import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus } from "./notion.js";
+import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus, updateNotionTaskDueDate } from "./notion.js";
 import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
-import { readDeadlineCache, removeFromDeadlineCache, refreshDeadlineCache } from "./deadlines.js";
+import { readDeadlineCache, removeFromDeadlineCache, refreshDeadlineCache, bumpDeadlineInCache, getCachedDeadlineRow } from "./deadlines.js";
 import { analyzeSync } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -420,6 +420,25 @@ app.post("/api/deadlines/refresh", async (_req, res) => {
     console.error("deadline refresh error:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post("/api/deadlines/:notionId/bump", async (req, res) => {
+  const { notionId } = req.params;
+  const weeks = Number(req.body?.weeks) || 1;
+  const dates = bumpDeadlineInCache(notionId, weeks);
+  if (!dates) return res.status(404).json({ error: "not in deadline cache" });
+
+  res.json({ ok: true, due_start: dates.start, due_end: dates.end });
+
+  setImmediate(async () => {
+    const current = getCachedDeadlineRow(notionId);
+    if (!current?.due_start) return;
+    try {
+      await updateNotionTaskDueDate(notionId, { start: current.due_start, end: current.due_end });
+    } catch (err) {
+      console.error(`Notion date bump failed for ${notionId}:`, err.message);
+    }
+  });
 });
 
 app.patch("/api/deadlines/:notionId/status", async (req, res) => {

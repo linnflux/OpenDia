@@ -72,6 +72,34 @@ export default function Today({ onOpenProject }) {
     }
   }
 
+  async function handleBumpWeek(notionId) {
+    try {
+      const r = await fetch(`/api/deadlines/${notionId}/bump`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weeks: 1 }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const { due_start, due_end } = await r.json();
+      setData((prev) => {
+        if (!prev?.deadlines) return prev;
+        const update = (arr) =>
+          (arr || []).map((t) => (t.id === notionId ? { ...t, due_start, due_end } : t));
+        return {
+          ...prev,
+          deadlines: {
+            ...prev.deadlines,
+            overdue: update(prev.deadlines.overdue),
+            imminent: update(prev.deadlines.imminent),
+            today: update(prev.deadlines.today),
+          },
+        };
+      });
+    } catch (e) {
+      alert(`Bump failed: ${e.message}`);
+    }
+  }
+
   async function refreshDeadlines() {
     setRefreshing(true);
     try {
@@ -226,6 +254,11 @@ export default function Today({ onOpenProject }) {
                                 title="Mark Reference in Notion"
                                 onClick={() => handleStatusChange(t.id, "Reference")}
                               >Ref</button>
+                              <button
+                                className="deadline-action-btn deadline-action-bump"
+                                title="Bump due date +1 week in Notion (clickable repeatedly)"
+                                onClick={() => handleBumpWeek(t.id)}
+                              >+1 wk</button>
                             </>
                           ) : null}
                         </td>

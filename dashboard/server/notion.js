@@ -132,6 +132,24 @@ export async function fetchNotionTitle(notionId) {
 }
 
 /**
+ * Update a Notion Tasks-DB page's Due Date.
+ * dateValue: { start: "ISO or YYYY-MM-DD", end: same | null }
+ */
+export async function updateNotionTaskDueDate(pageId, dateValue) {
+  if (!notionToken || !pageId || !dateValue?.start) return false;
+  const payload = { start: dateValue.start };
+  if (dateValue.end) payload.end = dateValue.end;
+  const res = await notionFetch(`/pages/${pageId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      properties: { "Due Date": { date: payload } },
+    }),
+  });
+  return res !== null;
+}
+
+/**
  * Update a Notion Tasks-DB page's Status select field.
  * Returns true on success, false on failure or missing token.
  */

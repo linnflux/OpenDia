@@ -39,6 +39,57 @@ export function refreshDeadlineCache() {
   });
 }
 
+function addDays(s, days) {
+  if (!s) return s;
+  if (s.length === 10) {
+    const d = new Date(s + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(T.*)$/);
+  if (!m) return s;
+  const d = new Date(m[1] + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10) + m[2];
+}
+
+export function bumpDeadlineInCache(notionId, weeks = 1) {
+  if (!notionId) return null;
+  try {
+    const raw = readFileSync(ALERTS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    const days = weeks * 7;
+    let updated = null;
+    const bump = (t) => {
+      if (t.id !== notionId) return t;
+      const newStart = addDays(t.due_start, days);
+      const newEnd = t.due_end ? addDays(t.due_end, days) : null;
+      updated = { start: newStart, end: newEnd };
+      return { ...t, due_start: newStart, due_end: newEnd };
+    };
+    data.overdue = (data.overdue || []).map(bump);
+    data.imminent = (data.imminent || []).map(bump);
+    data.today = (data.today || []).map(bump);
+    if (!updated) return null;
+    writeFileSync(ALERTS_FILE, JSON.stringify(data, null, 2));
+    return updated;
+  } catch {
+    return null;
+  }
+}
+
+export function getCachedDeadlineRow(notionId) {
+  if (!notionId) return null;
+  try {
+    const raw = readFileSync(ALERTS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    const all = [...(data.overdue || []), ...(data.imminent || []), ...(data.today || [])];
+    return all.find((t) => t.id === notionId) || null;
+  } catch {
+    return null;
+  }
+}
+
 export function removeFromDeadlineCache(notionId) {
   if (!notionId) return false;
   try {
