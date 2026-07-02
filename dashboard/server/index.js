@@ -13,7 +13,7 @@ import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForP
 import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
 import { readDeadlineCache, removeFromDeadlineCache, refreshDeadlineCache, bumpDeadlineInCache, getCachedDeadlineRow } from "./deadlines.js";
 import { readSweepCache, runSweep } from "./sweep.js";
-import { analyzeSync } from "./ai.js";
+import { analyzeReview } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -175,7 +175,11 @@ app.get("/api/projects/:id", (req, res) => {
   }
 });
 
-app.post("/api/projects/:id/sync", async (req, res) => {
+// Review a card against fresh evidence (Notion, new emails, recent timers).
+// Returns PROPOSALS only — nothing is applied until the operator clicks Apply
+// in the modal. The one exception is notion_id auto-discovery (safe,
+// idempotent), which is reported as linked_notion.
+app.post("/api/projects/:id/review", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const project = getProjectById(id);
@@ -183,69 +187,80 @@ app.post("/api/projects/:id/sync", async (req, res) => {
       return res.status(404).json({ error: "project not found" });
     }
 
-    const result = { notion: null, emails: [], analysis: null, updated: {} };
-
-    // Auto-discover Notion task if not linked
+    let linkedNotion = false;
     if (!project.notion_id) {
       const discovered = await searchNotionForProject(project.name, project.company_name);
       if (discovered) {
         updateProject(id, { notion_id: discovered });
         project.notion_id = discovered;
-        result.updated.notion_id = discovered;
+        linkedNotion = true;
       }
     }
 
-    // Fetch Notion data if linked
+    let notion = null;
     if (project.notion_id) {
-      result.notion = await fetchNotionPage(project.notion_id);
+      notion = await fetchNotionPage(project.notion_id);
     }
 
-    // Search Gmail for recent emails
+    let emails = [];
     try {
-      result.emails = await searchRecentEmails(project.company_name, {
+      emails = await searchRecentEmails(project.company_name, {
         shortName: project.company_short,
       });
     } catch (err) {
       console.error("Gmail search error:", err.message);
     }
+    // Only surface emails not already ingested as inbox items
+    const processed = getProcessedGmailIds();
+    const newEmails = emails.filter((e) => !processed.has(e.id));
 
-    // AI analysis if we have emails or Notion data
-    if (result.emails.length > 0 || result.notion) {
+    let timers = [];
+    try {
+      timers = await getTimerEntriesForProject(project, 3);
+    } catch (err) {
+      console.error("Timer lookup error:", err.message);
+    }
+
+    let analysis = null;
+    if (newEmails.length > 0 || notion || timers.length > 0) {
       try {
-        result.analysis = await analyzeSync({
-          project,
-          emails: result.emails,
-          notion: result.notion,
-        });
-
-        if (result.analysis) {
-          // Update next_step if AI suggests a change
-          if (result.analysis.nextStep && result.analysis.nextStep !== project.next_step) {
-            updateProject(id, { next_step: result.analysis.nextStep });
-            result.updated.next_step = result.analysis.nextStep;
-          }
-
-          // Append change requests to Notion as toggle blocks
-          if (result.analysis.changeRequests?.length > 0 && project.notion_id) {
-            try {
-              await appendToggleBlocks(
-                project.notion_id,
-                result.analysis.changeRequests
-              );
-              result.updated.notion_appended = true;
-            } catch (err) {
-              console.error("Notion append error:", err.message);
-            }
-          }
-        }
+        analysis = await analyzeReview({ project, emails: newEmails, notion, timers });
       } catch (err) {
-        console.error("AI analysis error:", err.message);
+        console.error("AI review error:", err.message);
       }
     }
 
-    res.json(result);
+    res.json({
+      summary: analysis?.summary || null,
+      proposals: {
+        next_step: analysis?.next_step || null,
+        status: analysis?.status || null,
+      },
+      change_requests: analysis?.change_requests || [],
+      new_emails: newEmails,
+      linked_notion: linkedNotion,
+      notion_title: notion?.title || null,
+    });
   } catch (err) {
-    console.error("POST /api/projects/:id/sync error:", err.message);
+    console.error("POST /api/projects/:id/review error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Apply target for a reviewed change request: append it to the linked Notion
+// task as a toggle block. Explicit-click only — never called automatically.
+app.post("/api/projects/:id/apply-change-request", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const project = getProjectById(id);
+    if (!project) return res.status(404).json({ error: "project not found" });
+    if (!project.notion_id) return res.status(400).json({ error: "no Notion task linked" });
+    const { summary, detail } = req.body || {};
+    if (!summary) return res.status(400).json({ error: "summary is required" });
+    await appendToggleBlocks(project.notion_id, [{ summary, detail: detail || "" }]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/projects/:id/apply-change-request error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -902,29 +917,6 @@ app.post("/api/client-aliases", (req, res) => {
   } catch (err) {
     console.error("POST /api/client-aliases error:", err.message);
     res.status(400).json({ error: err.message });
-  }
-});
-
-app.post("/api/projects/:id/check-mail", async (req, res) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    const project = getProjectById(id);
-    if (!project) return res.status(404).json({ error: "project not found" });
-
-    let emails = [];
-    try {
-      emails = await searchRecentEmails(project.company_name, { shortName: project.company_short });
-    } catch (err) {
-      console.error("Gmail search error:", err.message);
-    }
-
-    const processed = getProcessedGmailIds();
-    const candidates = emails.filter((e) => !processed.has(e.id));
-
-    res.json(candidates);
-  } catch (err) {
-    console.error("POST /api/projects/:id/check-mail error:", err.message);
-    res.status(500).json({ error: err.message });
   }
 });
 

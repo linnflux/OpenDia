@@ -113,12 +113,10 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [timersLoading, setTimersLoading] = useState(true);
   const [inboxItems, setInboxItems] = useState([]);
   const [inboxLoading, setInboxLoading] = useState(true);
-  const [checkingMail, setCheckingMail] = useState(false);
-  const [mailCandidates, setMailCandidates] = useState(null);
   const [ingesting, setIngesting] = useState(null);
   const [toast, setToast] = useState(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncData, setSyncData] = useState(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState(null);
   const [notionTitle, setNotionTitle] = useState(null);
   const [divisionOpen, setDivisionOpen] = useState(false);
   const [tab, setTab] = useState("details");
@@ -254,60 +252,84 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
     }, 500);
   }
 
-  async function handleSync() {
-    setSyncing(true);
+  async function handleReview() {
+    setReviewing(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}/sync`, { method: "POST" });
+      const res = await fetch(`/api/projects/${project.id}/review`, { method: "POST" });
       if (res.ok) {
         const data = await res.json();
-        setSyncData(data);
-        // Update local next_step if AI changed it
-        if (data.updated?.next_step) {
-          setNextStep(data.updated.next_step);
-          onUpdate(project.id, { next_step: data.updated.next_step });
-        }
-        // If Notion task was auto-discovered, update local state and refresh title
-        if (data.updated?.notion_id) {
-          project.notion_id = data.updated.notion_id;
-          onUpdate(project.id, { notion_id: data.updated.notion_id });
+        setReview(data);
+        // Notion auto-discovery is the only server-side write; reflect it locally
+        if (data.linked_notion) {
+          onUpdate(project.id, {});
           fetch(`/api/projects/${project.id}/notion-title`)
-            .then((r) => r.ok ? r.json() : null)
+            .then((r) => (r.ok ? r.json() : null))
             .then((d) => d?.title && setNotionTitle(d.title))
             .catch(() => {});
         }
-        const parts = [];
-        if (data.emails?.length) parts.push(`${data.emails.length} email(s)`);
-        if (data.analysis?.changeRequests?.length) parts.push(`${data.analysis.changeRequests.length} change request(s)`);
-        if (data.updated?.notion_appended) parts.push("Notion updated");
-        showToast(parts.length ? `Synced: ${parts.join(", ")}` : "Synced — no new activity");
       } else {
-        showToast("Sync failed");
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || "Review failed");
       }
     } catch (err) {
-      console.error("sync error:", err);
-      showToast("Sync failed");
+      console.error("review error:", err);
+      showToast("Review failed");
     } finally {
-      setSyncing(false);
+      setReviewing(false);
     }
   }
 
-  async function handleCheckMail() {
-    setCheckingMail(true);
+  function applyNextStepProposal() {
+    const value = review?.proposals?.next_step?.value;
+    if (!value) return;
+    setNextStep(value);
+    onUpdate(project.id, { next_step: value });
+    setReview((prev) => prev && { ...prev, proposals: { ...prev.proposals, next_step: null } });
+    showToast("Next step updated");
+  }
+
+  function applyStatusProposal() {
+    const value = review?.proposals?.status?.value;
+    if (!value) return;
+    onUpdate(project.id, { status: value });
+    setReview((prev) => prev && { ...prev, proposals: { ...prev.proposals, status: null } });
+    showToast(`Status → ${value}`);
+  }
+
+  function dismissProposal(key) {
+    setReview((prev) => prev && { ...prev, proposals: { ...prev.proposals, [key]: null } });
+  }
+
+  async function applyChangeRequest(cr, idx) {
     try {
-      const res = await fetch(`/api/projects/${project.id}/check-mail`, { method: "POST" });
+      const res = await fetch(`/api/projects/${project.id}/apply-change-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cr),
+      });
       if (res.ok) {
-        const candidates = await res.json();
-        setMailCandidates(candidates);
-        showToast(candidates.length > 0 ? `Found ${candidates.length} new email(s)` : "No new emails found");
+        showToast("Added to Notion task");
+        dismissChangeRequest(idx);
       } else {
-        showToast("Check mail failed");
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || "Notion append failed");
       }
     } catch (err) {
-      console.error("check mail error:", err);
-      showToast("Check mail failed");
-    } finally {
-      setCheckingMail(false);
+      console.error("apply change request error:", err);
+      showToast("Notion append failed");
     }
+  }
+
+  function dismissChangeRequest(idx) {
+    setReview((prev) =>
+      prev && { ...prev, change_requests: prev.change_requests.filter((_, i) => i !== idx) }
+    );
+  }
+
+  function dismissReviewEmail(id) {
+    setReview((prev) =>
+      prev && { ...prev, new_emails: prev.new_emails.filter((e) => e.id !== id) }
+    );
   }
 
   async function handleIngestEmail(email) {
@@ -320,7 +342,7 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
       });
       if (res.ok) {
         const data = await res.json();
-        setMailCandidates((prev) => prev?.filter((e) => e.id !== email.id) ?? null);
+        dismissReviewEmail(email.id);
         if (data.mode === "inject") {
           showToast("Email injected into active session");
         } else {
@@ -356,27 +378,16 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
       <div className={`modal${hasActiveTimer ? " modal-timer-active" : ""}`}>
         <div className="modal-top-actions">
           <button
-            className={`modal-sync-btn ${syncing ? "syncing" : ""}`}
-            onClick={handleSync}
-            disabled={syncing}
-            title="Refresh from Notion & email"
+            className={`modal-review-btn ${reviewing ? "reviewing" : ""}`}
+            onClick={handleReview}
+            disabled={reviewing}
+            title="Check Notion, email, and recent work for proposed updates — nothing changes until you Apply"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+              <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
             </svg>
-          </button>
-          <button
-            className={`modal-sync-btn ${checkingMail ? "syncing" : ""}`}
-            onClick={handleCheckMail}
-            disabled={checkingMail}
-            title="Check for new emails"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-              <polyline points="22,6 12,13 2,6" />
-            </svg>
+            <span>{reviewing ? "Reviewing…" : "Review"}</span>
           </button>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
@@ -483,6 +494,98 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
         {tab === "terminal" && <TerminalPanel project={project} hasActiveTimer={hasActiveTimer} />}
 
         {tab === "details" && <>
+
+        {review && (
+          <div className="modal-section modal-review-panel">
+            <label className="modal-label">
+              Review
+              <button className="review-panel-close" onClick={() => setReview(null)} title="Dismiss review">×</button>
+            </label>
+            {review.linked_notion && (
+              <div className="review-linked-note">
+                Linked Notion task{review.notion_title ? `: ${review.notion_title}` : ""}
+              </div>
+            )}
+            {review.summary && <div className="review-summary">{review.summary}</div>}
+
+            {review.proposals?.next_step && (
+              <div className="review-proposal-row">
+                <div className="review-proposal-body">
+                  <div className="review-proposal-label">Next step</div>
+                  <div className="review-proposal-current">{nextStep || "(none)"}</div>
+                  <div className="review-proposal-value">{review.proposals.next_step.value}</div>
+                  <div className="review-proposal-reason">{review.proposals.next_step.reason}</div>
+                </div>
+                <div className="review-proposal-actions">
+                  <button className="review-apply-btn" onClick={applyNextStepProposal}>Apply</button>
+                  <button className="review-dismiss-btn" onClick={() => dismissProposal("next_step")}>Dismiss</button>
+                </div>
+              </div>
+            )}
+
+            {review.proposals?.status && (
+              <div className="review-proposal-row">
+                <div className="review-proposal-body">
+                  <div className="review-proposal-label">Status</div>
+                  <div className="review-proposal-current">{project.status}</div>
+                  <div className="review-proposal-value">{review.proposals.status.value}</div>
+                  <div className="review-proposal-reason">{review.proposals.status.reason}</div>
+                </div>
+                <div className="review-proposal-actions">
+                  <button className="review-apply-btn" onClick={applyStatusProposal}>Apply</button>
+                  <button className="review-dismiss-btn" onClick={() => dismissProposal("status")}>Dismiss</button>
+                </div>
+              </div>
+            )}
+
+            {review.change_requests?.map((cr, i) => (
+              <div key={`cr-${i}`} className="review-proposal-row">
+                <div className="review-proposal-body">
+                  <div className="review-proposal-label">Change request</div>
+                  <div className="review-proposal-value">{cr.summary}</div>
+                  <div className="review-proposal-reason">{cr.detail}</div>
+                </div>
+                <div className="review-proposal-actions">
+                  <button className="review-apply-btn" onClick={() => applyChangeRequest(cr, i)}>Add to Notion</button>
+                  <button className="review-dismiss-btn" onClick={() => dismissChangeRequest(i)}>Dismiss</button>
+                </div>
+              </div>
+            ))}
+
+            {review.new_emails?.map((email) => {
+              const from = email.from?.replace(/^"?([^"<]+)"?\s*<[^>]+>$/, "$1").trim() || email.from;
+              return (
+                <div key={email.id} className="review-proposal-row">
+                  <div className="review-proposal-body">
+                    <div className="review-proposal-label">New email</div>
+                    <div className="review-proposal-value">
+                      <a href={email.threadUrl} target="_blank" rel="noopener noreferrer">{email.subject || "(no subject)"}</a>
+                    </div>
+                    <div className="review-proposal-reason">
+                      {from} · {email.date ? new Date(email.date).toLocaleDateString() : ""}
+                      {email.snippet ? ` — ${email.snippet.slice(0, 120)}` : ""}
+                    </div>
+                  </div>
+                  <div className="review-proposal-actions">
+                    <button
+                      className="review-apply-btn"
+                      onClick={() => handleIngestEmail(email)}
+                      disabled={ingesting === email.id}
+                    >
+                      {ingesting === email.id ? "…" : "Ingest"}
+                    </button>
+                    <button className="review-dismiss-btn" onClick={() => dismissReviewEmail(email.id)}>Dismiss</button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {!review.proposals?.next_step && !review.proposals?.status &&
+              !review.change_requests?.length && !review.new_emails?.length && (
+              <div className="review-clean">✓ Nothing new — card looks current.</div>
+            )}
+          </div>
+        )}
 
         <div className="modal-section">
           <label className="modal-label">Status</label>
@@ -653,49 +756,6 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
           </div>
         )}
 
-        {mailCandidates !== null && (
-          <div className="modal-section">
-            <label className="modal-label">
-              Email Candidates
-              {mailCandidates.length > 0 && <span className="timer-count">{mailCandidates.length}</span>}
-            </label>
-            {mailCandidates.length === 0 ? (
-              <div className="modal-empty">No new emails found</div>
-            ) : (
-              <div className="modal-inbox-list">
-                {mailCandidates.map((email) => {
-                  const from = email.from?.replace(/^"?([^"<]+)"?\s*<[^>]+>$/, "$1").trim() || email.from;
-                  return (
-                    <div key={email.id} className="modal-inbox-item modal-inbox-item--candidate">
-                      <span className="modal-inbox-subject">
-                        {(email.subject || "(no subject)").slice(0, 55)}
-                        {(email.subject || "").length > 55 ? "…" : ""}
-                      </span>
-                      <span className="modal-inbox-from">{from}</span>
-                      <span className="modal-inbox-age">{new Date(email.date).toLocaleDateString()}</span>
-                      <button
-                        className="modal-ingest-btn"
-                        onClick={() => handleIngestEmail(email)}
-                        disabled={ingesting === email.id}
-                      >
-                        {ingesting === email.id ? "…" : "Ingest"}
-                      </button>
-                      <button
-                        className="modal-ingest-btn modal-ingest-btn--dismiss"
-                        onClick={() => setMailCandidates((prev) => prev?.filter((e) => e.id !== email.id) ?? null)}
-                        disabled={ingesting === email.id}
-                        title="Dismiss"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="modal-section">
           <label className="modal-label">
             Time Entries
@@ -713,121 +773,6 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
             </div>
           )}
         </div>
-
-        {syncData && (
-          <div className="modal-section sync-results">
-            <label className="modal-label">Sync Results</label>
-
-            {syncData.updated?.notion_id && (
-              <div className="sync-meta" style={{ color: "#22c55e", fontWeight: 500, marginBottom: "0.5rem" }}>
-                Linked Notion task{syncData.notion?.title ? `: ${syncData.notion.title}` : ""}
-              </div>
-            )}
-
-            {syncData.notion && (
-              <div className="sync-notion">
-                <div className="sync-notion-header">
-                  <NotionIcon size={14} />
-                  <span className="sync-notion-title">{syncData.notion.title || "Untitled"}</span>
-                  {syncData.notion.status && (
-                    <span className="sync-notion-status">{syncData.notion.status}</span>
-                  )}
-                </div>
-                {syncData.notion.last_edited && (
-                  <div className="sync-meta">
-                    Edited {new Date(syncData.notion.last_edited).toLocaleDateString()}
-                  </div>
-                )}
-                {syncData.notion.todos.length > 0 && (
-                  <ul className="sync-todos">
-                    {syncData.notion.todos.map((todo, i) => (
-                      <li key={i} className={todo.checked ? "todo-done" : ""}>
-                        <span className="todo-check">{todo.checked ? "\u2611" : "\u2610"}</span>
-                        {todo.text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {syncData.notion.comments.length > 0 && (
-                  <div className="sync-comments">
-                    <div className="sync-sub-label">Recent comments</div>
-                    {syncData.notion.comments.map((c, i) => (
-                      <div key={i} className="sync-comment">
-                        <span className="sync-comment-text">{c.text}</span>
-                        <span className="sync-comment-date">
-                          {new Date(c.created).toLocaleDateString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {syncData.notion.url && (
-                  <a className="sync-notion-link" href={syncData.notion.url} target="_blank" rel="noopener noreferrer">
-                    Open in Notion
-                  </a>
-                )}
-              </div>
-            )}
-
-            {syncData.emails?.length > 0 && (
-              <div className="sync-emails">
-                <div className="sync-sub-label">Recent Emails ({syncData.emails.length})</div>
-                {syncData.emails.map((e) => {
-                  const alreadyIngested = inboxItems.some((i) => i.gmail_id === e.id);
-                  return (
-                    <div key={e.id} className="sync-email">
-                      <a className="sync-email-link" href={e.threadUrl} target="_blank" rel="noopener noreferrer">
-                        <div className="sync-email-subject">{e.subject}</div>
-                        <div className="sync-email-meta">
-                          <span className="sync-email-from">{e.from.replace(/<[^>]+>/, "").trim()}</span>
-                          <span className="sync-email-date">{new Date(e.date).toLocaleDateString()}</span>
-                        </div>
-                      </a>
-                      {alreadyIngested ? (
-                        <span className="sync-email-ingested">✓</span>
-                      ) : (
-                        <button
-                          className="modal-ingest-btn"
-                          onClick={() => handleIngestEmail(e)}
-                          disabled={ingesting === e.id}
-                        >
-                          {ingesting === e.id ? "…" : "Ingest"}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {syncData.analysis && (
-              <div className="sync-analysis">
-                {syncData.analysis.changeRequests?.length > 0 && (
-                  <div className="sync-changes">
-                    <div className="sync-sub-label">Change Requests Detected</div>
-                    {syncData.analysis.changeRequests.map((cr, i) => (
-                      <div key={i} className="sync-change">
-                        <div className="sync-change-summary">{cr.summary}</div>
-                        <div className="sync-change-detail">{cr.detail}</div>
-                      </div>
-                    ))}
-                    {syncData.updated?.notion_appended && (
-                      <div className="sync-meta" style={{ marginTop: "0.25rem" }}>Added to Notion task</div>
-                    )}
-                  </div>
-                )}
-                {syncData.analysis.reasoning && (
-                  <div className="sync-reasoning">{syncData.analysis.reasoning}</div>
-                )}
-              </div>
-            )}
-
-            {!syncData.notion && !syncData.emails?.length && (
-              <div className="modal-empty">No Notion page or email data linked</div>
-            )}
-          </div>
-        )}
-
         </>}
 
         <div className="modal-footer">
