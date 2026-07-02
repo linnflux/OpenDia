@@ -12,6 +12,7 @@ import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeek
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus, updateNotionTaskDueDate } from "./notion.js";
 import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
 import { readDeadlineCache, removeFromDeadlineCache, refreshDeadlineCache, bumpDeadlineInCache, getCachedDeadlineRow } from "./deadlines.js";
+import { readSweepCache, runSweep } from "./sweep.js";
 import { analyzeSync } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -646,6 +647,26 @@ app.post("/api/newsletter/generate", requireAdmin, (req, res) => {
       return res.status(500).json({ error: "newsletter file not produced", stderr });
     res.json({ name: targetName, content: readFileSync(targetPath, "utf8") });
   });
+});
+
+// Sweep — AI board review. GET returns the cached result; POST re-runs the
+// AI pass over all in_progress/wfhuman cards (blocking, ~1-2 min — same
+// pattern as newsletter generation).
+app.get("/api/sweep", (req, res) => {
+  res.json(readSweepCache());
+});
+
+app.post("/api/sweep/run", requireAdmin, async (req, res) => {
+  try {
+    const projects = getAllProjects({ includeCompleted: false })
+      .filter((p) => p.status === "in_progress" || p.status === "wfhuman");
+    if (projects.length === 0) return res.json({ generated: null, quick_wins: [], blocked: [], suggestions: [] });
+    const result = await runSweep(projects);
+    res.json(result);
+  } catch (err) {
+    console.error("POST /api/sweep/run error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/api/projects/:id/timers", async (req, res) => {

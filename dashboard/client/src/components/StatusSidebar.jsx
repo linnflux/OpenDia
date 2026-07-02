@@ -44,7 +44,7 @@ const STATUS_META = [
   },
 ];
 
-export default function StatusSidebar({ active, counts, onChange, mobileOpen, onMobileClose }) {
+export default function StatusSidebar({ active, counts, onChange, mobileOpen, onMobileClose, onOpenSweep, sweepCount }) {
   return (
     <>
       {mobileOpen && <div className="sidebar-backdrop" onClick={onMobileClose} />}
@@ -61,6 +61,23 @@ export default function StatusSidebar({ active, counts, onChange, mobileOpen, on
             <span className="status-sidebar-count">{counts[key] ?? 0}</span>
           </button>
         ))}
+        {onOpenSweep && (
+          <>
+            <div className="status-sidebar-divider" />
+            <button
+              className="status-sidebar-item status-sidebar-sweep"
+              onClick={() => { onOpenSweep(); onMobileClose(); }}
+            >
+              <span className="status-sidebar-icon">
+                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+                  <path d="M11 1L5.5 8.5M5.5 8.5L2 13.5h6L9 10M5.5 8.5L9 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+              <span className="status-sidebar-label">SWEEP</span>
+              {sweepCount > 0 && <span className="status-sidebar-count sweep-attention">{sweepCount}</span>}
+            </button>
+          </>
+        )}
       </aside>
     </>
   );

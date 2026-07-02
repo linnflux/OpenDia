@@ -54,6 +54,7 @@ import Analytics from "./components/Analytics.jsx";
 import Billing from "./components/Billing.jsx";
 import Newsletter from "./components/Newsletter.jsx";
 import Today from "./components/Today.jsx";
+import Sweep from "./components/Sweep.jsx";
 
 const DIVISION_COLORS = {
   WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
@@ -155,6 +156,20 @@ export default function App() {
       clearInterval(interval);
     };
   }, [fetchActiveTimers]);
+
+  // Attention count for the Sweep sidebar badge: active cards past their
+  // next_step date or missing a next step entirely (deduped by card).
+  const sweepAttention = useMemo(() => {
+    const today = new Date().toLocaleDateString("en-CA");
+    const ids = new Set();
+    for (const p of projects) {
+      if (p.status !== "in_progress" && p.status !== "wfhuman") continue;
+      const m = /^(\d{4}-\d{2}-\d{2}):/.exec(p.next_step || "");
+      if (m && m[1] < today) ids.add(p.id);
+      else if (!p.next_step || !p.next_step.trim()) ids.add(p.id);
+    }
+    return ids.size;
+  }, [projects]);
 
   // Collect unique divisions from loaded projects
   const divisions = useMemo(() => {
@@ -394,6 +409,8 @@ export default function App() {
               onChange={handleActiveStatusChange}
               mobileOpen={sidebarOpen}
               onMobileClose={() => setSidebarOpen(false)}
+              onOpenSweep={() => setView("sweep")}
+              sweepCount={sweepAttention}
             />
             <div className="board-main">
               <div className="board-main-toolbar">
@@ -428,6 +445,8 @@ export default function App() {
         </div>
       ) : view === "today" ? (
         <Today onOpenProject={handleProjectClick} />
+      ) : view === "sweep" ? (
+        <Sweep projects={projects} onOpenProject={handleProjectClick} isAdmin={!!me?.is_admin} />
       ) : view === "analytics" ? (
         <Analytics />
       ) : view === "billing" && me?.is_admin ? (
@@ -474,6 +493,7 @@ export default function App() {
         onOpenThemeModal={() => { setPaletteOpen(false); setThemeModalOpen(true); }}
         onOpenAnalytics={() => { setPaletteOpen(false); setView("analytics"); }}
         onOpenToday={() => { setPaletteOpen(false); setView("today"); }}
+        onOpenSweep={() => { setPaletteOpen(false); setView("sweep"); }}
         isAdmin={!!me?.is_admin}
         onOpenBilling={() => { setPaletteOpen(false); setView("billing"); }}
         onOpenNewsletter={() => { setPaletteOpen(false); setView("newsletter"); }}
