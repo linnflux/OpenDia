@@ -202,10 +202,27 @@ app.post("/api/projects/:id/review", async (req, res) => {
       notion = await fetchNotionPage(project.notion_id);
     }
 
+    let timers = [];
+    try {
+      timers = await getTimerEntriesForProject(project, 3);
+    } catch (err) {
+      console.error("Timer lookup error:", err.message);
+    }
+
+    // Email lookback scales to the card's quiet period: cover everything since
+    // the last work session (+1 week buffer), clamped to 7-60 days. A card
+    // untouched for a month gets a month of email; an active card stays cheap.
+    let lookbackDays = 30;
+    if (timers[0]?.start) {
+      const daysSinceWork = Math.ceil((Date.now() - new Date(timers[0].start).getTime()) / 86400000);
+      lookbackDays = Math.min(Math.max(daysSinceWork + 7, 7), 60);
+    }
+
     let emails = [];
     try {
       emails = await searchRecentEmails(project.company_name, {
         shortName: project.company_short,
+        days: lookbackDays,
       });
     } catch (err) {
       console.error("Gmail search error:", err.message);
@@ -213,13 +230,6 @@ app.post("/api/projects/:id/review", async (req, res) => {
     // Only surface emails not already ingested as inbox items
     const processed = getProcessedGmailIds();
     const newEmails = emails.filter((e) => !processed.has(e.id));
-
-    let timers = [];
-    try {
-      timers = await getTimerEntriesForProject(project, 3);
-    } catch (err) {
-      console.error("Timer lookup error:", err.message);
-    }
 
     let analysis = null;
     if (newEmails.length > 0 || notion || timers.length > 0) {
@@ -240,6 +250,7 @@ app.post("/api/projects/:id/review", async (req, res) => {
       new_emails: newEmails,
       linked_notion: linkedNotion,
       notion_title: notion?.title || null,
+      email_lookback_days: lookbackDays,
     });
   } catch (err) {
     console.error("POST /api/projects/:id/review error:", err.message);

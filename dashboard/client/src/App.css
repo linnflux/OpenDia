@@ -743,6 +743,15 @@ body.has-bg::before {
   background: var(--bg-card);
 }
 
+.review-lookback {
+  font-size: 0.65rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+  margin-left: 0.5rem;
+}
+
 .review-panel-close {
   float: right;
   background: none;

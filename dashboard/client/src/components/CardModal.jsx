@@ -514,6 +514,9 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
           <div className="modal-section modal-review-panel">
             <label className="modal-label">
               Review
+              {review.email_lookback_days && (
+                <span className="review-lookback">email: last {review.email_lookback_days}d</span>
+              )}
               <button className="review-panel-close" onClick={() => setReview(null)} title="Dismiss review">×</button>
             </label>
             {review.linked_notion && (
