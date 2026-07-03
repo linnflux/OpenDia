@@ -205,9 +205,6 @@ export default function App() {
     }
   }
 
-  // Header badge: tagged, non-completed cards
-  const taraCount = projects.filter((p) => p.status !== "completed" && hasTag(p, "tara")).length;
-
   function handleToggleTag(project, tagKey = "tara") {
     updateProject(project.id, { tags: toggleTag(project, tagKey) });
   }
@@ -299,7 +296,6 @@ export default function App() {
           <button className={`view-toggle-btn${view === "tara" ? " active" : ""}`} onClick={() => setView("tara")}>
             <span className="tara-tab-t">T</span>
             <span>Tara</span>
-            {taraCount > 0 && <span className="tara-badge">{taraCount}</span>}
           </button>
           <button className={`view-toggle-btn${view === "today" ? " active" : ""}`} onClick={() => setView("today")}>
             <TodayIcon />

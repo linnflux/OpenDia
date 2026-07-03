@@ -2316,14 +2316,6 @@ body.has-bg::before {
   background: #f97316;
   color: #fff;
 }
-.tara-badge {
-  background: #f97316;
-  color: #fff;
-  font-size: 0.65rem;
-  font-weight: 600;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--radius-pill);
-}
 
 /* ── Inbox-origin note in CardModal footer ─────────────────────────────────── */
 .modal-inbox-origin {
