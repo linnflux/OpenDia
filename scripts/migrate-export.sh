@@ -58,6 +58,9 @@ cat > "$CLAUDE_FILTER" <<'FILTER'
 + mcp-servers/**/tsconfig.json
 + mcp-servers/**/README.md
 + mcp-servers/**/dist/**
++ mcp-servers/**/build.mjs
++ mcp-servers/**/.gitignore
++ mcp-servers/**/.git/**
 - .credentials.json
 - mcp-credentials/**
 - projects/**/*.jsonl
@@ -207,18 +210,22 @@ else
     warn "~/FluxCC not found — skipping"
 fi
 
-# --- Summary ---
+# --- Success marker ---
+# All real work is done at this point. Touch the marker BEFORE the cosmetic
+# summary below: the recursive `rclone ls` listings occasionally get
+# rate-limited after a long run, and with `set -euo pipefail` a failed listing
+# used to kill the script here — leaving a stale marker despite every sync
+# having completed and verified.
+touch "$OPENDIA_DIR/logs/.last-backup-success"
+
+# --- Summary (best-effort; failures here are non-fatal) ---
 echo ""
 info "Export complete. Drive contents:"
 echo ""
-echo "  gdrive:Claude-Config/"
-rclone ls "gdrive:Claude-Config/" 2>/dev/null | wc -l | xargs -I{} echo "    {} files"
-echo ""
-echo "  gdrive:OpenDia/"
-rclone ls "gdrive:OpenDia/" 2>/dev/null | wc -l | xargs -I{} echo "    {} files"
-echo ""
-echo "  gdrive:FluxCC/"
-rclone ls "gdrive:FluxCC/" 2>/dev/null | wc -l | xargs -I{} echo "    {} files"
-echo ""
+for REMOTE in "Claude-Config" "OpenDia" "FluxCC"; do
+    echo "  gdrive:${REMOTE}/"
+    COUNT=$(rclone ls "gdrive:${REMOTE}/" --tpslimit 8 2>/dev/null | wc -l) || COUNT="?"
+    echo "    ${COUNT} files"
+    echo ""
+done
 info "Ready to run migrate-setup.sh on the new machine."
-touch "$OPENDIA_DIR/logs/.last-backup-success"
