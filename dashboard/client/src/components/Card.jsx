@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { TAGS, hasTag } from "../tags.js";
 
 const DIVISION_COLORS = {
   WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
@@ -19,7 +20,7 @@ const STATUS_OPTIONS = [
 
 const INBOX_PREFIX = "Auto-created from inbox: ";
 
-export default function Card({ project, onClick, hasActiveTimer, onStatusChange }) {
+export default function Card({ project, onClick, hasActiveTimer, onStatusChange, onToggleTag }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -55,11 +56,27 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange 
 
   return (
     <div className={`card${hasActiveTimer ? " card-timer-active" : ""}`} onClick={handleCardClick}>
-      {inboxSource && (
-        <span className="card-inbox-origin" title={`Created from inbox: ${inboxSource}`}>
-          <img src="/opendia_mark.svg" width="12" height="9" alt="" aria-hidden="true" />
-        </span>
-      )}
+      <span className="card-corner">
+        {TAGS.map((tag) => {
+          const on = hasTag(project, tag.key);
+          return (
+            <button
+              key={tag.key}
+              className={`card-tag-t${on ? " on" : ""}`}
+              style={on ? { backgroundColor: tag.color } : {}}
+              title={on ? `Tagged for ${tag.label} — click to untag` : `Tag for ${tag.label}`}
+              onClick={(e) => { e.stopPropagation(); onToggleTag && onToggleTag(project, tag.key); }}
+            >
+              {tag.letter}
+            </button>
+          );
+        })}
+        {inboxSource && (
+          <span className="card-inbox-origin" title={`Created from inbox: ${inboxSource}`}>
+            <img src="/opendia_mark.svg" width="12" height="9" alt="" aria-hidden="true" />
+          </span>
+        )}
+      </span>
       <div className="card-name">{project.name}</div>
       <div className="card-company">{project.company_name || "No company"}</div>
       <div className="card-badges">

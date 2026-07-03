@@ -55,6 +55,7 @@ import Billing from "./components/Billing.jsx";
 import Newsletter from "./components/Newsletter.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
+import { hasTag, toggleTag } from "./tags.js";
 
 const DIVISION_COLORS = {
   WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
@@ -198,6 +199,17 @@ export default function App() {
       // Division filter
       filtered[status] = list.filter((p) => p.division === filter);
     }
+    // The Tara view is the same board, additionally limited to tagged cards
+    if (view === "tara") {
+      filtered[status] = filtered[status].filter((p) => hasTag(p, "tara"));
+    }
+  }
+
+  // Header badge: tagged, non-completed cards
+  const taraCount = projects.filter((p) => p.status !== "completed" && hasTag(p, "tara")).length;
+
+  function handleToggleTag(project, tagKey = "tara") {
+    updateProject(project.id, { tags: toggleTag(project, tagKey) });
   }
 
   // Stable-sort each column: timer-active cards bubble to top, relative order preserved within each group
@@ -284,6 +296,11 @@ export default function App() {
             <BoardIcon />
             <span>Board</span>
           </button>
+          <button className={`view-toggle-btn${view === "tara" ? " active" : ""}`} onClick={() => setView("tara")}>
+            <span className="tara-tab-t">T</span>
+            <span>Tara</span>
+            {taraCount > 0 && <span className="tara-badge">{taraCount}</span>}
+          </button>
           <button className={`view-toggle-btn${view === "today" ? " active" : ""}`} onClick={() => setView("today")}>
             <TodayIcon />
             <span>Today</span>
@@ -329,7 +346,7 @@ export default function App() {
               )}
             </div>
           )}
-          {view === "board" && (
+          {(view === "board" || view === "tara") && (
             <div className="filter-dropdown-wrap">
               {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
               <button
@@ -393,7 +410,7 @@ export default function App() {
         </div>
       </header>
 
-      {view === "board" ? (
+      {view === "board" || view === "tara" ? (
         loading ? (
           <div className="loading">Loading projects...</div>
         ) : (
@@ -425,6 +442,7 @@ export default function App() {
                 onCardClick={handleCardClick}
                 activeTimerIds={activeTimerIds}
                 onStatusChange={handleStatusChange}
+                onToggleTag={handleToggleTag}
               />
             </div>
           </div>

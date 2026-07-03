@@ -13,7 +13,7 @@ function getDb() {
 }
 
 const GET_ALL_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
@@ -27,7 +27,7 @@ const GET_ALL_PROJECTS = `
 const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
 
 const GET_ACTIVE_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
@@ -46,7 +46,7 @@ export function getAllProjects({ includeCompleted = false } = {}) {
 
 export function getProjectById(id) {
   return getDb().prepare(`
-    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step,
+    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.tags,
            c.name AS company_name, c.short_name AS company_short,
            d.name AS division
     FROM projects p
@@ -56,7 +56,16 @@ export function getProjectById(id) {
   `).get(id);
 }
 
-const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id"]);
+const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id", "tags"]);
+
+// Migration guard: add columns introduced after the original schema.
+// Safe to call on every startup — no-ops once the column exists.
+export function ensureProjectsColumns() {
+  const cols = getDb().pragma("table_info(projects)").map((r) => r.name);
+  if (!cols.includes("tags")) {
+    getDb().exec("ALTER TABLE projects ADD COLUMN tags TEXT");
+  }
+}
 
 export function updateProject(id, fields) {
   const sets = [];

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { marked } from "marked";
 import TerminalPanel from "./TerminalPanel.jsx";
+import { TAGS, hasTag, toggleTag } from "../tags.js";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -377,6 +378,20 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
     <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdropClick}>
       <div className={`modal${hasActiveTimer ? " modal-timer-active" : ""}`}>
         <div className="modal-top-actions">
+          {TAGS.map((tag) => {
+            const on = hasTag(project, tag.key);
+            return (
+              <button
+                key={tag.key}
+                className={`modal-tag-t${on ? " on" : ""}`}
+                style={on ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
+                title={on ? `Tagged for ${tag.label} — click to untag` : `Tag for ${tag.label}`}
+                onClick={() => onUpdate(project.id, { tags: toggleTag(project, tag.key) })}
+              >
+                {tag.letter}
+              </button>
+            );
+          })}
           <button
             className={`modal-review-btn ${reviewing ? "reviewing" : ""}`}
             onClick={handleReview}
