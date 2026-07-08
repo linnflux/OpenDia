@@ -93,6 +93,11 @@ fi
 info "Saving crontab snapshot..."
 crontab -l > "$OPENDIA_DIR/crontab.backup" 2>/dev/null || true
 
+# Snapshot user systemd units (dashboard, cloudflared tunnel, etc.) so a
+# restored machine can re-enable services without reconstructing them.
+mkdir -p "$OPENDIA_DIR/systemd-units"
+cp "$HOME/.config/systemd/user/"*.service "$OPENDIA_DIR/systemd-units/" 2>/dev/null || true
+
 # --- Step 4a: WAL-consistent SQLite snapshot ---
 # opendia.db is in WAL mode; the main .db file may be stale.
 # Python's sqlite3.backup() reads through the WAL and produces a full snapshot
