@@ -29,6 +29,7 @@ import sqlite3
 import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -49,6 +50,28 @@ DASHBOARD_LOCAL = "http://localhost:8038"
 GCAL = "https://www.googleapis.com/calendar/v3"
 
 NEXT_STEP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}):\s*(.*)$", re.S)
+
+# ── Time-blocking rules ──────────────────────────────────────────────────
+# Day-granular items (date-only Notion dues, next_step dates) become real
+# timed blocks instead of all-day banners: quick actions get 30 minutes,
+# substantive work gets 60, placed into the first open slot after 8 AM ET
+# (respecting the primary calendar via freeBusy). All-day survives only for
+# genuine multi-day date ranges.
+WORK_START_H = 8
+WORK_END_H = 20
+SHORT_MIN = 30
+LONG_MIN = 60
+FREEBUSY_HORIZON_DAYS = 42  # freeBusy API limit
+TZ = ZoneInfo(CAL_TZ)
+
+QUICK_RE = re.compile(
+    r"\b(follow[- ]?up|call|confirm|check|email|reply|send|ask|ping|remind|verify|schedule|invoice|review)\b",
+    re.I,
+)
+
+
+def duration_minutes(text):
+    return SHORT_MIN if QUICK_RE.search(text or "") else LONG_MIN
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -197,6 +220,25 @@ class GCal:
         cfg["channel_expiration"] = int(created.get("expiration") or 0)
         return True
 
+    def freebusy(self, cal_ids, time_min, time_max):
+        """Merged busy intervals (as aware datetimes) across the given calendars."""
+        data = self.req("POST", "/freeBusy", json={
+            "timeMin": time_min.isoformat(),
+            "timeMax": time_max.isoformat(),
+            "items": [{"id": c} for c in cal_ids],
+        })
+        busy = []
+        for c in (data.get("calendars") or {}).values():
+            for b in c.get("busy", []):
+                try:
+                    busy.append((
+                        datetime.fromisoformat(b["start"].replace("Z", "+00:00")),
+                        datetime.fromisoformat(b["end"].replace("Z", "+00:00")),
+                    ))
+                except Exception:
+                    pass
+        return sorted(busy)
+
     def list_future_opendia_events(self, cal_id):
         events = {}
         page = None
@@ -321,6 +363,21 @@ def event_body(summary, start, end, description, kind, color=None):
     return body
 
 
+def patch_body(body):
+    """Google PATCH merges nested fields, so converting all-day <-> timed must
+    explicitly null the opposite start/end field or the API rejects the mix
+    with 'Invalid start time'."""
+    out = dict(body)
+    for k in ("start", "end"):
+        v = dict(out.get(k) or {})
+        if v.get("dateTime"):
+            v.setdefault("date", None)
+        elif v.get("date"):
+            v.setdefault("dateTime", None)
+        out[k] = v
+    return out
+
+
 def build_desired(token, cfg, today_iso):
     base_url = (cfg.get("base_url") or "").rstrip("/")
     by_notion, next_steps = load_db_maps()
@@ -355,8 +412,19 @@ def build_desired(token, cfg, today_iso):
             lines.append(f"Card: {base_url}/?project={card['id']}")
         lines.append(f"Notion: https://www.notion.so/{pid.replace('-', '')}")
         eid = "od" + pid.replace("-", "")
+        # Granularity decides time-blocking: date-only single-day dues get an
+        # auto-placed 30/60-min slot; explicit datetimes are verbatim;
+        # multi-day date ranges stay all-day banners.
+        if len(start) == 10 and (not end or end == start):
+            gran = "day"
+        elif len(start) == 10:
+            gran = "day-span"
+        else:
+            gran = "exact"
         desired[eid] = {
             "kind": "task",
+            "granularity": gran,
+            "duration": duration_minutes(name) if gran == "day" else None,
             "notion_id": pid,
             "start": start,
             "end": end,
@@ -378,6 +446,8 @@ def build_desired(token, cfg, today_iso):
         eid = f"odns{row['id']}"
         desired[eid] = {
             "kind": "next_step",
+            "granularity": "day",
+            "duration": duration_minutes(action),
             "card_id": row["id"],
             "action": action,
             "start": ds,
@@ -386,6 +456,104 @@ def build_desired(token, cfg, today_iso):
             "body": event_body(summary, ds, None, "\n".join(lines), "next_step", color="6"),
         }
     return desired
+
+
+# ---------------------------------------------------------------------------
+# Slot assignment (time-blocking)
+# ---------------------------------------------------------------------------
+def assign_slots(cal, cal_id, desired, google):
+    """Give every day-granular item a concrete 30/60-min block.
+
+    Stickiness rule: if the Google event already has a time on the correct
+    day (whether we placed it or the user dragged it), adopt those exact
+    times so reconciliation is a no-op. Only missing/all-day events get a
+    fresh slot: first free gap after 8 AM ET (after "now" for today),
+    respecting primary-calendar busyness and slots claimed earlier this run.
+    """
+    day_items = [(eid, it) for eid, it in desired.items() if it.get("granularity") == "day"]
+    if not day_items:
+        return
+
+    now = datetime.now(TZ)
+    today = now.date()
+    horizon_end = today + timedelta(days=FREEBUSY_HORIZON_DAYS)
+
+    # Adopt existing times first; collect items that still need placement
+    need = []
+    for eid, item in sorted(day_items, key=lambda x: (x[1]["start"], x[0])):
+        ev = google.get(eid)
+        if ev and ev.get("start", {}).get("dateTime"):
+            ev_day = datetime.fromisoformat(ev["start"]["dateTime"]).astimezone(TZ).date().isoformat()
+            if ev_day == item["start"][:10]:
+                item["body"]["start"] = dict(ev["start"])
+                item["body"]["end"] = dict(ev["end"])
+                continue
+        d = date.fromisoformat(item["start"][:10])
+        if d <= horizon_end:
+            need.append((eid, item, d))
+        # beyond the freeBusy horizon: stays all-day until it rolls into range
+
+    if not need:
+        return
+
+    # Busy = primary-calendar appointments (freeBusy) + our own already-timed
+    # events. NOT freeBusy on the OpenDia calendar itself: API-created all-day
+    # events default to opaque, so the un-converted banners would mark their
+    # whole day busy and block the very slots we're trying to assign.
+    # Banner-length busy intervals (>=20h, e.g. multi-day OOO/context events)
+    # are ignored — they're day markers, not meetings.
+    busy = [
+        (s, e) for s, e in cal.freebusy(
+            ["primary"],
+            datetime.combine(min(n[2] for n in need), datetime.min.time(), TZ),
+            datetime.combine(max(n[2] for n in need) + timedelta(days=1), datetime.min.time(), TZ),
+        )
+        if e - s < timedelta(hours=20)
+    ]
+    for ev in google.values():
+        st, en = ev.get("start", {}).get("dateTime"), ev.get("end", {}).get("dateTime")
+        if st and en:
+            try:
+                busy.append((datetime.fromisoformat(st), datetime.fromisoformat(en)))
+            except Exception:
+                pass
+    busy.sort()
+
+    def first_gap(day, minutes):
+        dur = timedelta(minutes=minutes)
+        cursor = datetime.combine(day, datetime.min.time(), TZ).replace(hour=WORK_START_H)
+        if day == today and now > cursor:
+            # round now up to the next :00/:30
+            minute = 30 if now.minute < 30 else 0
+            cursor = now.replace(minute=minute, second=0, microsecond=0)
+            if minute == 0:
+                cursor += timedelta(hours=1)
+        day_end = datetime.combine(day, datetime.min.time(), TZ).replace(hour=WORK_END_H)
+        while cursor + dur <= day_end:
+            clash = None
+            for b_start, b_end in busy:
+                if b_start < cursor + dur and b_end > cursor:
+                    clash = b_end
+            if clash is None:
+                return cursor
+            # jump past the conflict, snapped to :00/:30
+            cursor = clash.astimezone(TZ)
+            snap = 30 if cursor.minute <= 30 and cursor.minute > 0 else 0
+            if cursor.minute != 0 and cursor.minute != 30:
+                cursor = cursor.replace(minute=snap, second=0, microsecond=0)
+                if snap == 0:
+                    cursor += timedelta(hours=1)
+        return None
+
+    for eid, item, d in need:
+        slot = first_gap(d, item["duration"])
+        if slot is None:
+            continue  # day is full — stays all-day rather than double-booking
+        slot_end = slot + timedelta(minutes=item["duration"])
+        item["body"]["start"] = {"dateTime": slot.isoformat(), "timeZone": CAL_TZ}
+        item["body"]["end"] = {"dateTime": slot_end.isoformat(), "timeZone": CAL_TZ}
+        busy.append((slot, slot_end))
+        busy.sort()
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +616,7 @@ def main():
 
     desired = build_desired(ntoken, cfg, today_iso)
     google = cal.list_future_opendia_events(cal_id)
+    assign_slots(cal, cal_id, desired, google)
 
     created = updated = pushed_back = deleted = conflicts = 0
     new_state = {}
@@ -474,10 +643,12 @@ def main():
 
         g_shaped = notion_shape(have_event, base_rec)
         have = pair(*g_shaped)
-        if item["kind"] == "next_step":
-            # next_step lives at DAY granularity on the card. If the user drags
-            # the event into a specific time slot on the SAME day, that's their
-            # calendar preference — compare dates only so we never fight it.
+        day_granular = item.get("granularity") == "day"
+        if day_granular:
+            # Day-granular items (date-only dues, next_steps) live at DAY
+            # granularity on the source side; the TIME belongs to the calendar
+            # (auto-placed slot or wherever the user dragged it). Compare dates
+            # only so the time slot is never fought over.
             want = (item["start"][:10], None)
             have = ((g_shaped[0] or "")[:10] or None, None)
             base = ((base_rec.get("start") or "")[:10] or None, None) if base_rec else None
@@ -491,14 +662,23 @@ def main():
 
         def apply_google_side():
             if item["kind"] == "task":
+                if day_granular:
+                    # Source is date-only; keep Notion date-only on push-back
+                    return push_back_task(ntoken, item, (g_shaped[0] or "")[:10], None)
                 return push_back_task(ntoken, item, g_shaped[0], g_shaped[1])
             return push_back_next_step(item, g_shaped[0])
 
         if want == have:
-            pass  # dates agree; still refresh summary/description if stale
+            # Dates agree — but if this day-granular item just got a time slot
+            # while the event is still an all-day banner, apply the conversion.
+            if (day_granular and item["body"]["start"].get("dateTime")
+                    and have_event.get("start", {}).get("date")):
+                if not args.dry_run:
+                    cal.req("PATCH", f"/calendars/{cal_id}/events/{eid}", json=patch_body(item["body"]))
+                updated += 1
         elif notion_changed and not google_changed:
             if not args.dry_run:
-                cal.req("PATCH", f"/calendars/{cal_id}/events/{eid}", json=item["body"])
+                cal.req("PATCH", f"/calendars/{cal_id}/events/{eid}", json=patch_body(item["body"]))
             updated += 1
         elif google_changed and not notion_changed:
             if not args.dry_run:
@@ -512,7 +692,7 @@ def main():
             n_edited = item.get("last_edited") or ""
             if n_edited >= g_updated:
                 if not args.dry_run:
-                    cal.req("PATCH", f"/calendars/{cal_id}/events/{eid}", json=item["body"])
+                    cal.req("PATCH", f"/calendars/{cal_id}/events/{eid}", json=patch_body(item["body"]))
                 updated += 1
                 winner = "notion"
             else:
