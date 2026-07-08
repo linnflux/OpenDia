@@ -474,6 +474,13 @@ def main():
 
         g_shaped = notion_shape(have_event, base_rec)
         have = pair(*g_shaped)
+        if item["kind"] == "next_step":
+            # next_step lives at DAY granularity on the card. If the user drags
+            # the event into a specific time slot on the SAME day, that's their
+            # calendar preference — compare dates only so we never fight it.
+            want = (item["start"][:10], None)
+            have = ((g_shaped[0] or "")[:10] or None, None)
+            base = ((base_rec.get("start") or "")[:10] or None, None) if base_rec else None
         notion_changed = want != (base if base else want)
         google_changed = have != (base if base else have)
         if base is None and want != have:
