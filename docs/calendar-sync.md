@@ -9,7 +9,7 @@ manual steps.
 
 | Component | What | Runs |
 |---|---|---|
-| `scripts/calendar_sync.py` | The whole sync + slot scheduler + watch-channel renewal | cron `*/30 7-19 * * *` → `logs/calendar-sync.log`; also on webhook pings and `POST /api/calendar/sync` |
+| `scripts/calendar_sync.py` | The whole sync + slot scheduler + watch-channel renewal | cron `*/10 6-22 * * *` → `logs/calendar-sync.log`; also on webhook pings and `POST /api/calendar/sync` |
 | Google watch channel | Push notification on any calendar change → instant sync | 7-day TTL, auto-renewed by any sync run within 12h of expiry |
 | `POST /api/calendar/webhook` (dashboard) | Receives Google pings (public route, token-validated), coalesces sync runs | always (dashboard service) |
 | `cloudflared-opendia` (user systemd) | Cloudflare Tunnel exposing ONLY the webhook path publicly | always; `Restart=always`; linger enabled so it survives reboot without login |
