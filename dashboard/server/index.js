@@ -63,6 +63,53 @@ app.get("/api/themes", (req, res) => {
   }
 });
 
+// ── Google Calendar push webhook ─────────────────────────────────────────
+// Public route (mounted BEFORE the Tailscale auth middleware — Google is the
+// caller). Validates the channel token from the local calendar config, then
+// triggers a coalesced calendar_sync.py run so a drag in Google Calendar
+// reaches Notion within seconds. Exposed publicly via Tailscale Funnel on
+// this one path only.
+const CAL_CONFIG_PATH = resolve(process.env.HOME, "OpenDia", ".opendia-calendar.json");
+const calSync = { child: null, timer: null, rerun: false };
+
+function runCalendarSync() {
+  if (calSync.child) { calSync.rerun = true; return; }
+  calSync.child = spawn(`${process.env.HOME}/OpenDia/scripts/calendar_sync.py`, [], {
+    env: { ...process.env },
+    stdio: "ignore",
+  });
+  calSync.child.on("exit", () => {
+    calSync.child = null;
+    if (calSync.rerun) {
+      calSync.rerun = false;
+      scheduleCalendarSync();
+    }
+  });
+  calSync.child.on("error", () => { calSync.child = null; });
+}
+
+function scheduleCalendarSync(delayMs = 2000) {
+  if (calSync.timer) clearTimeout(calSync.timer);
+  calSync.timer = setTimeout(() => { calSync.timer = null; runCalendarSync(); }, delayMs);
+}
+
+app.post("/api/calendar/webhook", (req, res) => {
+  let expected = null;
+  try {
+    expected = JSON.parse(readFileSync(CAL_CONFIG_PATH, "utf8")).webhook_token || null;
+  } catch {}
+  const got = req.get("x-goog-channel-token");
+  if (!expected || got !== expected) {
+    console.warn("calendar webhook: rejected (bad token)");
+    return res.status(403).end();
+  }
+  const state = req.get("x-goog-resource-state") || "?";
+  console.log(`calendar webhook: ${state}`);
+  res.status(200).end();
+  // Google sends state=sync on channel creation; a run is harmless either way
+  scheduleCalendarSync();
+});
+
 app.use(requireLinnfluxUser);
 app.get("/api/me", (req, res) => res.json(req.user));
 

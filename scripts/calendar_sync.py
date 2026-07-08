@@ -27,6 +27,7 @@ import os
 import re
 import sqlite3
 import sys
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
 import requests
@@ -161,6 +162,40 @@ class GCal:
                 break
         created = self.req("POST", "/calendars", json={"summary": CAL_NAME, "timeZone": CAL_TZ})
         return created["id"]
+
+    def ensure_watch_channel(self, cal_id, cfg):
+        """Keep a push-notification channel alive so Google notifies our
+        webhook (Tailscale Funnel) on any calendar change. Renews when the
+        channel is missing or expires within 12h; cron cadence makes renewal
+        automatic. No-op unless webhook_url + webhook_token are configured."""
+        url = cfg.get("webhook_url")
+        token = cfg.get("webhook_token")
+        if not url or not token:
+            return False
+        exp = cfg.get("channel_expiration") or 0  # ms epoch
+        margin = (datetime.now(timezone.utc).timestamp() + 12 * 3600) * 1000
+        if cfg.get("channel_id") and exp > margin:
+            return False
+        new_id = uuid.uuid4().hex
+        created = self.req("POST", f"/calendars/{cal_id}/events/watch", json={
+            "id": new_id,
+            "type": "web_hook",
+            "address": url,
+            "token": token,
+            "params": {"ttl": "604800"},  # 7 days
+        })
+        # Stop the previous channel best-effort
+        old_id, old_res = cfg.get("channel_id"), cfg.get("channel_resource_id")
+        if old_id and old_res:
+            try:
+                self.req("POST", "/channels/stop", ok=(200, 204, 404),
+                         json={"id": old_id, "resourceId": old_res})
+            except Exception:
+                pass
+        cfg["channel_id"] = new_id
+        cfg["channel_resource_id"] = created.get("resourceId")
+        cfg["channel_expiration"] = int(created.get("expiration") or 0)
+        return True
 
     def list_future_opendia_events(self, cal_id):
         events = {}
@@ -403,8 +438,12 @@ def main():
 
     cal = GCal(google_token())
     cal_id = cal.ensure_calendar(cfg)
-    if cfg.get("calendar_id") != cal_id:
-        cfg["calendar_id"] = cal_id
+    cfg_dirty = cfg.get("calendar_id") != cal_id
+    cfg["calendar_id"] = cal_id
+    if not args.dry_run and cal.ensure_watch_channel(cal_id, cfg):
+        cfg_dirty = True
+        print("  watch channel renewed")
+    if cfg_dirty:
         save_json_atomic(CONFIG_FILE, cfg)
 
     desired = build_desired(ntoken, cfg, today_iso)
