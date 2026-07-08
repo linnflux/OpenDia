@@ -157,6 +157,12 @@ app.patch("/api/projects/:id", (req, res) => {
       if (!updated) return res.status(404).json({ error: "project not found" });
     }
 
+    // next_step (event date/text) and status (adds/removes next_step events)
+    // affect the OpenDia calendar — sync now instead of waiting for cron
+    if (fields.next_step !== undefined || fields.status !== undefined) {
+      scheduleCalendarSync();
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error("PATCH /api/projects/:id error:", err.message);
@@ -509,6 +515,8 @@ app.post("/api/deadlines/:notionId/bump", async (req, res) => {
     if (!current?.due_start) return;
     try {
       await updateNotionTaskDueDate(notionId, { start: current.due_start, end: current.due_end });
+      // Reflect the new due date on the OpenDia calendar immediately
+      scheduleCalendarSync();
     } catch (err) {
       console.error(`Notion date bump failed for ${notionId}:`, err.message);
     }
@@ -525,6 +533,8 @@ app.patch("/api/deadlines/:notionId/status", async (req, res) => {
   const ok = await updateNotionTaskStatus(notionId, status);
   if (!ok) return res.status(502).json({ error: "Notion update failed" });
   removeFromDeadlineCache(notionId);
+  // Completed/Reference tasks lose their future calendar events — sync now
+  scheduleCalendarSync();
   res.json({ ok: true, notionId, status });
 });
 
