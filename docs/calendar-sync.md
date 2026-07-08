@@ -54,9 +54,11 @@ journalctl --user -u opendia-dashboard | grep "calendar webhook" | tail  # pings
 ```
 
 A healthy steady-state run prints all zeros. Failures land in
-`calendar-sync.log` (cron) — there is no active alerting on sync failures;
-the 30-min cron means a broken webhook degrades to polling, and a fully
-broken sync shows stale event data rather than data loss.
+`calendar-sync.log` (cron), and the daily 5 PM Lonely Whistle email
+(`scripts/lonely_whistle.py` in ~/OpenDia/scripts, `calendar_sync_warnings()`)
+alerts on: no successful run in >2h, a last run that ended abnormally, or an
+expired webhook channel (instant sync degraded to 30-min polling). A broken
+sync shows stale event data rather than data loss.
 
 ## Disaster recovery
 
