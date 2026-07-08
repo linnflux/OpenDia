@@ -158,6 +158,19 @@ export default function App() {
     };
   }, [fetchActiveTimers]);
 
+  // Deep link: ?project=<id> opens that card's modal once projects load
+  // (used by OpenDia calendar event links). Param is consumed then stripped.
+  useEffect(() => {
+    if (projects.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const pid = parseInt(params.get("project"), 10);
+    if (!pid) return;
+    if (projects.some((p) => p.id === pid)) setSelectedProjectId(pid);
+    params.delete("project");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+  }, [projects]);
+
   // Attention count for the Sweep sidebar badge: active cards past their
   // next_step date or missing a next step entirely (deduped by card).
   const sweepAttention = useMemo(() => {

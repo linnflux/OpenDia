@@ -695,6 +695,17 @@ app.post("/api/sweep/run", requireAdmin, async (req, res) => {
   }
 });
 
+// Kick off an on-demand calendar sync (fire-and-forget; cron covers routine runs)
+app.post("/api/calendar/sync", (req, res) => {
+  const child = spawn(`${process.env.HOME}/OpenDia/scripts/calendar_sync.py`, [], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env },
+  });
+  child.unref();
+  res.json({ ok: true });
+});
+
 app.get("/api/projects/:id/timers", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
