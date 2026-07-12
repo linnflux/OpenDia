@@ -1,12 +1,4 @@
-const DIVISION_COLORS = {
-  WordFlux: { bg: "#3b82f6", text: "#0a1628" },
-  WatchThreat: { bg: "#5e97f2", text: "#fff" },
-  AmPen: { bg: "#5a7a94", text: "#fff" },
-  "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
-  "ADA Web Work": { bg: "#15489f", text: "#fff" },
-  Linnflux: { bg: "#54af4d", text: "#fff" },
-  FluxCC: { bg: "#2d1a0e", text: "#d4a528" },
-};
+import { DIVISION_COLORS } from "../constants.js";
 
 const STATUS_COLORS = {
   classified: { bg: "#1e3a5f", text: "#60a5fa", label: "Classified" },
@@ -31,6 +23,14 @@ export default function InboxCard({ item, onClick }) {
     <div
       className={`inbox-card${item.status === "dispatched" ? " inbox-card-running" : ""}${isServerWork ? " inbox-card-server" : ""}`}
       onClick={() => onClick(item)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick(item);
+        }
+      }}
     >
       <div className="inbox-card-top">
         <span className="inbox-card-from">{from}</span>

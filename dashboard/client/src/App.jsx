@@ -56,16 +56,7 @@ import Newsletter from "./components/Newsletter.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
 import { hasTag, toggleTag } from "./tags.js";
-
-const DIVISION_COLORS = {
-  WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
-  WatchThreat: { bg: "#5e97f2", text: "#fff" },
-  AmPen: { bg: "#5a7a94", text: "#fff" },
-  "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
-  "ADA Web Work": { bg: "#15489f", text: "#fff" },
-  Linnflux: { bg: "#54af4d", text: "#fff" },
-  FluxCC: { bg: "#2d1a0e", text: "#d4a528" },
-};
+import { DIVISION_COLORS, STATUS_OPTIONS } from "./constants.js";
 
 function getInitialTheme() {
   const saved = localStorage.getItem("opendia-theme");
@@ -100,6 +91,8 @@ export default function App() {
   const [inboxFilterOpen, setInboxFilterOpen] = useState(false);
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
   const [me, setMe] = useState(null);
+  const [statusToast, setStatusToast] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Derive the live project object from the current projects list so the open
   // modal automatically reflects status/next-step/notes changes pushed in by
@@ -151,10 +144,18 @@ export default function App() {
     window.addEventListener("focus", onFocus);
     // Poll every 10s so the green border appears without needing to refocus
     // the window (common when starting a timer from a terminal on the same machine).
-    const interval = setInterval(fetchActiveTimers, 10000);
+    // Skip while the tab is backgrounded; catch up once it's visible again.
+    const interval = setInterval(() => {
+      if (!document.hidden) fetchActiveTimers();
+    }, 10000);
+    function onVisibility() {
+      if (!document.hidden) fetchActiveTimers();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("focus", onFocus);
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [fetchActiveTimers]);
 
@@ -249,7 +250,13 @@ export default function App() {
   }
 
   function handleStatusChange(projectId, newStatus) {
+    // The grid is filtered to a single status, so changing status here makes
+    // the card vanish from view immediately — surface a toast so it isn't silent.
+    const project = projects.find((p) => p.id === projectId);
+    const label = STATUS_OPTIONS.find((s) => s.key === newStatus)?.label || newStatus;
     moveProject(projectId, newStatus);
+    setStatusToast(`${project?.name || "Card"} → ${label}`);
+    setTimeout(() => setStatusToast(null), 3000);
   }
 
   function handleActiveStatusChange(status) {
@@ -407,6 +414,33 @@ export default function App() {
               )}
             </div>
           )}
+          <div className="filter-dropdown-wrap">
+            {moreOpen && <div className="filter-backdrop" onClick={() => setMoreOpen(false)} />}
+            <button
+              className={`filter-dropdown-btn${view === "sweep" || view === "analytics" ? " active" : ""}`}
+              onClick={() => setMoreOpen((v) => !v)}
+            >
+              More
+              {sweepAttention > 0 && <span className="inbox-badge">{sweepAttention}</span>}
+              <span className="filter-caret">▾</span>
+            </button>
+            {moreOpen && (
+              <div className="filter-dropdown-menu">
+                <button
+                  className={`filter-option${view === "sweep" ? " active" : ""}`}
+                  onClick={() => { setView("sweep"); setMoreOpen(false); }}
+                >
+                  Sweep{sweepAttention > 0 && <span className="inbox-badge" style={{ marginLeft: 6 }}>{sweepAttention}</span>}
+                </button>
+                <button
+                  className={`filter-option${view === "analytics" ? " active" : ""}`}
+                  onClick={() => { setView("analytics"); setMoreOpen(false); }}
+                >
+                  Analytics
+                </button>
+              </div>
+            )}
+          </div>
           {me?.source === "tailscale" && (
             <span className="app-user-pill" title={me.login}>
               {me.name || me.login}
@@ -454,6 +488,7 @@ export default function App() {
                 onToggleTag={handleToggleTag}
               />
             </div>
+            {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
           </div>
         )
       ) : view === "inbox" ? (

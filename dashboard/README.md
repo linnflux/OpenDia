@@ -244,7 +244,8 @@ Returns `{ "source": "loopback", "is_admin": true }` for local script requests.
 | `GET` | `/api/analytics/week` | One week of timer data grouped by client. `?week=YYYY-Wnn` (omit for current week). Returns `{ week, weekStart, weekEnd, prevWeek, nextWeek, clients[{ client, billable_min, nonbillable_min, total_min, entries[] }] }`. Aggregates use `estimated_minutes`. |
 | `GET` | `/api/analytics/stale` | In-progress cards not updated in `?days=` (default 14). Returns `[{ id, name, company_name, division, updated_at, next_step }]`. |
 | `GET` | `/api/billing/preview` | **Admin only.** Shells out to `~/OpenDia/scripts/monthly_billing.py --month YYYY-MM --json` (dry-run) and returns per-client estimated billable / nonbillable minutes plus per-entry breakdown. Defaults to last calendar month. |
-| `POST` | `/api/billing/push` | **Admin only.** Stub (returns 501) — push-to-Billing-Master sheet wiring is the follow-up plan. |
+| `POST` | `/api/billing/push` | **Admin only.** Shells out to `~/OpenDia/scripts/monthly_billing.py --month YYYY-MM --write-sheet`, writing to the **Billing Master 2026** sheet (the `/monthly-billing` skill's target). Returns `{ ok, month, rows, sheet_url }`. Note this pushes the *older* pipeline's sheet only — see [Billing](#billing) below and [`docs/billing.md`](../docs/billing.md). |
+| `PATCH` | `/api/billing/entry` | **Admin only.** Toggles the `billable:` flag on a single daily-file timer entry. Body: `{ start, billable }` — `start` matches the entry's `<!-- entry:START --> ` marker. |
 | `GET` | `/api/newsletter/list` | **Admin only.** Returns `[{ name, from, to, mtime, size }]` for every file in `~/OpenDia/newsletters/` matching `^newsletter-YYYY-MM-DD-to-YYYY-MM-DD\.md$`, sorted desc by mtime. |
 | `GET` | `/api/newsletter/file` | **Admin only.** Returns `{ name, content }` for the requested newsletter. `?name=` is validated against the canonical filename regex (path traversal blocked). |
 | `PUT` | `/api/newsletter/file` | **Admin only.** Body: `{ name, content }`. Writes the markdown back to disk for in-dashboard editing. |
@@ -267,7 +268,9 @@ Two views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles-adm
 
 ### Billing
 
-**Ctrl+K → Open Billing.** Pick a month, click *Generate Preview*. The server shells out to `~/OpenDia/scripts/monthly_billing.py --month YYYY-MM --json` (dry-run) and returns per-client billable / non-billable estimated minutes (sourced from the timer ledger). Each client expands to show individual entries. A *Push to Billing Master* button is stubbed pending the follow-up plan; for now, run `/monthly-billing` in a terminal to write to the sheet.
+**Ctrl+K → Open Billing.** Pick a month, click *Generate Preview*. The server shells out to `~/OpenDia/scripts/monthly_billing.py --month YYYY-MM --json` (dry-run) and returns per-client billable / non-billable estimated minutes (sourced from the timer ledger). Each client expands to show individual entries, each with a click-to-toggle billable/non-billable button (`PATCH /api/billing/entry`, writes the daily `.md` file directly). Click *Push to Billing Master* to write for real — this is no longer stubbed; it shells out to `monthly_billing.py --month YYYY-MM --write-sheet` and returns the row count and a link to the sheet.
+
+This view only drives the **older** `/monthly-billing` pipeline (the "Billing Master 2026" sheet). The newer, richer `/billing-month` pipeline (Toggl + OpenDia unification, Square recurring revenue, AI-generated customer-facing notes, writes to the "Billing Operations" sheet) has no dashboard equivalent yet — run it from a terminal. Both pipelines are run every month through end of 2026 by deliberate choice, not because one is being phased out; see [`docs/billing.md`](../docs/billing.md) for the full split.
 
 ### Newsletter
 

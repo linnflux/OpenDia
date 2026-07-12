@@ -21,8 +21,18 @@ export function useProjects() {
 
   useEffect(() => {
     fetchProjects();
-    const interval = setInterval(fetchProjects, 30000);
-    return () => clearInterval(interval);
+    // Skip polling while the tab is backgrounded; catch up once it's visible again.
+    const interval = setInterval(() => {
+      if (!document.hidden) fetchProjects();
+    }, 30000);
+    function onVisibility() {
+      if (!document.hidden) fetchProjects();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [fetchProjects]);
 
   const grouped = {};
@@ -66,28 +76,5 @@ export function useProjects() {
     }
   };
 
-  const reorderColumn = async (status, orderedIds) => {
-    // Optimistic: reorder the projects array to match orderedIds
-    setProjects((prev) => {
-      const inCol = prev.filter((p) => p.status === status);
-      const rest = prev.filter((p) => p.status !== status);
-      const ordered = orderedIds
-        .map((id) => inCol.find((p) => p.id === id))
-        .filter(Boolean);
-      return [...rest, ...ordered];
-    });
-    try {
-      const res = await fetch("/api/projects/reorder", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, ids: orderedIds }),
-      });
-      if (!res.ok) throw new Error("Failed to reorder");
-    } catch (err) {
-      console.error("reorder error:", err);
-      fetchProjects();
-    }
-  };
-
-  return { grouped, projects, loading, moveProject, updateProject, reorderColumn, refresh: fetchProjects };
+  return { grouped, projects, loading, moveProject, updateProject, refresh: fetchProjects };
 }

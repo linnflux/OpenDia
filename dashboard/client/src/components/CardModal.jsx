@@ -2,15 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { marked } from "marked";
 import TerminalPanel from "./TerminalPanel.jsx";
 import { TAGS, hasTag, toggleTag } from "../tags.js";
+import { DIVISION_COLORS, DIVISION_LOGOS, STATUS_OPTIONS as STATUSES } from "../constants.js";
 
 marked.setOptions({ breaks: true, gfm: true });
-
-const STATUSES = [
-  { key: "in_progress", label: "In Progress", color: "#3b82f6" },
-  { key: "wfhuman", label: "WFHuman", color: "#f59e0b" },
-  { key: "ice", label: "Ice", color: "#6b7280" },
-  { key: "completed", label: "Completed", color: "#22c55e" },
-];
 
 function NotionIcon({ size = 16 }) {
   return (
@@ -20,26 +14,6 @@ function NotionIcon({ size = 16 }) {
     </svg>
   );
 }
-
-const DIVISION_COLORS = {
-  WordFlux: { bg: "#3b82f6", text: "#0a1628" },
-  WatchThreat: { bg: "#5e97f2", text: "#fff" },
-  AmPen: { bg: "#5a7a94", text: "#fff" },
-  "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
-  "ADA Web Work": { bg: "#15489f", text: "#fff" },
-  Linnflux: { bg: "#54af4d", text: "#fff" },
-  FluxCC: { bg: "#2d1a0e", text: "#d4a528" },
-};
-
-const DIVISION_LOGOS = {
-  WordFlux: "/divisions/wordflux-h.png",
-  WatchThreat: "/divisions/watchthreat-h.png",
-  AmPen: "/divisions/ampen.png",
-  "Bedford AI": "/divisions/bedford-ai-h.png",
-  "ADA Web Work": "/divisions/ada-web-work.png",
-  Linnflux: "/divisions/linnflux.png",
-  FluxCC: "/divisions/fluxcc.png",
-};
 
 function TimerEntry({ entry }) {
   const [expanded, setExpanded] = useState(false);

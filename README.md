@@ -124,9 +124,12 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 |---------|-------------|
 | `/checkin` | Hourly check-in. Loads today's log, scans recent Gmail, numbers tasks for quick selection. Refreshes the active project's next step. |
 | `/hello` | Morning routine. Creates daily log, carries over unchecked items from the prior day. |
-| `/monthly-billing` | Generate and push billing data for the previous month to the Billing Master sheet. |
+| `/monthly-billing` | Generate and push billing data for the previous month to the older "Billing Master 2026" sheet. Run alongside `/billing-month` through end of 2026 (both pipelines stay active by deliberate choice — see [`docs/billing.md`](docs/billing.md)). |
+| `/billing-month` | Generate the newer, richer unified monthly billing tab (Toggl + OpenDia time unification, Square recurring revenue) on the "Billing Operations" sheet. See [`docs/billing.md`](docs/billing.md). |
+| `/newsletter` | Generate a client newsletter from completed work in a date range (timer notes + completed Notion projects/tasks). Writes a markdown file to `~/OpenDia/newsletters/`; distribution is manual. |
 | `/notion-new` | *Deprecated — use `/od-go` instead.* |
 | `/notion-now` | Set the current Notion task's due date to now (rounded to previous half-hour, 1-hour window). |
+| `/od-new` | One-shot create-and-start. Creates a Notion task and matching dashboard card from freeform text (company, task, division, tmux session, due date), then hands off to `/od-go` to attach tmux and start the timer. |
 | `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. Names the Claude Code session to match the current tmux session, patches `tmux_session` on the dashboard card, and embeds the session name in the timer state file. |
 | `/od-stop` | Unified work stop. Stops the running timer, writes justified notes (bullets must account for billed duration), updates the dashboard card's next step, and logs a dated toggle block to the linked Notion task. When multiple timers are running, auto-selects the correct one by matching the current tmux session name. `backfill` mode does a one-shot historical sync of all prior entries. |
 | `/card-update` | Update a project card from the CLI. Auto-detects project from the current tmux session, shows card state, accepts freeform updates ("next step is X, status wfhuman"). Optional `--sync` flag triggers full AI-powered sync (Gmail + Notion + analysis) before prompting. |
@@ -136,7 +139,10 @@ Custom commands are markdown prompt files that define repeatable workflows. The 
 | `/timer-merge` | Merge duplicate timers for the same client/project into one consolidated entry. |
 | `/timer-start` | Start an internal time entry with client, task, division, and billable prompts. (Primitive — `/od-go` is the preferred entrypoint.) |
 | `/timer-status` | Show all active timers across all sessions. |
+| `/tmux-cleanup` | Interactive review of stale tmux sessions, bucketed by idle reason (numeric/anonymous, never attached, idle past threshold, stale inbox-auto-created); kill, keep, or inspect one at a time. |
 | `/zero` | Inbox Zero. Scans primary inbox, groups by thread, extracts action items. |
+
+In addition to slash commands, a standalone cron job — `scripts/claude_session_reaper.py` — reaps interactive Claude Code sessions idle for 72h+ to reclaim memory (transcripts persist, so `claude --resume` brings a reaped session back in full). See [`docs/session-reaper.md`](docs/session-reaper.md) for detection rules, protections, and disaster recovery.
 
 ## Data Flow
 
@@ -255,8 +261,8 @@ Operator labels email "OpenDia Inbox"
   │    Thread history is passed to Haiku so prompt_text reflects   │
   │      the full conversation, not just the last message          │
   │    Checks client alias table first (learned mappings           │
-  │      override Haiku — e.g. @deanvaughnlearning.com →           │
-  │      "Memory Sports")                                          │
+  │      override Haiku — e.g. @client-domain.com →                │
+  │      "Client Name")                                            │
   │    Matches result to an existing project via match_project()   │
   │      → sets project_id FK. If no match, auto-creates a new    │
   │      project in wfhuman status ("Auto-created from inbox: …") │
@@ -322,6 +328,12 @@ Operator labels email "OpenDia Inbox"
 | **AmPen** | Penetration Testing |
 | **Bedford AI** | AI & Automation |
 | **ADA Web Work** | Accessibility Compliance |
+| **FluxCC** | Astro Static Site Templates & Client Website Builds |
+| **Linnflux** | General / cross-division work that doesn't fit a specific division |
+| **Admin** | Internal administrative work (non-billable) |
+| **Onboarding** | Internal new-client/employee onboarding work (non-billable) |
+
+`Admin` and `Onboarding` are internal-only divisions — no client billing rolls up to them. They're offered as options by `/od-go` and `/od-new` for internal work that doesn't belong to a client-facing division.
 
 ## Design Principles
 

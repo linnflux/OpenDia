@@ -106,6 +106,45 @@ else
     warn "systemd unit not found at $UNIT_SRC — start dashboard manually."
 fi
 
+# Restore the other user units that migrate-export.sh snapshots (cloudflared
+# tunnel, etc.). Export backed these up; restore used to ignore them, so the
+# calendar webhook had to be rebuilt by hand after a migration.
+UNITS_SNAPSHOT="$HOME/OpenDia/systemd-units"
+if [ -d "$UNITS_SNAPSHOT" ]; then
+    mkdir -p "$HOME/.config/systemd/user"
+    for unit in "$UNITS_SNAPSHOT"/*.service; do
+        [ -f "$unit" ] || continue
+        name=$(basename "$unit")
+        [ "$name" = "opendia-dashboard.service" ] && continue  # handled above, from git
+        cp -n "$unit" "$HOME/.config/systemd/user/$name"
+        systemctl --user enable "$name" 2>/dev/null \
+            && info "Restored + enabled $name" \
+            || warn "Could not enable $name — check its EnvironmentFile/secrets."
+    done
+    systemctl --user daemon-reload
+else
+    warn "No systemd-units snapshot at $UNITS_SNAPSHOT — restore units manually."
+fi
+
+# Restore cron jobs (calendar sync, inbox/intake ticks, backup, reaper, whistle).
+# Without this, every scheduled job silently does not exist after a migration.
+CRON_BACKUP="$HOME/OpenDia/crontab.backup"
+if [ -f "$CRON_BACKUP" ]; then
+    if [ -n "$(crontab -l 2>/dev/null)" ]; then
+        warn "A crontab already exists — NOT overwriting."
+        warn "Review and merge manually: $CRON_BACKUP"
+    else
+        crontab "$CRON_BACKUP"
+        info "Cron jobs restored from $CRON_BACKUP ($(wc -l < "$CRON_BACKUP") lines)."
+    fi
+else
+    warn "No crontab backup at $CRON_BACKUP — scheduled jobs will NOT run."
+fi
+
+# User services must survive a reboot with no login session.
+loginctl enable-linger "$USER" 2>/dev/null && info "Linger enabled for $USER." \
+    || warn "Could not enable linger — services will not start until you log in."
+
 # ============================================================
 phase "C — Build MCP Servers"
 # ============================================================

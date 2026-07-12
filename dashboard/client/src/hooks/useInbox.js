@@ -13,8 +13,18 @@ export function useInbox() {
 
   useEffect(() => {
     fetch_();
-    const interval = setInterval(fetch_, 15000);
-    return () => clearInterval(interval);
+    // Skip polling while the tab is backgrounded; catch up once it's visible again.
+    const interval = setInterval(() => {
+      if (!document.hidden) fetch_();
+    }, 15000);
+    function onVisibility() {
+      if (!document.hidden) fetch_();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [fetch_]);
 
   function dismissItem(id) {

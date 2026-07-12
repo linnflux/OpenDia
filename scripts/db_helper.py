@@ -8,6 +8,33 @@ from datetime import datetime
 
 DB_PATH = os.path.expanduser("~/OpenDia/opendia.db")
 
+VALID_STATUSES = {"in_progress", "wfhuman", "completed", "ice"}
+
+STATUS_ALIASES = {
+    "active": "in_progress",
+    "in progress": "in_progress",
+    "in-progress": "in_progress",
+    "wfh": "wfhuman",
+    "wf_human": "wfhuman",
+    "wf-human": "wfhuman",
+    "wf human": "wfhuman",
+    "done": "completed",
+    "complete": "completed",
+    "finished": "completed",
+    "frozen": "ice",
+    "hold": "ice",
+    "on_ice": "ice",
+}
+
+def normalize_status(status):
+    """Normalize status to a valid dashboard value, raising ValueError if unrecognized."""
+    s = (status or "in_progress").strip().lower()
+    if s in VALID_STATUSES:
+        return s
+    if s in STATUS_ALIASES:
+        return STATUS_ALIASES[s]
+    raise ValueError(f"Invalid project status {status!r}. Valid: {sorted(VALID_STATUSES)}")
+
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -79,6 +106,24 @@ def get_company(company_id):
         print(f"  Company {company_id} not found.")
 
 
+def set_nonprofit(company_id, value):
+    conn = get_conn()
+    row = conn.execute("SELECT name FROM companies WHERE id = ?", (company_id,)).fetchone()
+    if not row:
+        conn.close()
+        print(f"  Company {company_id} not found.")
+        return
+    conn.execute(
+        "UPDATE companies SET nonprofit = ?, updated_at = datetime('now') WHERE id = ?",
+        (1 if value else 0, company_id),
+    )
+    conn.commit()
+    conn.close()
+    print(f"Set nonprofit={1 if value else 0} for '{row['name']}' (id={company_id})")
+    if value:
+        print("Reminder: tick the Nonprofit checkbox on the company's Notion page too.")
+
+
 def update_company(company_id, **kwargs):
     conn = get_conn()
     kwargs["updated_at"] = now()
@@ -133,17 +178,15 @@ def list_people(company_id=None):
 
 # --- Project CRUD ---
 
-def add_project(name, company_id=None, division=None, status="active", notes=None):
+def add_project(name, company_id=None, division=None, status="in_progress", tmux_session=None, notes=None):
     conn = get_conn()
     division_id = get_division_id(conn, division) if division else None
     conn.execute(
-        "INSERT INTO projects (name, company_id, division_id, status, notes) VALUES (?, ?, ?, ?, ?)",
-        (name, company_id, division_id, status, notes),
+        "INSERT INTO projects (name, company_id, division_id, status, tmux_session, notes) VALUES (?, ?, ?, ?, ?, ?)",
+        (name, company_id, division_id, normalize_status(status), tmux_session, notes),
     )
-    pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.execute("UPDATE projects SET sort_order = sort_order + 1 WHERE status = ? AND sort_order IS NOT NULL", (status,))
-    conn.execute("UPDATE projects SET sort_order = 0 WHERE id = ?", (pid,))
     conn.commit()
+    pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()
     print(f"Added project '{name}' (id={pid})")
     return pid
@@ -152,7 +195,7 @@ def add_project(name, company_id=None, division=None, status="active", notes=Non
 def list_projects(company_id=None, status=None):
     conn = get_conn()
     query = (
-        "SELECT p.id, p.name, p.status, c.name as company, d.name as division "
+        "SELECT p.id, p.name, p.status, p.tmux_session, c.name as company, d.name as division "
         "FROM projects p "
         "LEFT JOIN companies c ON p.company_id = c.id "
         "LEFT JOIN divisions d ON p.division_id = d.id "
@@ -175,7 +218,8 @@ def list_projects(company_id=None, status=None):
     for r in rows:
         company = f" ({r['company']})" if r["company"] else ""
         div = f" [{r['division']}]" if r["division"] else ""
-        print(f"  {r['id']}: {r['name']}{company}{div} - {r['status']}")
+        tmux = f" tmux:{r['tmux_session']}" if r["tmux_session"] else ""
+        print(f"  {r['id']}: {r['name']}{company}{div} - {r['status']}{tmux}")
 
 
 # --- Task CRUD ---
@@ -292,6 +336,7 @@ def print_usage():
     print("  add-company <name> [short_name]     Add a company")
     print("  list-companies                       List all companies")
     print("  get-company <id>                     Show company details")
+    print("  set-nonprofit <id> <0|1>             Set company nonprofit flag")
     print("  add-person <name> [company_id]       Add a person")
     print("  list-people [company_id]             List people")
     print("  add-project <name> [company_id] [division]  Add a project")
@@ -324,6 +369,12 @@ if __name__ == "__main__":
             print("Error: company id required")
             sys.exit(1)
         get_company(int(args[0]))
+
+    elif cmd == "set-nonprofit":
+        if len(args) < 2 or args[1] not in ("0", "1"):
+            print("Error: usage: set-nonprofit <company_id> <0|1>")
+            sys.exit(1)
+        set_nonprofit(int(args[0]), args[1] == "1")
 
     elif cmd == "add-person":
         if not args:

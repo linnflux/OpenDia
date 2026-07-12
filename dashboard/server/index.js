@@ -40,6 +40,14 @@ function isSafeRepoPath(p) {
     && !p.split("/").includes("..");
 }
 
+// Dashboard card status → Notion task Status select value. "ice" has no Notion
+// equivalent and deliberately maps to nothing (leaves the task alone).
+const NOTION_STATUS_BY_CARD_STATUS = {
+  in_progress: "In Progress",
+  wfhuman: "WFR",
+  completed: "Completed",
+};
+
 function timingSafeEqualStr(a, b) {
   const ab = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
@@ -196,6 +204,25 @@ app.patch("/api/projects/:id", (req, res) => {
     // affect the OpenDia calendar — sync now instead of waiting for cron
     if (fields.next_step !== undefined || fields.status !== undefined) {
       scheduleCalendarSync();
+    }
+
+    // Card status is one half of "is this done"; the linked Notion task is the
+    // other. They used to drift forever — moving a card to Completed left the
+    // Notion task open, so nothing ever actually closed. Push it through,
+    // best-effort (a Notion hiccup must not fail the request).
+    if (fields.status !== undefined) {
+      const project = getProjectById(id);
+      const notionStatus = NOTION_STATUS_BY_CARD_STATUS[fields.status];
+      if (project?.notion_id && notionStatus) {
+        setImmediate(async () => {
+          try {
+            const ok = await updateNotionTaskStatus(project.notion_id, notionStatus);
+            if (!ok) console.warn(`notion status sync returned false for project ${id}`);
+          } catch (err) {
+            console.error(`notion status sync failed for project ${id}:`, err.message);
+          }
+        });
+      }
     }
 
     res.json({ ok: true });

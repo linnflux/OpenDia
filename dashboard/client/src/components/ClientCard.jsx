@@ -1,18 +1,21 @@
-const DIVISION_LOGOS = {
-  WordFlux: "/divisions/wordflux-h.png",
-  WatchThreat: "/divisions/watchthreat-h.png",
-  AmPen: "/divisions/ampen.png",
-  "Bedford AI": "/divisions/bedford-ai-h.png",
-  "ADA Web Work": "/divisions/ada-web-work.png",
-  Linnflux: "/divisions/linnflux.png",
-  FluxCC: "/divisions/fluxcc.png",
-};
+import { DIVISION_LOGOS } from "../constants.js";
 
 export default function ClientCard({ company, onOpen }) {
   const { companyName, divisions, statusCounts, stalenessKey, relativeTime, nextStep } = company;
 
   return (
-    <div className="client-card" onClick={() => onOpen(company.key)}>
+    <div
+      className="client-card"
+      onClick={() => onOpen(company.key)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(company.key);
+        }
+      }}
+    >
       <div className="client-card-name">{companyName}</div>
 
       {divisions.length > 0 && (

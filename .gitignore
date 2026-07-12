@@ -27,3 +27,14 @@ dashboard/.env
 
 # Cloudflare
 .wrangler/
+
+# Client-specific one-off scripts — real client names, domains, contacts, PII.
+# This repo is PUBLIC. These stay local (they are one-off deliverables, not
+# pipeline code) and are covered by the nightly Drive backup instead.
+scripts/build_jpj_proposal.py
+scripts/kkmm-mediafire-migrate.sh
+scripts/send_mail_merge.gs
+scripts/oracle_prompt.md
+scripts/billing_seed_clients.py
+scripts/.wrangler/
+scripts/__pycache__/

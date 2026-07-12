@@ -453,7 +453,7 @@ body.has-bg::before {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 0.75rem;
-  cursor: grab;
+  cursor: pointer;
   transition: border-color 0.15s;
 }
 
@@ -463,10 +463,6 @@ body.has-bg::before {
 
 .card:hover {
   border-color: var(--border-hover);
-}
-
-.card:active {
-  cursor: grabbing;
 }
 
 .card-name {
@@ -1230,6 +1226,14 @@ body.has-bg::before {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+/* .modal-toast reused outside the modal (e.g. board status-change toast) —
+   pin to the viewport instead of a scrolling container. */
+.status-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  z-index: 50;
+}
+
 .modal-id {
   font-size: 0.7rem;
   color: var(--text-faint);
@@ -1689,10 +1693,27 @@ body.has-bg::before {
     transform: none;
     margin: 0 auto;
     order: 3;
+    max-width: 100%;
   }
   .app-header {
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+  /* The strip clips overflow (for the rounded-corner border), so let it
+     scroll horizontally instead of silently cutting off the last tab. */
+  .view-toggle {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  .view-toggle-btn {
+    min-height: 40px;
+    padding: 0.5rem 0.65rem;
+    flex-shrink: 0;
+  }
+  /* Meaningless on touch and eats header width */
+  .cp-trigger-kbd {
+    display: none;
   }
 }
 
@@ -2258,16 +2279,16 @@ body.has-bg::before {
 }
 
 .card-tag-t {
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg-hover, rgba(255,255,255,0.08));
   color: var(--text-faint);
   cursor: pointer;
@@ -3049,11 +3070,19 @@ body.has-bg::before {
 
 /* ── Analytics View ─────────────────────────────────────────────────────────── */
 .analytics-page {
+  position: relative;
   padding: 1.5rem 1.75rem 3rem;
   max-width: 960px;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* Wrap wide tables in this so they scroll within their own box on narrow
+   screens instead of forcing the whole page (and header) to scroll sideways. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Accordion sections */
@@ -3260,6 +3289,7 @@ body.has-bg::before {
 /* ── Sweep view ─────────────────────────────────────────────── */
 .sweep-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
@@ -3336,8 +3366,8 @@ body.has-bg::before {
   gap: 0.6rem;
   flex-wrap: wrap;
 }
-.sweep-row-name { font-weight: 600; font-size: 0.84rem; }
-.sweep-row-meta { font-size: 0.72rem; color: var(--text-faint); }
+.sweep-row-name { font-weight: 600; font-size: 0.84rem; word-break: break-word; }
+.sweep-row-meta { font-size: 0.72rem; color: var(--text-faint); word-break: break-word; }
 .sweep-status-chip { text-transform: uppercase; letter-spacing: 0.03em; }
 .sweep-status-wfhuman { color: #f59e0b; }
 .sweep-status-in_progress { color: #3b82f6; }
@@ -3720,6 +3750,8 @@ body.has-bg::before {
   background: var(--bg-secondary, rgba(0,0,0,0.15));
   display: flex;
   flex-direction: column;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .billing-entry-row {
@@ -4389,7 +4421,6 @@ body.has-bg::before {
   }
 
   .analytics-page {
-    min-width: 860px;
     padding: 1rem;
   }
 

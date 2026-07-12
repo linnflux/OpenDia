@@ -1,14 +1,5 @@
 import { useEffect } from "react";
-
-const DIVISION_LOGOS = {
-  WordFlux: "/divisions/wordflux-h.png",
-  WatchThreat: "/divisions/watchthreat-h.png",
-  AmPen: "/divisions/ampen.png",
-  "Bedford AI": "/divisions/bedford-ai-h.png",
-  "ADA Web Work": "/divisions/ada-web-work.png",
-  Linnflux: "/divisions/linnflux.png",
-  FluxCC: "/divisions/fluxcc.png",
-};
+import { DIVISION_LOGOS } from "../constants.js";
 
 const NOTION_BASE = "https://www.notion.so/";
 

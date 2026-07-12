@@ -5,7 +5,7 @@ const BG_POSITION_KEY = "opendia-bg-position";
 
 function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onOpenAnalytics, onOpenToday, onOpenSweep, isAdmin, onOpenBilling, onOpenNewsletter }) {
   return [
-    { id: "refresh", icon: "\u21BB", label: "Refresh Board", shortcut: "R", action: onRefresh },
+    { id: "refresh", icon: "\u21BB", label: "Refresh Board", action: onRefresh },
     { id: "theme-select", icon: "\u25D0", label: "Select Theme\u2026", action: onOpenThemeModal },
     { id: "today", icon: "\u{1F4C5}", label: "Open Today", action: onOpenToday },
     { id: "sweep", icon: "\u26A1", label: "Open Sweep", action: onOpenSweep },

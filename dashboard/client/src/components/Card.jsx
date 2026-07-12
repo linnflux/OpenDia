@@ -1,22 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { TAGS, hasTag } from "../tags.js";
-
-const DIVISION_COLORS = {
-  WordFlux: { bg: "#111111", text: "#ffffff", uppercase: true },
-  WatchThreat: { bg: "#5e97f2", text: "#fff" },
-  AmPen: { bg: "#5a7a94", text: "#fff" },
-  "Bedford AI": { bg: "#f5f0e8", text: "#2b0000" },
-  "ADA Web Work": { bg: "#15489f", text: "#fff" },
-  Linnflux: { bg: "#54af4d", text: "#fff" },
-  FluxCC: { bg: "#2d1a0e", text: "#d4a528" },
-};
-
-const STATUS_OPTIONS = [
-  { key: "in_progress", label: "In Progress", color: "#3b82f6" },
-  { key: "wfhuman",    label: "WFHuman",     color: "#f59e0b" },
-  { key: "ice",        label: "Ice",          color: "#6b7280" },
-  { key: "completed",  label: "Completed",    color: "#22c55e" },
-];
+import { DIVISION_COLORS, STATUS_OPTIONS } from "../constants.js";
 
 const INBOX_PREFIX = "Auto-created from inbox: ";
 
@@ -43,6 +27,14 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
     if (onClick) onClick(project);
   }
 
+  function handleCardKeyDown(e) {
+    if (e.target !== e.currentTarget) return; // let nested buttons handle their own keys
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleCardClick(e);
+    }
+  }
+
   function handlePillClick(e) {
     e.stopPropagation();
     setMenuOpen((v) => !v);
@@ -55,7 +47,13 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
   }
 
   return (
-    <div className={`card${hasActiveTimer ? " card-timer-active" : ""}`} onClick={handleCardClick}>
+    <div
+      className={`card${hasActiveTimer ? " card-timer-active" : ""}`}
+      onClick={handleCardClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={handleCardKeyDown}
+    >
       <span className="card-corner">
         {TAGS.map((tag) => {
           const on = hasTag(project, tag.key);

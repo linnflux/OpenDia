@@ -198,6 +198,7 @@ export default function Analytics() {
               <div className="analytics-empty">No stale in-progress cards.</div>
             )}
             {!loadingStale && !errorStale && staleData && staleData.length > 0 && (
+              <div className="table-scroll">
               <table className="analytics-table">
                 <thead>
                   <tr>
@@ -222,6 +223,7 @@ export default function Analytics() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}

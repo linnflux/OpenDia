@@ -41,6 +41,12 @@ export default function Today({ onOpenProject }) {
   const [deadlineSort, setDeadlineSort] = useState({ key: "due", dir: "asc" });
   const [pendingIds, setPendingIds] = useState(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
 
   useEffect(() => {
     fetch("/api/today")
@@ -75,7 +81,7 @@ export default function Today({ onOpenProject }) {
         next.delete(notionId);
         return next;
       });
-      alert(`Failed to set ${status}: ${e.message}`);
+      showToast(`Failed to set ${status}: ${e.message}`);
     }
   }
 
@@ -103,7 +109,7 @@ export default function Today({ onOpenProject }) {
         };
       });
     } catch (e) {
-      alert(`Bump failed: ${e.message}`);
+      showToast(`Bump failed: ${e.message}`);
     }
   }
 
@@ -115,7 +121,7 @@ export default function Today({ onOpenProject }) {
       setData(d);
       setPendingIds(new Set());
     } catch (e) {
-      alert(`Refresh failed: ${e.message}`);
+      showToast(`Refresh failed: ${e.message}`);
     } finally {
       setRefreshing(false);
     }
@@ -221,6 +227,7 @@ export default function Today({ onOpenProject }) {
                 </th>
               );
               return (
+                <div className="table-scroll">
                 <table className="analytics-table">
                   <thead>
                     <tr>
@@ -278,6 +285,7 @@ export default function Today({ onOpenProject }) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               );
             })()}
           </div>
@@ -303,6 +311,7 @@ export default function Today({ onOpenProject }) {
             {active_timers.length === 0 ? (
               <div className="analytics-empty">No active timers.</div>
             ) : (
+              <div className="table-scroll">
               <table className="analytics-table">
                 <thead>
                   <tr>
@@ -323,6 +332,7 @@ export default function Today({ onOpenProject }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -347,6 +357,7 @@ export default function Today({ onOpenProject }) {
             {wfhuman.items.length === 0 ? (
               <div className="analytics-empty">No WFHuman cards.</div>
             ) : (
+              <div className="table-scroll">
               <table className="analytics-table">
                 <thead>
                   <tr>
@@ -371,6 +382,7 @@ export default function Today({ onOpenProject }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -395,6 +407,7 @@ export default function Today({ onOpenProject }) {
             {stale.length === 0 ? (
               <div className="analytics-empty">No stale in-progress cards.</div>
             ) : (
+              <div className="table-scroll">
               <table className="analytics-table">
                 <thead>
                   <tr>
@@ -421,6 +434,7 @@ export default function Today({ onOpenProject }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -499,6 +513,7 @@ export default function Today({ onOpenProject }) {
         )}
       </div>
 
+      {toast && <div className="modal-toast">{toast}</div>}
     </div>
   );
 }
