@@ -109,23 +109,40 @@ def toggl_v2_get(token, path, params=None):
 
 
 def get_toggl_monthly_hours(token, workspace_id, year, month):
-    """Return a dict of {client_name: hours} for the month using the v2 Reports API.
+    """Return {client_name: hours} for the month.
 
-    Uses the v2 API (GET) which works without Toggl premium plan.
-    Returns all tracked time (billable + non-billable combined).
+    Prefers the v2 Reports API (workspace-wide, all users). As of 2026-07-12 that
+    endpoint returns 402 "feature is not included in current subscription level"
+    on this workspace, so we fall back to aggregating raw v9 time entries.
+
+    The fallback is NOT equivalent: v9 /me/time_entries only sees the token
+    owner's time. If ~/.toggl_tokens holds one token per user it covers everyone;
+    with a single token it UNDERSTATES hours (~100h/month of Tara's time in June
+    2026). The fallback warns on stderr rather than quietly under-reporting.
     """
     last_day = calendar.monthrange(year, month)[1]
     start_date = f"{year:04d}-{month:02d}-01"
     end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
 
     print(f"  Toggl: fetching v2 summary {start_date} → {end_date}...", end=" ", flush=True)
-    summary = toggl_v2_get(token, "summary", {
-        "workspace_id": workspace_id,
-        "since": start_date,
-        "until": end_date,
-        "user_agent": "billing@linnflux.com",
-        "grouping": "clients",
-    })
+    try:
+        summary = toggl_v2_get(token, "summary", {
+            "workspace_id": workspace_id,
+            "since": start_date,
+            "until": end_date,
+            "user_agent": "billing@linnflux.com",
+            "grouping": "clients",
+        })
+    except RuntimeError as e:
+        if "402" not in str(e):
+            raise
+        print("402 (plan-gated) — falling back to v9 time entries.")
+        import toggl_hours
+        tokens = toggl_hours.load_tokens()
+        warn = toggl_hours.coverage_warning(tokens)
+        if warn:
+            print(f"  !! {warn}", file=sys.stderr)
+        return toggl_hours.monthly_hours(tokens, year, month)
 
     data = summary.get("data", [])
     print(f"{len(data)} client groups.")
