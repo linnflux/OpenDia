@@ -9,6 +9,17 @@ function isLoopback(req) {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
 }
 
+// cloudflared connects to us over loopback too, so a bare loopback socket is
+// NOT proof of a local process. Cloudflare stamps these on everything it
+// proxies; their presence means the request came from the public internet and
+// must never inherit the local-process admin grant — even if the tunnel's
+// ingress rules are ever widened beyond the webhook path.
+const CF_PROXY_HEADERS = ["cf-ray", "cf-connecting-ip", "cf-ipcountry", "cdn-loop", "x-forwarded-for"];
+
+function viaPublicProxy(req) {
+  return CF_PROXY_HEADERS.some((h) => req.headers[h]);
+}
+
 export function verifyRequest(req) {
   const login = (req.headers["tailscale-user-login"] || "").toLowerCase().trim();
   // Header present → came through tailscale serve; verify domain regardless of source IP.
@@ -18,8 +29,10 @@ export function verifyRequest(req) {
     if (!domain || !ALLOWED_DOMAINS.includes(domain)) return { ok: false, reason: "domain-not-allowed", login };
     return { ok: true, login, name, source: "tailscale", is_admin: ADMIN_EMAILS.includes(login) };
   }
-  // No header → allow only from loopback (local scripts: /od-go, /od-stop, etc.)
-  if (isLoopback(req)) return { ok: true, login: "loopback", name: "Local Process", source: "loopback", is_admin: true };
+  // No header → allow only genuinely local processes (/od-go, /od-stop, cron).
+  if (isLoopback(req) && !viaPublicProxy(req)) {
+    return { ok: true, login: "loopback", name: "Local Process", source: "loopback", is_admin: true };
+  }
   return { ok: false, reason: "no-tailscale-header" };
 }
 

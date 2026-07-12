@@ -1,12 +1,13 @@
 import http from "http";
 import express from "express";
-import { resolve, dirname } from "path";
+import { resolve, dirname, sep } from "path";
 import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
-import { spawn, exec } from "child_process";
+import { spawn, execFile } from "child_process";
+import { timingSafeEqual, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus, updateNotionTaskDueDate } from "./notion.js";
@@ -18,7 +19,41 @@ import { analyzeReview } from "./ai.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+// Git refs and repo paths reach git as argv (never a shell), but keep them
+// boring anyway: no option-injection, no traversal, no shell metacharacters.
+function isSafeGitRef(ref) {
+  return typeof ref === "string"
+    && ref.length > 0 && ref.length <= 200
+    && /^[A-Za-z0-9._\/-]+$/.test(ref)
+    && !ref.startsWith("-")
+    && !ref.includes("..");
+}
+
+function isSafeRepoPath(p) {
+  return typeof p === "string"
+    && p.length > 0 && p.length <= 200
+    && /^[A-Za-z0-9._\/-]+$/.test(p)
+    && !p.startsWith("-")
+    && !p.startsWith("/")
+    && !p.split("/").includes("..");
+}
+
+function timingSafeEqualStr(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+function runGit(args, cwd) {
+  return new Promise((res) => {
+    execFile("git", args, { cwd, timeout: 120000 }, (err, stdout, stderr) => {
+      res({ code: err ? (err.code ?? 1) : 0, stdout: stdout || "", stderr: stderr || "" });
+    });
+  });
+}
 
 const DEFAULT_THEME_DIR = resolve(__dirname, "..", "themes");
 
@@ -98,8 +133,8 @@ app.post("/api/calendar/webhook", (req, res) => {
   try {
     expected = JSON.parse(readFileSync(CAL_CONFIG_PATH, "utf8")).webhook_token || null;
   } catch {}
-  const got = req.get("x-goog-channel-token");
-  if (!expected || got !== expected) {
+  const got = req.get("x-goog-channel-token") || "";
+  if (!expected || !timingSafeEqualStr(got, expected)) {
     console.warn("calendar webhook: rejected (bad token)");
     return res.status(403).end();
   }
@@ -717,10 +752,16 @@ app.post("/api/newsletter/generate", requireAdmin, (req, res) => {
 
   let stderr = "";
   proc.stderr.on("data", d => { stderr += d; });
+  const killTimer = setTimeout(() => {
+    proc.kill("SIGKILL");
+    if (!res.headersSent) res.status(504).json({ error: "newsletter generation timed out after 10m" });
+  }, 600000);
   proc.on("error", err => {
+    clearTimeout(killTimer);
     if (!res.headersSent) res.status(500).json({ error: err.message });
   });
   proc.on("close", code => {
+    clearTimeout(killTimer);
     if (res.headersSent) return;
     if (code !== 0) {
       console.error("newsletter generate exit", code, stderr);
@@ -754,12 +795,9 @@ app.post("/api/sweep/run", requireAdmin, async (req, res) => {
 
 // Kick off an on-demand calendar sync (fire-and-forget; cron covers routine runs)
 app.post("/api/calendar/sync", (req, res) => {
-  const child = spawn(`${process.env.HOME}/OpenDia/scripts/calendar_sync.py`, [], {
-    detached: true,
-    stdio: "ignore",
-    env: { ...process.env },
-  });
-  child.unref();
+  // Route through the coalescing runner so an on-demand sync can never race a
+  // webhook- or PATCH-triggered run against the same Notion/Google state.
+  scheduleCalendarSync(0);
   res.json({ ok: true });
 });
 
@@ -800,7 +838,7 @@ app.get("/api/file", (req, res) => {
   // Resolve ~ to home dir, then ensure it's under ~/OpenDia/
   const resolved = resolve(filePath.replace(/^~/, process.env.HOME));
   const openDiaRoot = resolve(process.env.HOME, "OpenDia");
-  if (!resolved.startsWith(openDiaRoot)) {
+  if (resolved !== openDiaRoot && !resolved.startsWith(openDiaRoot + sep)) {
     return res.status(403).json({ error: "path must be under ~/OpenDia/" });
   }
 
@@ -873,7 +911,7 @@ app.delete("/api/inbox/:id", (req, res) => {
   }
 });
 
-app.post("/api/inbox/:id/redispatch", (req, res) => {
+app.post("/api/inbox/:id/redispatch", requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const item = getInboxItemById(id);
@@ -895,7 +933,7 @@ app.post("/api/inbox/:id/redispatch", (req, res) => {
   }
 });
 
-app.post("/api/inbox/:id/approve-server", (req, res) => {
+app.post("/api/inbox/:id/approve-server", requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const item = getInboxItemById(id);
@@ -918,11 +956,15 @@ app.post("/api/inbox/:id/approve-server", (req, res) => {
   }
 });
 
-app.patch("/api/inbox/:id/preview", (req, res) => {
+app.patch("/api/inbox/:id/preview", requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { dev_preview_url, dev_branch, repo_path } = req.body;
     if (!dev_preview_url) return res.status(400).json({ error: "dev_preview_url required" });
+    if (dev_branch !== undefined && dev_branch !== null && !isSafeGitRef(dev_branch))
+      return res.status(400).json({ error: "invalid dev_branch" });
+    if (repo_path !== undefined && repo_path !== null && !isSafeRepoPath(repo_path))
+      return res.status(400).json({ error: "invalid repo_path" });
     const updated = updateInboxItem(id, { dev_preview_url, dev_branch, repo_path });
     if (!updated) return res.status(404).json({ error: "inbox item not found" });
     res.json({ ok: true });
@@ -932,33 +974,46 @@ app.patch("/api/inbox/:id/preview", (req, res) => {
   }
 });
 
-app.post("/api/inbox/:id/approve-deploy", (req, res) => {
+app.post("/api/inbox/:id/approve-deploy", requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const item = getInboxItemById(id);
     if (!item) return res.status(404).json({ error: "inbox item not found" });
     if (!item.dev_branch) return res.status(400).json({ error: "No dev branch recorded for this item" });
     if (!item.repo_path) return res.status(400).json({ error: "No repo_path recorded for this item" });
+    // Values predate validation in /preview, so re-check before they reach git.
+    if (!isSafeGitRef(item.dev_branch)) return res.status(400).json({ error: "invalid dev_branch" });
+    if (!isSafeRepoPath(item.repo_path)) return res.status(400).json({ error: "invalid repo_path" });
 
-    const repoDir = resolve(process.env.HOME, "FluxCC", item.repo_path);
-    const script = [
-      `cd "${repoDir}"`,
-      `git checkout main`,
-      `git pull origin main`,
-      `git merge ${item.dev_branch} --no-edit`,
-      `git push origin main`,
-      `git branch -d ${item.dev_branch}`,
-      `git push origin --delete ${item.dev_branch}`,
-    ].join(" && ");
+    const fluxRoot = resolve(process.env.HOME, "FluxCC");
+    const repoDir = resolve(fluxRoot, item.repo_path);
+    if (repoDir !== fluxRoot && !repoDir.startsWith(fluxRoot + sep))
+      return res.status(400).json({ error: "repo_path escapes FluxCC root" });
+    if (!existsSync(resolve(repoDir, ".git")))
+      return res.status(400).json({ error: "repo_path is not a git repository" });
 
-    exec(script, (err, stdout, stderr) => {
-      if (err) {
-        console.error("approve-deploy exec error:", stderr);
-        return res.status(500).json({ error: stderr || err.message });
+    const branch = item.dev_branch;
+    const steps = [
+      ["checkout", "main"],
+      ["pull", "origin", "main"],
+      ["merge", branch, "--no-edit"],
+      ["push", "origin", "main"],
+      ["branch", "-d", branch],
+      ["push", "origin", "--delete", branch],
+    ];
+
+    let output = "";
+    for (const args of steps) {
+      const step = await runGit(args, repoDir);
+      output += `$ git ${args.join(" ")}\n${step.stdout}`;
+      if (step.code !== 0) {
+        console.error("approve-deploy git failed:", args.join(" "), step.stderr);
+        return res.status(500).json({ error: `git ${args[0]} failed`, output });
       }
-      updateInboxItem(id, { status: "deployed" });
-      res.json({ ok: true, output: stdout });
-    });
+    }
+
+    updateInboxItem(id, { status: "deployed" });
+    res.json({ ok: true, output });
   } catch (err) {
     console.error("POST /api/inbox/:id/approve-deploy error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1000,7 +1055,7 @@ app.post("/api/client-aliases", (req, res) => {
   }
 });
 
-app.post("/api/projects/:id/ingest-email", (req, res) => {
+app.post("/api/projects/:id/ingest-email", requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const project = getProjectById(id);

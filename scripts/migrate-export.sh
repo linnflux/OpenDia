@@ -156,6 +156,7 @@ info "Syncing ~/OpenDia/ to gdrive:OpenDia/ ..."
 
 OPENDIA_FILTER=$(mktemp)
 cat > "$OPENDIA_FILTER" <<'FILTER'
++ repo/dashboard/.env
 - repo/**
 - venv/**
 - __pycache__/**
