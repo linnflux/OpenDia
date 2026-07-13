@@ -151,6 +151,8 @@ def main():
     ap.add_argument("--to", dest="to_ym")
     ap.add_argument("--client", help="only this client")
     ap.add_argument("--only", choices=["thin", "underbilled"], help="show only this verdict")
+    ap.add_argument("--passes", type=int, default=3,
+                    help="grade each entry N times; only agreed verdicts are reported (default 3)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -174,18 +176,47 @@ def main():
         print("No billed entries in that range.")
         return
 
-    print(f"  Auditing {len(entries)} entries against their notes "
-          f"({(len(entries) + BATCH - 1) // BATCH} model calls)...", file=sys.stderr)
+    print(f"  Auditing {len(entries)} entries × {args.passes} passes "
+          f"({(len(entries) + BATCH - 1) // BATCH * args.passes} model calls)...", file=sys.stderr)
 
-    verdicts = {}
-    for i in range(0, len(entries), BATCH):
-        chunk = entries[i:i + BATCH]
-        try:
-            verdicts.update(audit_batch(chunk, i))
-        except Exception as e:
-            print(f"  batch at {i} failed: {str(e)[:120]}", file=sys.stderr)
+    # A single grading pass is NOT stable: re-running the same entries with the
+    # same prompt produced materially different verdicts (36 vs 40 thin, and not
+    # the same entries). So grade each entry several times and only report a
+    # verdict the passes AGREE on. Entries where the passes disagree are
+    # "unsure" — reported as such, never counted as a finding.
+    passes = []
+    for pass_n in range(args.passes):
+        got = {}
+        for i in range(0, len(entries), BATCH):
+            chunk = entries[i:i + BATCH]
+            try:
+                got.update(audit_batch(chunk, i))
+            except Exception as e:
+                print(f"  pass {pass_n + 1}, batch at {i} failed: {str(e)[:100]}", file=sys.stderr)
+        passes.append(got)
+        print(f"  pass {pass_n + 1}/{args.passes}: {len(got)}/{len(entries)} graded", file=sys.stderr)
 
-    unaudited = len(entries) - len(verdicts)
+    verdicts, unsure = {}, 0
+    for i in range(len(entries)):
+        got = [p[i] for p in passes if i in p]
+        if not got:
+            continue
+        votes = [g.get("verdict") for g in got]
+        winner = max(set(votes), key=votes.count)
+        if votes.count(winner) < (len(votes) // 2 + 1) or (
+                len(votes) > 1 and votes.count(winner) == len(votes) - votes.count(winner)):
+            unsure += 1
+            continue
+        agreeing = [g for g in got if g.get("verdict") == winner]
+        mins = sorted(g.get("suggested_minutes") or 0 for g in agreeing)
+        verdicts[i] = {
+            "verdict": winner,
+            "suggested_minutes": mins[len(mins) // 2],
+            "reason": agreeing[0].get("reason", ""),
+            "agreement": f"{votes.count(winner)}/{len(votes)}",
+        }
+
+    unaudited = len(entries) - len(verdicts) - unsure
 
     rows = []
     for i, e in enumerate(entries):
@@ -198,6 +229,8 @@ def main():
             "suggested_minutes": v.get("suggested_minutes"),
             "verdict": v.get("verdict", "?"),
             "reason": v.get("reason", ""),
+            "agreement": v.get("agreement", ""),
+            "internal": e["client"].strip().lower() == "linnflux",
         })
 
     if args.only:
@@ -218,6 +251,9 @@ def main():
     print(f"{'='*92}")
     print(f"  {len(ok)} defensible · {len(thin)} thin · {len(under)} underbilled "
           f"(of {len(rows)} audited)")
+    if unsure:
+        print(f"  {unsure} entr{'y' if unsure == 1 else 'ies'} the passes disagreed on — "
+              f"not counted either way (re-run or read them yourself).")
     if unaudited:
         print(f"  !! {unaudited} entr{'y' if unaudited == 1 else 'ies'} could NOT be audited "
               f"(model error) — not counted above.")
@@ -232,7 +268,8 @@ def main():
         for r in sorted(group, key=lambda r: -(r["billed_minutes"])):
             sug = r["suggested_minutes"]
             delta = f"{r['billed_minutes']}m billed → notes support ~{sug}m" if sug is not None else f"{r['billed_minutes']}m billed"
-            print(f"   {r['date']}  {r['client'][:24]:<24} {delta}")
+            agree = f"  [{r['agreement']} passes]" if r.get("agreement") else ""
+            print(f"   {r['date']}  {r['client'][:24]:<24} {delta}{agree}")
             print(f"              {r['task'][:70]}")
             print(f"              → {r['reason']}")
         print()
@@ -242,11 +279,23 @@ def main():
     show("UNDERBILLED — you left money on the table",
          under, "The notes describe more work than was billed.")
 
-    billed = sum(r["billed_minutes"] for r in rows)
-    sugg = sum(r["suggested_minutes"] or r["billed_minutes"] for r in rows)
-    print(f"  Billed across audited entries: {billed/60:.1f}h")
-    print(f"  What the notes support:        {sugg/60:.1f}h  ({(sugg-billed)/60:+.1f}h)")
-    print("\n  A verdict is a prompt to look, not a verdict on you. Read the entry.\n")
+    # Internal work is not billed to anyone, so mixing it into the totals hides
+    # the only number that matters: whether CLIENT hours are defensible.
+    print(f"  {'':<22} {'entries':>7} {'ok':>4} {'thin':>5} {'under':>6} {'billed':>8} {'supported':>10}")
+    print(f"  {'-'*72}")
+    for label, group in (("CLIENT-BILLED", [r for r in rows if not r["internal"]]),
+                         ("INTERNAL (not billed)", [r for r in rows if r["internal"]])):
+        if not group:
+            continue
+        b = sum(r["billed_minutes"] for r in group) / 60
+        sp = sum((r["suggested_minutes"] or r["billed_minutes"]) for r in group) / 60
+        print(f"  {label:<22} {len(group):>7} "
+              f"{sum(1 for r in group if r['verdict']=='ok'):>4} "
+              f"{sum(1 for r in group if r['verdict']=='thin'):>5} "
+              f"{sum(1 for r in group if r['verdict']=='underbilled'):>6} "
+              f"{b:>7.1f}h {sp:>9.1f}h  ({sp-b:+.1f}h)")
+    print("\n  A verdict is a prompt to look, not a verdict on you. Read the entry.")
+    print("  Only verdicts the passes agreed on are shown.\n")
 
 
 if __name__ == "__main__":
