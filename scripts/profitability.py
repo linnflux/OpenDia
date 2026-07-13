@@ -279,11 +279,37 @@ def main():
         # Cached months came from the billing tabs — workspace-wide, every user.
         # Only months we have to fetch live are limited to the token owner, so the
         # single-token warning applies to those and only those.
-        cached = set(th._load_cache())
-        live = [f"{y:04d}-{m:02d}" for y, m in months if f"{y:04d}-{m:02d}" not in cached]
-        toggl_coverage = th.coverage_warning(tokens) if live else None
-        if toggl_coverage:
-            toggl_coverage = f"{toggl_coverage} (affects: {', '.join(live)})"
+        toggl_coverage = th.coverage_warning(tokens)
+
+        # Token count alone does NOT prove coverage: with two tokens we still found
+        # 16h in June logged by a third user. The monthly billing tabs were written
+        # from the workspace-wide Reports API, so where a tab exists it is ground
+        # truth — reconcile against it and report any hours nobody's token explains.
+        unaccounted = {}
+        try:
+            svc = bm.get_sheets_service()
+            meta = svc.spreadsheets().get(spreadsheetId=bm.NEW_SHEET_ID).execute()
+            tabs = {sh["properties"]["title"] for sh in meta["sheets"]}
+            for y, m in months:
+                tab = f"{y:04d}-{m:02d}"
+                if tab not in tabs:
+                    continue
+                vals = svc.spreadsheets().values().get(
+                    spreadsheetId=bm.NEW_SHEET_ID, range=f"'{tab}'!A12:C90"
+                ).execute().get("values", [])
+                sheet_h = 0.0
+                for r in vals:
+                    if len(r) >= 2 and r[0] and r[0] not in ("Client", "TOTALS"):
+                        try:
+                            sheet_h += float(r[1] or 0)
+                        except ValueError:
+                            pass
+                ours = sum(v for k, v in th.monthly_hours(tokens, y, m).items()
+                           if k.strip().lower() != "linnflux")
+                if sheet_h - ours > 1.0:
+                    unaccounted[tab] = round(sheet_h - ours, 1)
+        except Exception:
+            pass  # reconciliation is a bonus check, never a hard failure
         for y, m in months:
             # Toggl's free tier answers 402 for both plan-gating AND quota
             # exhaustion, so hours come from the on-disk cache first (seeded from
@@ -368,6 +394,12 @@ def main():
         print("     or seed the cache from a billing tab. Do not act on this as-is.\n")
     elif toggl_coverage:
         print(f"  Note: {toggl_coverage}\n")
+    if unaccounted:
+        tot = sum(unaccounted.values())
+        print(f"  !! {tot:.0f}h logged by a user whose Toggl token we do NOT have "
+              f"({', '.join(f'{k}: {v}h' for k, v in sorted(unaccounted.items()))}).")
+        print("     Those hours are MISSING below, so $/hr is overstated for the")
+        print("     affected clients. Add that user's token to ~/.toggl_tokens.\n")
     hdr = f"  {'Client':<30} {'Net rev':>10} {'Hours':>7} {'Eff $/hr':>9}"
     if args.cost_rate:
         hdr += f" {'Margin':>10} {'Margin%':>8}"
