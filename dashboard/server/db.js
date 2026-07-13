@@ -136,6 +136,7 @@ export function matchProject(client, division, task, project) {
     FROM projects p
     LEFT JOIN companies c ON p.company_id = c.id
     LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE COALESCE(p.tmux_session, '') != 'operator'
   `).all();
 
   // First pass: exact project name match (highest priority)
@@ -200,6 +201,7 @@ export function matchProjectCandidates(client, division, task, limit = 3) {
     FROM projects p
     LEFT JOIN companies c ON p.company_id = c.id
     LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE COALESCE(p.tmux_session, '') != 'operator'
   `).all();
 
   const clientMatched = [];

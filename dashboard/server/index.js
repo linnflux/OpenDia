@@ -160,7 +160,9 @@ app.get("/api/me", (req, res) => res.json(req.user));
 app.get("/api/projects", (req, res) => {
   try {
     const includeCompleted = req.query.include_completed === "true";
-    const projects = getAllProjects({ includeCompleted });
+    let projects = getAllProjects({ includeCompleted });
+    // Operator command-deck card is admin-only
+    if (!req.user?.is_admin) projects = projects.filter((p) => p.tmux_session !== "operator");
     res.json(projects);
   } catch (err) {
     console.error("GET /api/projects error:", err.message);
@@ -283,6 +285,9 @@ app.get("/api/projects/:id", (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid id" });
     const project = getProjectById(id);
     if (!project) return res.status(404).json({ error: "not found" });
+    if (project.tmux_session === "operator" && !req.user?.is_admin) {
+      return res.status(404).json({ error: "not found" });
+    }
     res.json(project);
   } catch (err) {
     console.error("GET /api/projects/:id error:", err.message);
@@ -810,7 +815,7 @@ app.get("/api/sweep", (req, res) => {
 app.post("/api/sweep/run", requireAdmin, async (req, res) => {
   try {
     const projects = getAllProjects({ includeCompleted: false })
-      .filter((p) => p.status === "in_progress" || p.status === "wfhuman");
+      .filter((p) => (p.status === "in_progress" || p.status === "wfhuman") && p.tmux_session !== "operator");
     if (projects.length === 0) return res.json({ generated: null, quick_wins: [], blocked: [], suggestions: [] });
     const result = await runSweep(projects);
     res.json(result);

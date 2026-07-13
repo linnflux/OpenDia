@@ -310,6 +310,12 @@ export function mountTerminal(server, app) {
       socket.destroy();
       return;
     }
+    const wsProject = getProjectById(Number(m[1]));
+    if (wsProject?.tmux_session === "operator" && !auth.is_admin) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req, m[1]);
     });
@@ -489,10 +495,15 @@ export function mountTerminal(server, app) {
     if (!state) return res.status(400).json({ error: "no active viewer — open the Terminal tab first" });
     if (state.holder) return res.status(409).json({ error: "already controlled", controlHolder: { takenAt: state.holder.takenAt } });
 
-    // Start timer if not running
+    if (project.tmux_session === "operator" && !req.user?.is_admin) {
+      return res.status(403).json({ error: "forbidden", reason: "admin_only" });
+    }
+
+    // Start timer if not running. The operator session is dispatch-only:
+    // it must never have a timer, so take-control proceeds timer-free.
     let timerInfo = findTimerForSession(project.tmux_session);
     let timerStarted = false;
-    if (!timerInfo) {
+    if (!timerInfo && project.tmux_session !== "operator") {
       try {
         const info = startTimerForProject(project, task || undefined);
         timerInfo = { file: info.stateFile, data: info };
@@ -516,7 +527,7 @@ export function mountTerminal(server, app) {
       ws: null, // filled by "claim-control" WS message
       takenAt: Date.now(),
       lastInputAt: Date.now(),
-      stateFile: timerInfo.file,
+      stateFile: timerInfo?.file ?? null,
       startedBy: user
     };
 
