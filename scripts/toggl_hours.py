@@ -184,6 +184,25 @@ def monthly_hours(tokens, year, month, indexes=None, use_cache=True):
     return result
 
 
+def monthly_hours_by_user(tokens, year, month, indexes=None):
+    """{user_email: {client_name: hours}} for one month.
+
+    Each token sees only its owner's entries, which is normally the limitation —
+    but it also means we get a per-person breakdown for free. That is what lets
+    cost be computed from who ACTUALLY did the work (Ryan's hours at Ryan's rate)
+    instead of a blended guess.
+    """
+    if isinstance(tokens, str):
+        tokens = [tokens]
+    out = {}
+    for i, tok in enumerate(tokens):
+        me = _get(tok, "me")
+        email = (me.get("email") or f"user-{me.get('id')}").lower()
+        idx = indexes[i] if indexes else None
+        out[email] = {k: round(v, 4) for k, v in _monthly_hours_one(tok, year, month, idx).items()}
+    return out
+
+
 def seed_cache(year, month, hours):
     """Write known-good hours into the cache (e.g. from a billing sheet tab that
     was generated while the Reports API still worked)."""

@@ -140,6 +140,27 @@ def square_payments(token, start_iso, end_iso):
 
 # ── Name matching ─────────────────────────────────────────────────────────────
 
+RATES_PATH = Path.home() / "OpenDia" / ".labor-rates.json"
+
+
+def load_rates():
+    """Fully-loaded hourly COST of delivery, per person.
+
+    Lives outside the repo (compensation data; this repo is public). Absent
+    file just means no margin column — never a failure. Gusto has no API for a
+    company to read its own payroll, so this is a hand-maintained config; the
+    numbers change roughly once a year.
+    """
+    try:
+        cfg = json.loads(RATES_PATH.read_text())
+    except (OSError, ValueError):
+        return None
+    return {
+        "default": float(cfg.get("default_rate") or 0),
+        "by_user": {k.lower(): float(v) for k, v in (cfg.get("rates") or {}).items() if v},
+    }
+
+
 def domain_of(email):
     return email.split("@")[-1].lower().lstrip("www.") if "@" in email else ""
 
@@ -328,6 +349,23 @@ def main():
                 else:
                     unmapped_hours[raw] += h
 
+        # Per-person hours per client: lets cost be computed from who ACTUALLY did
+        # the work (each person at their own rate) rather than a blended average.
+        rates = load_rates()
+        cost_by_client = defaultdict(float)
+        if rates:
+            try:
+                for y, m in months:
+                    for user, per_client in th.monthly_hours_by_user(tokens, y, m).items():
+                        rate = rates["by_user"].get(user, rates["default"])
+                        for raw, h in per_client.items():
+                            client = match(raw)
+                            if client:
+                                cost_by_client[client] += h * rate
+            except Exception as e:
+                print(f"  (per-user cost unavailable: {str(e)[:60]})", file=sys.stderr)
+                rates = None
+
         for y, m in months:
             for e in load_month_entries(y, m):
                 client = match(e["client"])
@@ -357,8 +395,12 @@ def main():
             "od_hours": round(hrs["od"], 1),
             "effective_hourly": round(eff, 2) if eff is not None else None,
         }
-        if args.cost_rate:
-            cost = total_h * args.cost_rate
+        cost = None
+        if rates and client in cost_by_client:
+            cost = cost_by_client[client]        # real, per-person
+        elif args.cost_rate:
+            cost = total_h * args.cost_rate      # flat assumption
+        if cost is not None:
             row["cost"] = round(cost, 2)
             row["margin"] = round(rev["net"] - cost, 2)
             row["margin_pct"] = round((rev["net"] - cost) / rev["net"] * 100, 1) if rev["net"] else None
@@ -400,8 +442,9 @@ def main():
               f"({', '.join(f'{k}: {v}h' for k, v in sorted(unaccounted.items()))}).")
         print("     Those hours are MISSING below, so $/hr is overstated for the")
         print("     affected clients. Add that user's token to ~/.toggl_tokens.\n")
+    show_margin = bool(args.cost_rate) or any("margin" in r for r in rows)
     hdr = f"  {'Client':<30} {'Net rev':>10} {'Hours':>7} {'Eff $/hr':>9}"
-    if args.cost_rate:
+    if show_margin:
         hdr += f" {'Margin':>10} {'Margin%':>8}"
     print(hdr)
     print(f"  {'-'*90}")
@@ -409,10 +452,11 @@ def main():
     for r in rows:
         eff = f"${r['effective_hourly']:,.0f}" if r["effective_hourly"] is not None else "     —"
         line = f"  {r['client'][:30]:<30} {'$'+format(r['revenue_net'], ',.0f'):>10} {r['hours']:>7.1f} {eff:>9}"
-        if args.cost_rate:
-            m = r.get("margin", 0)
+        if show_margin:
+            m = r.get("margin")
             mp = r.get("margin_pct")
-            line += f" {'$'+format(m, ',.0f'):>10} {(f'{mp:.0f}%' if mp is not None else '—'):>8}"
+            line += (f" {'$'+format(m, ',.0f'):>10} {(f'{mp:.0f}%' if mp is not None else '—'):>8}"
+                     if m is not None else f" {'—':>10} {'—':>8}")
         flag = ""
         if r["revenue_net"] > 0 and r["hours"] == 0:
             flag = "  ++ recurring, no delivery hours"

@@ -38,3 +38,6 @@ scripts/oracle_prompt.md
 scripts/billing_seed_clients.py
 scripts/.wrangler/
 scripts/__pycache__/
+
+# Labor cost rates — compensation data. Never in a public repo.
+.labor-rates.json
