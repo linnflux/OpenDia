@@ -293,6 +293,28 @@ def reaper_warnings() -> list[str]:
     return warns
 
 
+def toggl_coverage_warnings() -> list[str]:
+    """Toggl hours feed billing. A single user token silently under-reports them
+    (~100h/month of a second operator's time), and the v2 Reports API that used
+    to cover the whole workspace is now 402-gated. Surface it once a month rather
+    than discovering it mid-billing-run."""
+    if datetime.now(tz=EASTERN).day > 3:
+        return []  # only nag near month end/start, when billing actually happens
+    multi = Path.home() / ".toggl_tokens"
+    try:
+        toks = [l for l in multi.read_text().splitlines()
+                if l.strip() and not l.startswith("#")] if multi.exists() else []
+    except OSError:
+        toks = []
+    if len(toks) > 1:
+        return []
+    return [
+        "WARNING: Toggl has only ONE user token — billing hours exclude the other "
+        "operator's time (~100h/month). Add each user's token to ~/.toggl_tokens. "
+        "See docs/billing.md."
+    ]
+
+
 def main():
     now = datetime.now(tz=EASTERN)
     date_str = now.strftime("%Y-%m-%d")
@@ -305,7 +327,8 @@ def main():
     # ledger check, so on any day with no logged work (weekends, days off — about
     # 1 in 4) a dead backup or dead calendar sync alerted nobody. Quiet days are
     # exactly when nothing else would catch it.
-    warnings = [w for w in [backup_warning()] if w] + calendar_sync_warnings() + reaper_warnings()
+    warnings = ([w for w in [backup_warning()] if w] + calendar_sync_warnings()
+                + reaper_warnings() + toggl_coverage_warnings())
 
     entries = parse_ledger(ledger_path) if ledger_path.exists() else []
 

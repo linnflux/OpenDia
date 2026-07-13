@@ -130,3 +130,52 @@ Step 4's notes and warn the Operator about lost manual fills.
   and this doc both say run both.
 - **One parser.** Any new script or dashboard route that reads timer files
   imports `timeentry.py` — do not add a sixth regex for this format.
+
+## Toggl: the Reports API is gone (2026-07-13)
+
+`/reports/api/v2/summary` — the endpoint both billing pipelines used for Toggl
+hours — now returns **402 "feature is not included in current subscription
+level"** on this workspace. Toggl also answers 402 when the free-tier quota is
+exhausted, including on endpoints that worked minutes earlier, so **402 means
+back off, never retry in a loop.**
+
+Billing no longer dies on this. `get_toggl_monthly_hours()` falls back to
+`scripts/toggl_hours.py`, which aggregates raw `/api/v9/me/time_entries` (free)
+and caches results to `~/OpenDia/.toggl-hours-cache.json`. Past months never
+change, so the cache is authoritative once written; it can be seeded from the
+monthly billing tabs, which are workspace-wide.
+
+**The catch, and it matters for billing:** `/me/time_entries` returns only the
+token owner's entries. Against the June 2026 sheet, Toggl logged 234h that month
+while a single token sees 134h — **roughly 100h/month belongs to another user.**
+With one token, Toggl hours are UNDERSTATED and any $/hr or margin derived from
+them is overstated.
+
+Fix one of two ways:
+
+1. Put **one token per user**, one per line, in `~/.toggl_tokens` (chmod 600).
+   `toggl_hours.load_tokens()` sums across all of them.
+2. Upgrade the Toggl plan to restore the workspace-wide Reports API.
+
+Until then the code warns on every run rather than silently under-reporting.
+Check coverage before a billing run:
+
+```bash
+python3 ~/OpenDia/scripts/toggl_hours.py 2026 06   # prints token count + warning
+```
+
+## Estimate audit — do the notes justify the bill?
+
+`estimated_minutes` is the billing number: an approximation of how long the
+completed work would take a competent human developer. Wall-clock is irrelevant.
+What makes an estimate defensible is the NOTES.
+
+```bash
+python3 ~/OpenDia/scripts/estimate_audit.py --month 2026-06 --only thin
+```
+
+Grades each entry's notes against its billed minutes, three passes, reporting
+only verdicts the passes agree on (a single pass is NOT stable). Flags `thin`
+(notes don't account for the minutes — a billing risk) and `underbilled`. Run it
+before a billing batch. A `thin` verdict means *go look at that entry*, not
+*you over-billed* — often the work happened and the notes undersold it.
