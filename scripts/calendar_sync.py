@@ -406,7 +406,9 @@ def build_desired(token, cfg, today_iso):
                     except Exception:
                         company_cache[cid] = ""
                 company = company_cache[cid]
-        summary = f"{company} — {name}" if company else name
+        # Titles that lead with an emoji opt out of the "Company — " prefix
+        emoji_lead = bool(name) and ord(name[0]) > 0x2000
+        summary = f"{company} — {name}" if company and not emoji_lead else name
         lines = []
         if card and base_url:
             lines.append(f"Card: {base_url}/?project={card['id']}")
