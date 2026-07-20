@@ -70,10 +70,16 @@ export default function Newsletter() {
         if (d.error) throw new Error(d.error);
         setActiveName(d.name);
         setContent(d.content);
-        loadList();
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setGenerating(false));
+      .catch((e) =>
+        // Generation shells out to `claude -p` (30-90s). If the response is slow
+        // or the proxy drops the long request, the file is still written server-
+        // side — surface that rather than making it look like nothing happened.
+        setError(`${e.message}. If it was still generating, the file may have been saved — check "Past newsletters" below.`)
+      )
+      // Always refresh the list, success or not, so a completed-but-slow
+      // generation appears instead of vanishing until a manual reload.
+      .finally(() => { setGenerating(false); loadList(); });
   }
 
   function save() {
