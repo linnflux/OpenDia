@@ -505,6 +505,18 @@ export function moveProjectToTop(projectId, newStatus) {
   })();
 }
 
+// Exact tmux_session → project lookup for the running-timer reconciler. Uses
+// the same key terminal.js trusts, not the fuzzy matchProject scoring. Excludes
+// the "operator" sentinel session, consistent with the other project queries.
+export function getProjectByTmuxSession(session) {
+  if (!session || session === "operator") return undefined;
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.status, p.tmux_session, p.notion_id
+    FROM projects p
+    WHERE p.tmux_session = ?
+  `).get(session);
+}
+
 export function getStaleInProgressProjects(days = 14) {
   return getDb().prepare(`
     SELECT p.id, p.name, p.updated_at, p.next_step,

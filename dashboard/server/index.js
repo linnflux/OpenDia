@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { PORT } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
 import { spawn, execFile } from "child_process";
 import { timingSafeEqual, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
@@ -47,6 +47,21 @@ const NOTION_STATUS_BY_CARD_STATUS = {
   wfhuman: "WFR",
   completed: "Completed",
 };
+
+// Push a card's status through to its linked Notion task, fire-and-forget.
+// Best-effort: a Notion hiccup must never throw into the caller.
+function pushNotionStatus(project, cardStatus) {
+  const notionStatus = NOTION_STATUS_BY_CARD_STATUS[cardStatus];
+  if (!project?.notion_id || !notionStatus) return;
+  setImmediate(async () => {
+    try {
+      const ok = await updateNotionTaskStatus(project.notion_id, notionStatus);
+      if (!ok) console.warn(`notion status sync returned false for project ${project.id}`);
+    } catch (err) {
+      console.error(`notion status sync failed for project ${project.id}:`, err.message);
+    }
+  });
+}
 
 function timingSafeEqualStr(a, b) {
   const ab = Buffer.from(String(a));
@@ -213,18 +228,7 @@ app.patch("/api/projects/:id", (req, res) => {
     // Notion task open, so nothing ever actually closed. Push it through,
     // best-effort (a Notion hiccup must not fail the request).
     if (fields.status !== undefined) {
-      const project = getProjectById(id);
-      const notionStatus = NOTION_STATUS_BY_CARD_STATUS[fields.status];
-      if (project?.notion_id && notionStatus) {
-        setImmediate(async () => {
-          try {
-            const ok = await updateNotionTaskStatus(project.notion_id, notionStatus);
-            if (!ok) console.warn(`notion status sync returned false for project ${id}`);
-          } catch (err) {
-            console.error(`notion status sync failed for project ${id}:`, err.message);
-          }
-        });
-      }
+      pushNotionStatus(getProjectById(id), fields.status);
     }
 
     res.json({ ok: true });
@@ -895,6 +899,44 @@ app.get("/api/projects/:id/inbox", (req, res) => {
 ensureInboxTable();
 ensureClientAliasesTable();
 ensureProjectsColumns();
+
+// ── Running-timer → In Progress reconciler ────────────────────────────────────
+// A timer left running on an Ice/WFHuman/Completed card is invisible (the board
+// shows one status at a time), so a forgotten timer can run for days unseen. Any
+// card with a running timer is forced to In Progress so it surfaces in the column
+// that actually gets watched. Promote only, never demote — stopping a timer leaves
+// the card in In Progress, which is honest. Steady state writes nothing: we only
+// touch a card whose status actually differs.
+let reconcileInFlight = false;
+async function reconcileRunningTimers() {
+  if (reconcileInFlight) return;
+  reconcileInFlight = true;
+  try {
+    const timers = await getActiveTimers();
+    let changed = false;
+    const seen = new Set();
+    for (const t of timers) {
+      // Exact join only: project_id when present (dashboard-started), else
+      // tmux_session (always written). Never the fuzzy matchProject here.
+      const project = (t.project_id && getProjectById(t.project_id))
+        || getProjectByTmuxSession(t.tmux_session);
+      if (!project || seen.has(project.id)) continue;
+      seen.add(project.id);
+      if (project.status === "in_progress") continue;
+      moveProjectToTop(project.id, "in_progress");
+      pushNotionStatus(project, "in_progress");
+      changed = true;
+      console.log(`reconciler: project ${project.id} (${project.name}) ${project.status} → in_progress (timer running)`);
+    }
+    if (changed) scheduleCalendarSync();
+  } catch (err) {
+    console.error("reconcileRunningTimers error:", err.message);
+  } finally {
+    reconcileInFlight = false;
+  }
+}
+reconcileRunningTimers();
+setInterval(reconcileRunningTimers, 60_000);
 
 app.get("/api/inbox", (req, res) => {
   try {

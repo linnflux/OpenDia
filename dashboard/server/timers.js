@@ -23,6 +23,10 @@ export async function getActiveTimers() {
           division: timer.division || null,
           task: timer.task || null,
           start: timer.start || null,
+          // Exact join keys for the running-timer reconciler. tmux_session is
+          // always written; project_id only by dashboard-started timers.
+          tmux_session: timer.tmux_session || null,
+          project_id: timer.project_id || null,
         });
       }
     } catch {
