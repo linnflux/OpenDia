@@ -8,7 +8,7 @@ full history on demand.
 
 A session is reaped when ALL of:
   - its ~/.claude/sessions/<pid>.json says kind == "interactive"
-  - idle age (now - max(updatedAt, transcript mtime)) > threshold (default 72h)
+  - idle age (now - updatedAt on the session json) > threshold (default 72h)
   - status is not busy/shell (not actively working)
   - no active timer state file references its name as tmux_session
   - its tmux session (same name) is not currently attached
@@ -187,12 +187,15 @@ def main():
             skip("self")
             continue
 
+        # Idle = time since the session's own last interaction (updatedAt on the
+        # sessions/<pid>.json, bumped on real user activity + status changes).
+        # We deliberately do NOT fold in the transcript-file mtime: background
+        # pings touch every session's transcript ~hourly, so max(updatedAt,
+        # transcript_mtime) made every session look ~1h idle and the reaper never
+        # fired (38 sessions, 3-18 days idle, all read as "fresh" — the OOM this
+        # tool exists to prevent). The busy/shell status guard below still
+        # protects sessions that are actively working right now.
         updated_ms = meta.get("updatedAt") or meta.get("startedAt") or 0
-        tp = transcript_path(meta.get("cwd", ""), meta.get("sessionId", ""))
-        try:
-            updated_ms = max(updated_ms, tp.stat().st_mtime * 1000)
-        except OSError:
-            pass
         idle_s = (now_ms - updated_ms) / 1000
         idle_h = idle_s / 3600
 
