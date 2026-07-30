@@ -115,6 +115,12 @@ actually enabled.
 Full dress rehearsal, worth doing once: `od-fallback on`, resume a session, and confirm
 an MCP tool, a slash command, and a multi-step tool chain (read → edit → run) all work.
 
+**Rehearsal completed 2026-07-30 — PASS.** Resumed the `od-dash` session on Bedrock
+(Opus 5) and verified: MCP servers work (Google Workspace `chat_list_spaces`, Notion
+`notion_get_me`), a read → edit → run tool chain works, and the local reads that slash
+commands depend on (timer state files, dashboard `/api/projects`) work. Nothing about the
+session behaved differently apart from the model being Opus 5 instead of Fable 5.
+
 ## Deliberately not used
 
 - **No LiteLLM proxy.** Nothing for it to do here: interactive uses Claude Code's native
