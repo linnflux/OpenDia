@@ -20,15 +20,29 @@ from pathlib import Path
 CREDENTIALS_PATH = Path.home() / ".claude" / "mcp-credentials" / "google-workspace.json"
 TOKENS_PATH = Path.home() / ".claude" / "mcp-credentials" / "google-workspace" / "tokens.json"
 
-# Current token scopes + gmail.modify added
+# THE UNION LIST — keep in sync with SCOPES in
+# ~/.claude/mcp-servers/google-workspace/src/google-client.ts. Both flows write
+# the SAME token file, so a consent from either side REPLACES the token's scopes
+# entirely. Any scope missing here is silently revoked when this script runs.
+#
+# This bit us on 2026-07-27: the MCP's list lacked gmail.modify, an MCP
+# re-consent dropped it, and the 5-minute inbox cron failed every tick for three
+# days ("gmail.modify scope missing") because it could not relabel threads to
+# "OpenDia Processed". The same event downgraded drive to readonly.
+#
+# RULE: never remove a scope here to tidy up, and never add one to only one of
+# the two files.
 NEW_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.labels",
-    "https://www.googleapis.com/auth/gmail.modify",   # ← new: needed for messages.modify
+    "https://www.googleapis.com/auth/gmail.modify",   # needed for messages.modify
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive",          # full, not readonly — shared-drive uploads
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/chat.spaces.readonly",
+    "https://www.googleapis.com/auth/chat.messages.readonly",
 ]
 
 

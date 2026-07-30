@@ -66,6 +66,29 @@ approval — goes through one of two `requireAdmin` dashboard routes:
   `~/FluxCC` working directory when `division_hint == "FluxCC"`, on every
   dispatch path (`_dispatch_one` and `--redispatch`). Server-access items
   still get `SERVER_WORK_PREAMBLE` regardless of division.
+## OAuth scopes — the shared-token trap
+
+The pipeline authenticates with the **same token file** as the Google Workspace
+MCP (`~/.claude/mcp-credentials/google-workspace/tokens.json`). Two separate
+consent flows write it:
+
+- `scripts/inbox_setup_auth.py` → `NEW_SCOPES`
+- the MCP's `src/google-client.ts` → `SCOPES`
+
+**A consent from either side REPLACES the token's scopes wholesale.** Any scope
+missing from the list that runs last is silently revoked. The two lists must stay
+byte-identical unions; both carry a comment saying so.
+
+This failed on **2026-07-27**: the MCP list lacked `gmail.modify`, a re-consent
+dropped it, and Stage A could not relabel threads to `OpenDia Processed`. Every
+tick failed for three days — 288 logged errors a day — and it surfaced only when
+a labeled email visibly failed to appear. The same event downgraded `drive` to
+`drive.readonly`.
+
+`inbox_pipeline_warnings()` in `lonely_whistle.py` now checks the granted scopes
+directly, so this class of failure is reported the same day even if no email is
+labeled.
+
 - **Approval gates in general:** `redispatch`, `approve-server`, `preview`
   (records a dev-branch preview URL), `approve-deploy` (merges a FluxCC dev
   branch to main and deletes it), and the Check Mail `ingest-email` route

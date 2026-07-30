@@ -293,6 +293,99 @@ def reaper_warnings() -> list[str]:
     return warns
 
 
+# Scopes the 5-minute inbox cron actually needs. gmail.modify is the one that
+# matters most and the one that has silently gone missing: without it Stage A
+# cannot relabel a thread to "OpenDia Processed", so every tick fails and
+# labeled email is never picked up.
+INBOX_REQUIRED_SCOPES = {
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.labels",
+    "https://www.googleapis.com/auth/gmail.modify",
+}
+
+
+def inbox_pipeline_warnings() -> list[str]:
+    """Health-check the 5-minute inbox pipeline (docs/inbox-pipeline.md).
+
+    Why this exists: on 2026-07-27 an OAuth re-consent through the Google
+    Workspace MCP silently dropped the gmail.modify scope, because the MCP's
+    scope list and inbox_setup_auth.py's list had drifted apart and both write
+    the same token file. Every tick failed for THREE DAYS, logging the same
+    error 288 times a day, and nobody noticed until Nick labeled an email and
+    watched it not arrive. The scope bug was one missing line; having no alarm
+    on a 5-minute job was the real defect.
+
+    Three checks, cheapest first. All silent when healthy.
+    """
+    warns = []
+
+    # 1. Paused by hand and never resumed. Easy to forget; total silence looks
+    #    identical to "no email came in today".
+    if (Path.home() / "OpenDia" / "inbox.disabled").exists():
+        warns.append(
+            "WARNING: inbox pipeline is PAUSED (~/OpenDia/inbox.disabled exists) "
+            "-- labeled email is not being processed. Remove the file to resume."
+        )
+
+    # 2. Token scopes. This is the direct root-cause check: it fires even when
+    #    no email has been labeled, so the failure surfaces before it costs work.
+    tokens = Path.home() / ".claude" / "mcp-credentials" / "google-workspace" / "tokens.json"
+    try:
+        import json
+        granted = set(json.loads(tokens.read_text()).get("scope", "").split())
+        missing = INBOX_REQUIRED_SCOPES - granted
+        if missing:
+            short = ", ".join(sorted(s.rsplit("/", 1)[-1] for s in missing))
+            warns.append(
+                f"WARNING: Google OAuth token is MISSING scope(s): {short} -- the inbox "
+                "pipeline cannot relabel threads and every tick will fail. Re-consent "
+                "with: python3 ~/OpenDia/scripts/inbox_setup_auth.py  (keep that script's "
+                "scope list in sync with the MCP's google-client.ts)"
+            )
+    except (OSError, ValueError):
+        pass  # token unreadable is the MCP's problem to report, not ours
+
+    # 3. Today's tick log — staleness and errors. Cron is */5, so at the 5pm
+    #    send anything older than ~20 minutes means ticks stopped.
+    log = Path.home() / "OpenDia" / "logs" / f"inbox-{datetime.now(tz=EASTERN):%Y-%m-%d}.log"
+    if not log.exists():
+        warns.append(
+            "WARNING: no inbox tick log for today -- the */5 cron is not running. "
+            "Check: crontab -l | grep inbox-tick"
+        )
+        return warns
+
+    age_min = (datetime.now().timestamp() - log.stat().st_mtime) / 60
+    if age_min > 20:
+        warns.append(
+            f"WARNING: inbox pipeline last ticked {age_min:.0f} min ago (expected every 5) "
+            "-- check crontab / ~/OpenDia/logs/"
+        )
+
+    try:
+        lines = [l for l in log.read_text().splitlines() if l.strip()]
+    except OSError:
+        return warns
+
+    # Only errors since the LAST SUCCESSFUL tick mean it is broken *now*. A tick
+    # that fails early never logs "Tick start" at all — it emits the error and
+    # exits — so completion markers, not error counts, are the health signal.
+    # Counting all of today's errors would keep nagging after a mid-day fix.
+    last_ok = max((i for i, l in enumerate(lines) if "Tick complete" in l), default=-1)
+    errors_since = [l for l in lines[last_ok + 1:] if "ERROR" in l]
+
+    if errors_since:
+        total = sum(1 for l in lines if "ERROR" in l)
+        context = f" ({total} today)" if total > len(errors_since) else ""
+        scope = "all day" if last_ok == -1 else "since the last successful tick"
+        warns.append(
+            f"WARNING: inbox pipeline failing {scope} -- {len(errors_since)} error(s)"
+            f"{context}. Latest: {errors_since[-1].strip()[:200]}"
+        )
+
+    return warns
+
+
 def toggl_coverage_warnings() -> list[str]:
     """Toggl hours feed billing. A single user token silently under-reports them
     (~100h/month of a second operator's time), and the v2 Reports API that used
@@ -328,7 +421,8 @@ def main():
     # 1 in 4) a dead backup or dead calendar sync alerted nobody. Quiet days are
     # exactly when nothing else would catch it.
     warnings = ([w for w in [backup_warning()] if w] + calendar_sync_warnings()
-                + reaper_warnings() + toggl_coverage_warnings())
+                + reaper_warnings() + inbox_pipeline_warnings()
+                + toggl_coverage_warnings())
 
     entries = parse_ledger(ledger_path) if ledger_path.exists() else []
 
