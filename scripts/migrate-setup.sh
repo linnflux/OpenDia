@@ -298,6 +298,31 @@ else
     check_fail "Claude configs missing"
 fi
 
+# Deployment config — resource IDs are not in the repo, so a fresh machine that
+# restored without them looks fine until the first billing or calendar run
+# crashes. Check at setup time instead of discovering it from a cron failure.
+if [ -f "$HOME/OpenDia/.opendia.conf" ]; then
+    MISSING_IDS=""
+    for key in BILLING_OPS_SHEET_ID NOTION_TASKS_DB_ID TOGGL_WORKSPACE_ID; do
+        grep -qE "^${key}=.+" "$HOME/OpenDia/.opendia.conf" || MISSING_IDS="$MISSING_IDS $key"
+    done
+    if [ -z "$MISSING_IDS" ]; then
+        check_pass "Deployment config present (~/OpenDia/.opendia.conf)"
+    else
+        check_fail "~/OpenDia/.opendia.conf missing values:$MISSING_IDS"
+    fi
+else
+    check_fail "~/OpenDia/.opendia.conf missing — copy repo/examples/opendia.conf.example and fill it in"
+fi
+
+# Outage fallback config (optional — only used during an AI provider outage)
+if [ -f "$HOME/OpenDia/.od-fallback.conf" ]; then
+    check_pass "Outage fallback configured (run 'od-fallback check' to verify live)"
+else
+    warn "~/OpenDia/.od-fallback.conf absent — no AI outage fallback on this machine."
+    echo "       See repo/examples/od-fallback.conf.example and docs/outage-fallback.md"
+fi
+
 # MCP server builds
 for server in toggl google-workspace square notion; do
     if [ -d "$HOME/.claude/mcp-servers/$server/dist" ] || [ -d "$HOME/.claude/mcp-servers/$server/node_modules" ]; then
