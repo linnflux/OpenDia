@@ -53,8 +53,13 @@ its systemd `EnvironmentFile` and `systemctl --user restart opendia-dashboard`.
 `repo/scripts/classify_email.py` calls Anthropic with an API key (from
 `~/.config/opendia/inbox.env` — a separate, ToS-clean credential from the interactive
 OAuth session). `_create_message()` catches `APIStatusError` / `APIConnectionError` /
-`APITimeoutError` and retries once against `anthropic.AnthropicBedrock`. No new
-dependency: the installed SDK signs SigV4 natively, so **boto3 is not required**.
+`APITimeoutError` and retries once against `anthropic.AnthropicBedrock`.
+
+**Requires `boto3` + `botocore`** (installed to user site-packages with
+`pip3 install --user --break-system-packages`, since this system's Python is
+externally managed under PEP 668). Note the trap: `AnthropicBedrock` *instantiates*
+fine without them, so an import check passes — but the signed request fails at call
+time with `No module named 'boto3'`. Only a real end-to-end invoke proves the path.
 
 Bedrock is used **only on failure** — no steady-state cost. If Bedrock is unconfigured
 or also failing, the **original** Anthropic error is re-raised, so behavior is identical
@@ -74,11 +79,22 @@ OD_FALLBACK_SMALL_MODEL=us.anthropic.<haiku-model-id>
 Get the real IDs with:
 
 ```bash
-aws bedrock list-foundation-models --region us-east-1 \
-  --query "modelSummaries[?providerName=='Anthropic'].modelId" --output text
+aws bedrock list-inference-profiles --region us-east-1 \
+  --query "inferenceProfileSummaries[?contains(inferenceProfileId,'anthropic')].inferenceProfileId" \
+  --output text
 ```
 
-Bedrock generally wants the cross-region inference-profile form (`us.anthropic.…`).
+**Use the `us.` inference-profile IDs, not the bare model IDs** — bare IDs fail with
+"Invocation … with on-demand throughput isn't supported".
+
+Verified working on this account (2026-07-30): `us.anthropic.claude-opus-5` (current
+main), `us.anthropic.claude-opus-4-8`, `us.anthropic.claude-sonnet-4-6`,
+`us.anthropic.claude-haiku-4-5-20251001-v1:0` (current small).
+
+**Known exception:** `us.anthropic.claude-fable-5` is enabled in the Bedrock catalog
+but fails to invoke — `ValidationException: data retention mode 'default' is not
+available for this model`. So the fallback main model is Opus 5 rather than Fable 5,
+even though Fable 5 is the normal interactive default. Worth re-testing later.
 
 ## One-time AWS setup
 
