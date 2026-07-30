@@ -102,6 +102,50 @@ def _build_system_prompt(known_clients):
     return SYSTEM_PROMPT_BASE.format(known_clients_block=known_clients_block)
 
 
+def _create_message(anthropic, *, api_key: str, **kwargs):
+    """Call Anthropic, falling back to the SAME Claude model on AWS Bedrock.
+
+    Why: this runs on a 5-minute cron. During the 2026-07-29 Anthropic outage every
+    tick failed and threads were relabeled "OpenDia Error", each needing manual
+    reprocessing. Bedrock serves the same model from separate infrastructure, so one
+    retry there turns a multi-hour manual cleanup into an invisible blip.
+
+    Bedrock is used ONLY on failure, so there is no steady-state cost. If Bedrock is
+    unconfigured or also failing, we re-raise the ORIGINAL Anthropic error — the
+    caller's existing per-thread handling then behaves exactly as it does today.
+    """
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        return client.messages.create(model=MODEL, **kwargs)
+    except (anthropic.APIStatusError, anthropic.APIConnectionError,
+            anthropic.APITimeoutError) as primary_err:
+        bedrock_model = os.environ.get("OD_BEDROCK_MODEL") or _conf_value("OD_FALLBACK_SMALL_MODEL")
+        region = os.environ.get("AWS_REGION") or _conf_value("OD_FALLBACK_REGION") or "us-east-1"
+        if not bedrock_model:
+            raise
+        print(f"classify_email: Anthropic failed ({type(primary_err).__name__}); "
+              f"retrying on Bedrock {bedrock_model}", file=sys.stderr)
+        try:
+            bedrock = anthropic.AnthropicBedrock(aws_region=region)
+            return bedrock.messages.create(model=bedrock_model, **kwargs)
+        except Exception as fallback_err:
+            print(f"classify_email: Bedrock fallback also failed: {fallback_err}", file=sys.stderr)
+            raise primary_err
+
+
+def _conf_value(key: str) -> str:
+    """Read a KEY=value from ~/OpenDia/.od-fallback.conf (shared with od-fallback.sh)."""
+    conf = Path.home() / "OpenDia" / ".od-fallback.conf"
+    try:
+        for line in conf.read_text().splitlines():
+            line = line.strip()
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
 def classify_email(subject: str, from_addr: str, body: str, thread_history: str = "",
                    attachments_line: str = "") -> dict:
     """
@@ -152,12 +196,12 @@ Subject: {subject}
 </email_content>
 """
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=MODEL,
+    response = _create_message(
+        anthropic,
         max_tokens=512,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
+        api_key=api_key,
     )
 
     raw = response.content[0].text.strip()
