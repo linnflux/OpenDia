@@ -57,6 +57,24 @@ CREATE TABLE IF NOT EXISTS client_aliases (
 )
 """
 
+CREATE_FLUXCC_SITES_TABLE = """
+CREATE TABLE IF NOT EXISTS fluxcc_sites (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_hint   TEXT NOT NULL UNIQUE,
+    display_name  TEXT,
+    slug          TEXT UNIQUE,
+    repo_path     TEXT,
+    cf_project    TEXT,
+    gitlab_repo   TEXT,
+    preview_url   TEXT,
+    custom_domain TEXT,
+    status        TEXT,
+    auto_email    INTEGER DEFAULT 0,
+    created_at    DATETIME DEFAULT (datetime('now')),
+    updated_at    DATETIME DEFAULT (datetime('now'))
+)
+"""
+
 
 def _con():
     con = sqlite3.connect(DB_PATH)
@@ -65,6 +83,7 @@ def _con():
     con.execute("PRAGMA foreign_keys=ON")
     con.execute(CREATE_INBOX_TABLE)
     con.execute(CREATE_ALIASES_TABLE)
+    con.execute(CREATE_FLUXCC_SITES_TABLE)
     # Migrate: add columns if they don't exist yet
     cols = {row[1] for row in con.execute("PRAGMA table_info(inbox_items)")}
     if "notes" not in cols:
@@ -211,6 +230,49 @@ def upsert_alias(match_type: str, match_value: str, client_hint: str,
         con.close()
 
 
+FLUXCC_SITE_FIELDS = {
+    "display_name", "slug", "repo_path", "cf_project", "gitlab_repo",
+    "preview_url", "custom_domain", "status", "auto_email",
+}
+
+
+def upsert_fluxcc_site(client_hint: str, **fields):
+    """Insert or update a FluxCC site record keyed by client_hint."""
+    fields = {k: v for k, v in fields.items() if k in FLUXCC_SITE_FIELDS}
+    con = _con()
+    try:
+        cols = ["client_hint"] + list(fields)
+        updates = ", ".join(f"{k}=excluded.{k}" for k in fields)
+        con.execute(
+            f"INSERT INTO fluxcc_sites ({', '.join(cols)}) "
+            f"VALUES ({', '.join('?' * len(cols))}) "
+            f"ON CONFLICT(client_hint) DO UPDATE SET {updates}, updated_at=datetime('now')",
+            [client_hint] + list(fields.values()),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def get_fluxcc_site(hint: str):
+    """
+    Resolve a FluxCC site by client_hint, slug, or display name
+    (case-insensitive). Returns dict or None.
+    """
+    if not hint:
+        return None
+    con = _con()
+    try:
+        row = con.execute(
+            "SELECT * FROM fluxcc_sites WHERE LOWER(client_hint) = LOWER(?) "
+            "OR LOWER(slug) = LOWER(?) OR LOWER(display_name) = LOWER(?)",
+            (hint, hint, hint),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        con.close()
+
+
 def ensure_project_for_inbox(client_hint: str, division_hint: str, short_slug: str, subject: str) -> int:
     """
     Auto-create a project for an inbox item when no existing project matches.
@@ -348,6 +410,14 @@ if __name__ == "__main__":
     elif len(sys.argv) == 6 and sys.argv[1] == "close-timer-stub":
         _, _, _marker, _state_file, _ledger_file, _log_path = sys.argv
         close_inbox_timer_stub(_marker, _state_file, _ledger_file, _log_path)
+    elif len(sys.argv) == 2 and sys.argv[1] == "dump-fluxcc-sites":
+        con = _con()
+        rows = con.execute(
+            "SELECT client_hint, slug, repo_path, cf_project, gitlab_repo, status, auto_email "
+            "FROM fluxcc_sites ORDER BY client_hint"
+        ).fetchall()
+        print(json.dumps([dict(r) for r in rows], indent=2))
+        con.close()
     elif len(sys.argv) == 2 and sys.argv[1] == "dump-aliases":
         con = _con()
         rows = con.execute(

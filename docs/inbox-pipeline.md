@@ -62,12 +62,10 @@ approval — goes through one of two `requireAdmin` dashboard routes:
   instance, must take a Lightsail snapshot via `lightsail_snapshot.sh`
   before any write, stops and drafts a clarification reply instead of
   guessing).
-- **FluxCC item:** `_dispatch_one` (the unused auto-dispatch path) picks a
-  `FLUXCC_PREAMBLE` and a `~/FluxCC` working directory when
-  `division_hint == "FluxCC"`. The `--redispatch` path used in production
-  does **not** currently do this branch — a FluxCC re-dispatch gets the
-  generic preamble, not the dev-branch/CF-Pages-preview workflow. Known
-  drift, not by design.
+- **FluxCC item:** `_fluxcc_kwargs()` selects the `FLUXCC_PREAMBLE` and a
+  `~/FluxCC` working directory when `division_hint == "FluxCC"`, on every
+  dispatch path (`_dispatch_one` and `--redispatch`). Server-access items
+  still get `SERVER_WORK_PREAMBLE` regardless of division.
 - **Approval gates in general:** `redispatch`, `approve-server`, `preview`
   (records a dev-branch preview URL), `approve-deploy` (merges a FluxCC dev
   branch to main and deletes it), and the Check Mail `ingest-email` route

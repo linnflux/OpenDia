@@ -38,7 +38,12 @@ CLAUDE_BIN = shutil.which("claude") or str(Path.home() / ".local/bin/claude")
 sys.path.insert(0, str(Path(__file__).parent))
 
 from context_header import build_context_header
-from inbox_db import close_inbox_timer_stub, get_inbox_item_by_gmail_id, update_inbox_item
+from inbox_db import (
+    close_inbox_timer_stub,
+    get_fluxcc_site,
+    get_inbox_item_by_gmail_id,
+    update_inbox_item,
+)
 from gmail_helper import (
     _load_service,
     download_attachments,
@@ -469,6 +474,52 @@ def run():
     log.info("Stage B complete")
 
 
+FLUXCC_RESOLVED_TEMPLATE = """\
+## Resolved Site (authoritative — do NOT guess or pick a different repo/branch)
+
+- Repo: ~/FluxCC/{repo_path}
+- Work branch: {dev_branch} — create it from main if it doesn't exist;
+  check it out and build on it if it does. Never any other branch name.
+- CF Pages project: {cf_project} (preview will appear at a
+  https://<branch-prefix>.{cf_project}.pages.dev URL after push)
+
+"""
+
+
+def _fluxcc_kwargs(division_hint: str, inbox_id: int, client_hint: str = "",
+                   gmail_id: str = "") -> dict:
+    """FluxCC items get the dev-branch preview workflow: preamble + ~/FluxCC cwd.
+
+    Used by every dispatch path so redispatched items keep the workflow
+    (previously only _dispatch_one selected it — see inbox-pipeline.md).
+
+    When the client resolves in fluxcc_sites, repo_path and dev_branch are
+    assigned deterministically here and written to the inbox item BEFORE the
+    session spawns — the session is told which repo/branch to use rather than
+    trusted to pick one.
+    """
+    if division_hint != "FluxCC":
+        return {}
+    kwargs = {
+        "preamble": FLUXCC_PREAMBLE,
+        "working_dir": Path.home() / "FluxCC",
+        "inbox_id": inbox_id,
+    }
+    site = get_fluxcc_site(client_hint)
+    if site and site.get("repo_path") and inbox_id:
+        item = get_inbox_item_by_gmail_id(gmail_id) if gmail_id else None
+        repo_path = (item or {}).get("repo_path") or site["repo_path"]
+        dev_branch = (item or {}).get("dev_branch") or f"change/{site['slug']}-{inbox_id}"
+        if gmail_id:
+            update_inbox_item(gmail_id, repo_path=repo_path, dev_branch=dev_branch)
+        kwargs["preamble"] = FLUXCC_PREAMBLE + FLUXCC_RESOLVED_TEMPLATE.format(
+            repo_path=repo_path,
+            dev_branch=dev_branch,
+            cf_project=site.get("cf_project") or site["slug"],
+        )
+    return kwargs
+
+
 def _dispatch_one(
     service, msg_id: str, seen: set, queue_id: str, dispatched_id: str, error_id: str
 ):
@@ -511,34 +562,18 @@ def _dispatch_one(
     inbox_item = get_inbox_item_by_gmail_id(gmail_id)
     inbox_id = inbox_item["id"] if inbox_item else 0
 
-    # FluxCC gets dev-branch preview workflow
-    if division_hint == "FluxCC":
-        session_name = _spawn_session(
-            gmail_id=gmail_id,
-            client_hint=client_hint,
-            division_hint=division_hint,
-            from_addr=from_addr,
-            subject=subject,
-            prompt_text=prompt_text,
-            short_slug=short_slug,
-            estimated_minutes=estimated_minutes,
-            preamble=FLUXCC_PREAMBLE,
-            working_dir=Path.home() / "FluxCC",
-            inbox_id=inbox_id,
-            project_id=project_id,
-        )
-    else:
-        session_name = _spawn_session(
-            gmail_id=gmail_id,
-            client_hint=client_hint,
-            division_hint=division_hint,
-            from_addr=from_addr,
-            subject=subject,
-            prompt_text=prompt_text,
-            short_slug=short_slug,
-            estimated_minutes=estimated_minutes,
-            project_id=project_id,
-        )
+    session_name = _spawn_session(
+        gmail_id=gmail_id,
+        client_hint=client_hint,
+        division_hint=division_hint,
+        from_addr=from_addr,
+        subject=subject,
+        prompt_text=prompt_text,
+        short_slug=short_slug,
+        estimated_minutes=estimated_minutes,
+        project_id=project_id,
+        **_fluxcc_kwargs(division_hint, inbox_id, client_hint, gmail_id),
+    )
 
     log.info(f"  Session spawned: {session_name}")
 
@@ -598,6 +633,8 @@ def redispatch(gmail_id: str):
         operator_notes=item.get("notes"),
         attachment_meta_json=item.get("attachment_meta"),
         project_id=item.get("project_id") or 0,
+        **_fluxcc_kwargs(item.get("division_hint", ""), item.get("id") or 0,
+                         item.get("client_hint", ""), gmail_id),
     )
 
     log.info(f"  New session spawned: {session_name}")
