@@ -1,0 +1,34 @@
+# ~/OpenDia/.od-fallback.conf — outage fallback target
+#
+# Copy to ~/OpenDia/.od-fallback.conf and fill in your own values:
+#     cp examples/od-fallback.conf.example ~/OpenDia/.od-fallback.conf
+#     chmod 600 ~/OpenDia/.od-fallback.conf
+#
+# Read by scripts/od-fallback.sh and scripts/classify_email.py. Kept out of the
+# repo because the correct model IDs are account- and region-specific.
+# See docs/outage-fallback.md for the full runbook.
+
+# AWS region with Bedrock model access enabled.
+OD_FALLBACK_REGION=us-east-1
+
+# Main model — used for interactive Claude Code sessions while failed over.
+#
+# IMPORTANT: use the cross-region INFERENCE PROFILE id (the "us." prefix), not
+# the bare model id. Bare ids fail with "Invocation of model ID ... with
+# on-demand throughput isn't supported".
+#
+# Discover what your account can actually invoke:
+#   aws bedrock list-inference-profiles --region us-east-1 \
+#     --query "inferenceProfileSummaries[?contains(inferenceProfileId,'anthropic')].inferenceProfileId" \
+#     --output text
+OD_FALLBACK_MODEL=us.anthropic.<main-model-id>
+
+# Small/fast model — background tasks and the inbox classifier's auto-failover.
+OD_FALLBACK_SMALL_MODEL=us.anthropic.<small-model-id>
+
+# Verify before you need it. A live invoke is the only real proof:
+#   od-fallback check
+#
+# Note: a model appearing in the Bedrock catalog does NOT mean it is invocable.
+# Some models reject the default data-retention mode. `od-fallback check` makes
+# a real call precisely so this surfaces in calm conditions rather than mid-outage.

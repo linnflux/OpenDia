@@ -97,6 +97,31 @@ No API tokens, keys, or secrets are stored in:
 
 Credentials live outside the project directory, managed by MCP server configs, environment variables, or external tooling (IAM, CLI auth) depending on the integration pattern.
 
+### Deployment Configuration
+
+Resource identifiers that point at a specific deployment's data — spreadsheet IDs, Notion database IDs, workspace IDs — are also kept out of the repository. They aren't secrets, since they're useless without credentials, but they're durable pointers at live business data, and hardcoding them means a fork inherits someone else's spreadsheets.
+
+They live in `~/OpenDia/.opendia.conf` and are read by `scripts/opendia_config.py` (Python) and `dashboard/server/config.js` (Node). One file, two readers. An environment variable of the same name always wins, which keeps one-off runs and CI simple. A missing value raises an error naming the key rather than falling back to a default, because a silently wrong sheet ID writes billing data into the wrong workbook. See [`examples/opendia.conf.example`](examples/opendia.conf.example).
+
+## Resilience
+
+OpenDia runs on Claude Code, which means an outage at a single AI provider stops the AI-dependent parts of the business. On 2026-07-29 that happened: a roughly three-hour `529 Overloaded` event took down the web app, the API, and the CLI together.
+
+The fallback is **the same Claude models on AWS Bedrock** — separate infrastructure with its own SLA. Three things shaped that choice, and the first two generalize beyond this particular provider:
+
+1. **MCP servers and slash commands are client-side.** They're files and subprocesses the CLI owns, so they survive any backend swap. "Keep working during an outage" therefore never required staying on the first-party API. Only the model endpoint changes.
+2. **Fall back to the same model on different infrastructure, not to a different model family.** A different vendor's model means different tool-calling behavior on exactly the multi-step agentic work the system depends on. Swapping infrastructure while holding the model constant means no capability regression to reason about, which is what makes the fallback trustworthy enough to actually use.
+3. **Never route a subscription OAuth token through a proxy.** Anthropic's consumer terms prohibit using Free/Pro/Max OAuth tokens in other products or services, and enforcement has suspended accounts. That trades a three-hour outage for a permanent one. Bedrock is reached through Claude Code's own native support (`CLAUDE_CODE_USE_BEDROCK=1`), not a proxy, so no token is ever re-presented to a third party.
+
+The switch has two halves:
+
+- **Interactive** — a sourced shell script (`scripts/od-fallback.sh`) flips the current shell to Bedrock. `od-fallback on`, resume a session, work normally, `od-fallback off` when the outage clears. Manual by choice: normal operation runs on a subscription that's free at the margin, while Bedrock bills per token, so an automatic flip could silently run up a bill during a blip.
+- **Automated** — the inbox classifier, which runs on a five-minute cron and has no human in the loop, retries in-process against Bedrock when the primary API errors. Bedrock is touched only on failure, so there's no steady-state cost. If it's unconfigured or also failing, the original error is re-raised and behavior is exactly as it was before the fallback existed.
+
+**Test it cold.** A fallback that has never been exercised is not a fallback. `od-fallback check` makes a real model invocation rather than checking imports or listing catalog entries, because the failures worth catching only appear at call time: a missing transitive dependency, an IAM policy that lists models but can't invoke them, or a model that's enabled in the catalog and still rejects every request. Run it periodically, in calm conditions.
+
+Configuration template: [`examples/od-fallback.conf.example`](examples/od-fallback.conf.example). Full runbook, including what degrades and what doesn't: [`docs/outage-fallback.md`](docs/outage-fallback.md).
+
 ## Dashboard
 
 A lightweight dashboard with three coordinated views — **Board** (project kanban), **Inbox** (email pipeline queue), and **Clients** (company-centric report view) — that provide a visual interface to the SQLite database. Built with React and Express, served on a single port, accessible from any machine on the Tailscale network. See [`dashboard/README.md`](dashboard/README.md) for setup and usage details.
@@ -343,6 +368,7 @@ Operator labels email "OpenDia Inbox"
 4. **Concurrent by default.** Multiple tmux sessions, multiple timers, multiple client contexts — all running simultaneously on one server.
 5. **Safety guardrails.** No emails sent without explicit confirmation. No destructive AWS operations. No force pushes. Claude asks before acting on anything irreversible. SSH write operations require explicit Operator confirmation via a PreToolUse hook (see below).
 6. **Accumulating intelligence.** Memory files capture corrections, patterns, and client-specific knowledge. Claude gets smarter about Linnflux operations with every session.
+7. **No single point of failure, including the AI.** The system fails over to the same models on separate infrastructure, and the fallback is verified with real calls on a schedule rather than assumed to work. See [Resilience](#resilience).
 
 ## The Mark
 
@@ -357,6 +383,18 @@ The name OpenDia means "Open Day" — your day is open because OpenDia handles t
 </p>
 
 Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) for the wordmark — a geometric typeface with just enough humanist character to feel approachable without losing its technical edge. "Open" is set in Light (300) and "Dia" in Bold (700), letting the weight contrast carry the emphasis rather than color or size. The typeface's distinctive letterforms — particularly the "O" and "D" — complement the organic geometry of the mark.
+
+## Documentation
+
+| Document | Covers |
+|----------|--------|
+| [`docs/inbox-pipeline.md`](docs/inbox-pipeline.md) | Gmail label → classification → dispatch flow, stage internals, failure handling |
+| [`docs/billing.md`](docs/billing.md) | Both billing pipelines, why they run in parallel, sheet layout |
+| [`docs/calendar-sync.md`](docs/calendar-sync.md) | Notion task due dates → Google Calendar, dedupe and locking |
+| [`docs/outage-fallback.md`](docs/outage-fallback.md) | AI provider outage runbook, what degrades, Bedrock setup |
+| [`docs/session-reaper.md`](docs/session-reaper.md) | Idle session reclamation, protections, disaster recovery |
+
+Reference formats and config templates live in [`examples/`](examples/): a completed [time entry](examples/time-entry.md), a running [timer state file](examples/timer-state.json), and templates for [`.opendia.conf`](examples/opendia.conf.example) and [`.od-fallback.conf`](examples/od-fallback.conf.example).
 
 ## Installation
 
@@ -401,6 +439,20 @@ Copy the scripts into the live location:
 
 ```bash
 cp ~/OpenDia/repo/scripts/* ~/OpenDia/scripts/
+```
+
+Create the deployment config. This holds resource IDs (spreadsheets, Notion databases, workspaces) that are specific to your deployment and deliberately not in the repo — see [Deployment Configuration](#deployment-configuration). Every value is optional; you only need the ones for features you actually run.
+
+```bash
+cp ~/OpenDia/repo/examples/opendia.conf.example ~/OpenDia/.opendia.conf
+chmod 600 ~/OpenDia/.opendia.conf
+# edit ~/OpenDia/.opendia.conf and fill in your own IDs
+```
+
+Check what resolves at any time with:
+
+```bash
+python3 ~/OpenDia/scripts/opendia_config.py
 ```
 
 ### 3. Initialize the database
