@@ -25,7 +25,9 @@ TIMER_BASE = os.path.expanduser("~/OpenDia/Time")
 CREDENTIALS_PATH = os.path.expanduser("~/.claude/mcp-credentials/google-workspace.json")
 TOKENS_PATH = os.path.expanduser("~/.claude/mcp-credentials/google-workspace/tokens.json")
 DB_PATH = os.path.expanduser("~/OpenDia/opendia.db")
-SPREADSHEET_ID = "1VowYnKQG3lM-RZIVqgtlCHc2QSx364epvdiRlSMsLFY"
+from opendia_config import get_id  # noqa: E402
+
+SPREADSHEET_ID = get_id("BILLING_MASTER_SHEET_ID")
 TAB_NAME = "OpenDia"
 
 

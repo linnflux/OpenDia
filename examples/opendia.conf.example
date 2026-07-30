@@ -1,0 +1,42 @@
+# ~/OpenDia/.opendia.conf — deployment-specific resource IDs
+#
+# Copy to ~/OpenDia/.opendia.conf and fill in your own values:
+#     cp examples/opendia.conf.example ~/OpenDia/.opendia.conf
+#     chmod 600 ~/OpenDia/.opendia.conf
+#
+# These are NOT secrets — they are useless without credentials — but they are
+# durable pointers at live business data, so they are kept out of this public
+# repository. Keeping them here also means a fork does not inherit someone
+# else's spreadsheets baked into the source.
+#
+# Read by scripts/opendia_config.py (Python) and dashboard/server/config.js
+# (Node). An environment variable of the same name always wins, which is
+# convenient for one-off runs and CI.
+#
+# Every value below is required only by the feature that uses it. If you do not
+# run the billing scripts, you do not need the sheet IDs.
+
+# --- Google Sheets ----------------------------------------------------------
+# The ID is the long string in the sheet URL:
+#   https://docs.google.com/spreadsheets/d/<THIS PART>/edit
+
+# Target of /billing-month — the unified monthly billing tab.
+BILLING_OPS_SHEET_ID=
+
+# Target of /monthly-billing — the older billing workbook.
+# Only needed if you run both pipelines (see docs/billing.md).
+BILLING_MASTER_SHEET_ID=
+
+# --- Notion -----------------------------------------------------------------
+# The database ID is in the database URL, before the "?v=" query string.
+# Dashes are optional; both forms work.
+
+# Tasks database — read by calendar sync, deadline checks, and the intake pipeline.
+NOTION_TASKS_DB_ID=
+
+# Build Registry table — only needed for the static-site intake pipeline.
+NOTION_BUILD_REGISTRY_ID=
+
+# --- Toggl ------------------------------------------------------------------
+# Numeric workspace ID, visible in the Toggl web app URL.
+TOGGL_WORKSPACE_ID=

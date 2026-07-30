@@ -33,9 +33,11 @@ TOKENS_PATH = os.path.expanduser("~/.claude/mcp-credentials/google-workspace/tok
 DB_PATH = os.path.expanduser("~/OpenDia/opendia.db")
 TIMER_BASE = os.path.expanduser("~/OpenDia/Time")
 
-NEW_SHEET_ID = "1irjs6n2XoG_FDDQiE7_7V5Buvo0btbEUS5_roVEOoOY"
+from opendia_config import get_id  # noqa: E402
+
+NEW_SHEET_ID = get_id("BILLING_OPS_SHEET_ID")
 CLIENTS_TAB = "Clients"
-TOGGL_WORKSPACE = "1879769"
+TOGGL_WORKSPACE = get_id("TOGGL_WORKSPACE_ID")
 
 TOGGL_API_BASE = "https://api.track.toggl.com/api/v9"
 TOGGL_REPORTS_BASE = "https://api.track.toggl.com/reports/api/v3"

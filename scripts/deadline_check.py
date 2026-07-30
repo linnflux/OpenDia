@@ -24,7 +24,9 @@ import requests
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TASKS_DB_ID = "aff52e96-1dfd-438c-8b15-84c446afd054"
+from opendia_config import get_id  # noqa: E402
+
+TASKS_DB_ID = get_id("NOTION_TASKS_DB_ID")
 NOTION_API_VERSION = "2022-06-28"
 LOOKBACK_DAYS = 90
 SKIP_STATUSES = {"Completed", "Reference"}

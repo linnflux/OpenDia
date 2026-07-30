@@ -121,8 +121,10 @@ GLAB_PATH = Path.home() / ".local" / "bin" / "glab"
 GITLAB_TOKEN_PATH = Path.home() / ".claude" / "mcp-credentials" / "gitlab" / "token"
 
 # Notion
-BUILD_REGISTRY_TABLE_ID = "3445e0a9-e689-8182-9c7c-e4ea089aaa46"
-TASKS_DB_ID = "aff52e96-1dfd-438c-8b15-84c446afd054"
+from opendia_config import get_id  # noqa: E402
+
+BUILD_REGISTRY_TABLE_ID = get_id("NOTION_BUILD_REGISTRY_ID")
+TASKS_DB_ID = get_id("NOTION_TASKS_DB_ID")
 NOTION_API_BASE = "https://api.notion.com/v1"
 
 # Cloudflare

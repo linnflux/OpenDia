@@ -2,7 +2,7 @@ import http from "http";
 import express from "express";
 import { resolve, dirname, sep } from "path";
 import { fileURLToPath } from "url";
-import { PORT } from "./config.js";
+import { PORT, BILLING_MASTER_SHEET_ID } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
@@ -679,7 +679,9 @@ app.post("/api/billing/push", requireAdmin, (req, res) => {
       ok: true,
       month,
       rows: rowMatch ? parseInt(rowMatch[1], 10) : null,
-      sheet_url: "https://docs.google.com/spreadsheets/d/1VowYnKQG3lM-RZIVqgtlCHc2QSx364epvdiRlSMsLFY/edit#gid=0",
+      sheet_url: BILLING_MASTER_SHEET_ID
+        ? `https://docs.google.com/spreadsheets/d/${BILLING_MASTER_SHEET_ID}/edit#gid=0`
+        : null,
       stdout: out.trim(),
     });
   });

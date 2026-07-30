@@ -23,7 +23,9 @@ SQUARE_TOKEN_FILE = os.path.expanduser("~/.claude.json")
 LOCATION_ID = "6RGNNJJXK66KR"
 SQUARE_API_BASE = "https://connect.squareup.com/v2"
 
-NEW_SHEET_ID = "1irjs6n2XoG_FDDQiE7_7V5Buvo0btbEUS5_roVEOoOY"
+from opendia_config import get_id  # noqa: E402
+
+NEW_SHEET_ID = get_id("BILLING_OPS_SHEET_ID")
 CREDENTIALS_PATH = os.path.expanduser("~/.claude/mcp-credentials/google-workspace.json")
 TOKENS_PATH = os.path.expanduser("~/.claude/mcp-credentials/google-workspace/tokens.json")
 
