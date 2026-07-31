@@ -90,6 +90,12 @@ const STATUS_COLORS = {
   done:       { bg: "#1a2e1a", text: "#86efac", label: "Done" },
   error:      { bg: "#3b1a1a", text: "#f87171", label: "Error" },
   deployed:   { bg: "#1a2a3a", text: "#38bdf8", label: "Deployed" },
+  "new-lead":       { bg: "#3a2f1a", text: "#fbbf24", label: "Awaiting approval" },
+  "lead-approving": { bg: "#1a3a2a", text: "#4ade80", label: "Researching" },
+  "lead-approved":  { bg: "#1a2e1a", text: "#86efac", label: "Approved" },
+  "intake-held":    { bg: "#3a2f1a", text: "#fbbf24", label: "Held" },
+  scaffolding:      { bg: "#1a3a2a", text: "#4ade80", label: "Scaffolding" },
+  "first-draft":    { bg: "#1a2a3a", text: "#38bdf8", label: "First draft" },
 };
 
 function extractDomain(fromAddr) {
@@ -128,6 +134,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   const [approveResult, setApproveResult] = useState(null); // { ok } | { error }
   const [deployApproving, setDeployApproving] = useState(false);
   const [deployResult, setDeployResult] = useState(null); // { ok } | { error }
+  const [leadApproving, setLeadApproving] = useState(false);
+  const [leadResult, setLeadResult] = useState(null); // { ok } | { error }
   const [logLines, setLogLines] = useState("");
   const [logExists, setLogExists] = useState(false);
   const { companies } = useCompaniesList();
@@ -258,7 +266,11 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
   }
 
   const isServerWork = item.requires_server_access === 1 || item.requires_server_access === true;
-  const canRedispatch = ["classified", "done", "error", "dispatched"].includes(item.status) && !isServerWork;
+  const isLead = (item.gmail_id || "").startsWith("tally:68QDQA:");
+  // Leads have no prompt_text or short_slug, so the Claude-session dispatch
+  // path would fail on them.
+  const canRedispatch = ["classified", "done", "error", "dispatched"].includes(item.status)
+    && !isServerWork && !isLead;
   const hasPreview = !!item.dev_preview_url;
 
   async function handleApproveDeploy() {
@@ -277,6 +289,25 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
       setDeployResult({ error: e.message || "Deploy failed" });
     } finally {
       setDeployApproving(false);
+    }
+  }
+
+  async function handleApproveLead() {
+    setLeadApproving(true);
+    setLeadResult(null);
+    try {
+      const r = await fetch(`/api/inbox/${item.id}/approve-lead`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Approval failed");
+      setLeadResult({ ok: true });
+    } catch (e) {
+      setLeadResult({ error: e.message || "Approval failed" });
+    } finally {
+      setLeadApproving(false);
     }
   }
 
@@ -460,6 +491,47 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
             {deployResult?.error && (
               <div className="inbox-server-result inbox-server-result-err">
                 {deployResult.error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tally lead gate — nothing has run yet but this row and a draft */}
+        {isLead && ["new-lead", "lead-approving"].includes(item.status) && (
+          <div className="inbox-server-gate">
+            <div className="inbox-server-gate-body">
+              <span
+                className="inbox-card-server-flag"
+                style={{ background: "#3a2f1a", color: "#fbbf24" }}
+              >
+                LEAD
+              </span>
+              <span className="inbox-server-gate-info">
+                {item.status === "lead-approving"
+                  ? "Research is running — Notion task, Build Registry row, and mockups."
+                  : "Nothing has run for this lead yet. Approving creates a Notion task, "
+                    + "a Build Registry row, and 2-3 Gemini mockups (~30-90s)."}
+              </span>
+              <button
+                className="inbox-approve-btn"
+                onClick={handleApproveLead}
+                disabled={leadApproving || item.status === "lead-approving"}
+              >
+                {leadApproving || item.status === "lead-approving"
+                  ? "Researching…"
+                  : item.error_text
+                    ? "↺ Retry research"
+                    : "Approve & Research"}
+              </button>
+            </div>
+            {leadResult?.ok && (
+              <div className="inbox-server-result inbox-server-result-ok">
+                Research started — the status updates here within about 15 seconds.
+              </div>
+            )}
+            {leadResult?.error && (
+              <div className="inbox-server-result inbox-server-result-err">
+                {leadResult.error}
               </div>
             )}
           </div>

@@ -1032,6 +1032,41 @@ app.post("/api/inbox/:id/approve-server", requireAdmin, (req, res) => {
   }
 });
 
+// Runs the gated half of the Tally lead intake: Notion task, Build Registry
+// row, and 2-3 Gemini mockups. Detached rather than in-process because the work
+// is 30-90s (and up to ~6 min worst case on image-gen timeouts); the client
+// picks up the status change on its normal 15s poll.
+app.post("/api/inbox/:id/approve-lead", requireAdmin, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const item = getInboxItemById(id);
+    if (!item) return res.status(404).json({ error: "inbox item not found" });
+    if (!/^tally:68QDQA:[A-Za-z0-9_-]+$/.test(item.gmail_id || "")) {
+      return res.status(400).json({ error: "item is not a Tally lead" });
+    }
+    if (item.status !== "new-lead") {
+      return res.status(400).json({ error: `lead is ${item.status}, not awaiting approval` });
+    }
+
+    const scriptPath = `${process.env.HOME}/OpenDia/scripts/intake_pipeline.py`;
+    // The pipeline needs the API keys the cron wrapper sources from inbox.env;
+    // the dashboard's own env does not carry them.
+    const child = spawn(
+      "bash",
+      ["-lc",
+       `set -a; [ -f "$HOME/.config/opendia/inbox.env" ] && . "$HOME/.config/opendia/inbox.env"; set +a; ` +
+       `exec python3 "${scriptPath}" approve-lead ${id}`],
+      { detached: true, stdio: "ignore", env: { ...process.env } },
+    );
+    child.unref();
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/inbox/:id/approve-lead error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.patch("/api/inbox/:id/preview", requireAdmin, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);

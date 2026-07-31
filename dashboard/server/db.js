@@ -324,6 +324,8 @@ export function ensureInboxTable() {
       dev_preview_url       TEXT,
       dev_branch            TEXT,
       repo_path             TEXT,
+      attachment_meta       TEXT,
+      lead_approved_at      TEXT,
       created_at            DATETIME DEFAULT (datetime('now')),
       updated_at            DATETIME DEFAULT (datetime('now'))
     )
@@ -358,6 +360,12 @@ export function ensureInboxTable() {
   if (!cols.includes("repo_path")) {
     db.exec("ALTER TABLE inbox_items ADD COLUMN repo_path TEXT");
   }
+  if (!cols.includes("attachment_meta")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN attachment_meta TEXT");
+  }
+  if (!cols.includes("lead_approved_at")) {
+    db.exec("ALTER TABLE inbox_items ADD COLUMN lead_approved_at TEXT");
+  }
 }
 
 export function ensureClientAliasesTable() {
@@ -377,12 +385,15 @@ export function ensureClientAliasesTable() {
 
 export function getAllInboxItems() {
   ensureInboxTable();
+  // attachment_meta holds the stashed Tally payload (respondent name, email,
+  // phone). This list is re-polled every 15s, so keep it out of the wire
+  // format; getInboxItemById still returns it for routes that need it.
   return getDb().prepare(`
     SELECT i.*, p.name AS project_name
     FROM inbox_items i
     LEFT JOIN projects p ON i.project_id = p.id
     ORDER BY i.created_at DESC LIMIT 200
-  `).all();
+  `).all().map(({ attachment_meta, ...rest }) => rest);
 }
 
 export function getInboxItemsByProject(projectId) {

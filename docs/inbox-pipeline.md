@@ -172,10 +172,29 @@ they're waiting on the Operator to click Dispatch.
 ## FluxCC intake, a separate pipeline
 
 `intake-tick.sh` / `intake_pipeline.py` runs on the same `*/5 * * * *` cadence
-and shares `~/.config/opendia/inbox.env` for `ANTHROPIC_API_KEY`, but it has
-no Gmail label trigger — it polls two Tally forms (`68QDQA` triage/lead,
-`QKBRQl` deep intake) and runs an 8-stage new-client onboarding flow (design
-research, Nick notification draft, git scaffold, Cloudflare Pages deploy,
-hero image, final notification). Pause with `touch ~/OpenDia/intake.disabled`.
-It does not touch the `inbox_items` table or the Gmail-based Inbox view —
-don't conflate the two when troubleshooting either.
+and shares `~/.config/opendia/inbox.env`, but it has no Gmail label trigger —
+it polls two Tally forms (`68QDQA` triage/lead, `QKBRQl` deep intake) and runs
+new-client onboarding. Pause with `touch ~/OpenDia/intake.disabled`.
+
+It **does** write `inbox_items` rows (`gmail_id` = `tally:<form>:<submission>`),
+so Tally leads appear in the same Inbox view as email items. They carry no
+`prompt_text`/`short_slug` and must never go through the Claude-session
+dispatch path.
+
+**Both Tally forms are public and unauthenticated, so the pipeline is gated.**
+The cron may only create the inbox row and draft a notice to Nick. Everything
+that costs money or writes to a durable shared record — the Notion task, the
+Build Registry row (which feeds `fluxcc_sites`), screenshots of submitter-
+supplied URLs, and the Gemini mockups — waits for **Approve & Research** in the
+dashboard inbox tab (`POST /api/inbox/:id/approve-lead` → `intake_pipeline.py
+approve-lead <id>`). Scaffolding (GitLab repo, CF Pages project, live deploy)
+additionally refuses unless the matching lead has `lead_approved_at` set and is
+not dismissed; an early deep-intake submission is parked as `intake-held` with
+its payload stashed rather than raised, because `_process_form` marks a
+submission seen on the error path too.
+
+Lead statuses: `new-lead` (awaiting approval) → `lead-approving` → `lead-approved`
+→ `scaffolding` → `first-draft`. Failed approvals return to `new-lead` with
+`error_text` set, never `error` — the modal treats `error` as re-dispatchable.
+Per-step idempotency markers live in `inbox_items.attachment_meta`, which also
+stashes the raw submission so approval needs no Tally re-fetch.

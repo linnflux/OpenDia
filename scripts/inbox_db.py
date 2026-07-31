@@ -107,6 +107,8 @@ def _con():
         con.execute("ALTER TABLE inbox_items ADD COLUMN dev_branch TEXT")
     if "repo_path" not in cols:
         con.execute("ALTER TABLE inbox_items ADD COLUMN repo_path TEXT")
+    if "lead_approved_at" not in cols:
+        con.execute("ALTER TABLE inbox_items ADD COLUMN lead_approved_at TEXT")
     con.commit()
     return con
 

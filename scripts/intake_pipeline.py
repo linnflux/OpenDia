@@ -292,6 +292,8 @@ def _db_conn():
         ("error_text", "TEXT"),
         ("client_hint", "TEXT"),
         ("division_hint", "TEXT"),
+        ("attachment_meta", "TEXT"),
+        ("lead_approved_at", "TEXT"),
     ]:
         if col not in cols:
             conn.execute(f"ALTER TABLE inbox_items ADD COLUMN {col} {defn}")
@@ -301,7 +303,7 @@ def _db_conn():
 
 def upsert_inbox_row(gmail_id, from_addr, subject, status,
                      client_hint, division_hint="WordFlux",
-                     notes=None, error_text=None):
+                     notes=None, error_text=None, attachment_meta=None):
     """Insert or update inbox_items row keyed by gmail_id. Returns row id."""
     conn = _db_conn()
     try:
@@ -314,16 +316,18 @@ def upsert_inbox_row(gmail_id, from_addr, subject, status,
                 parts.append("notes = ?"); vals.append(notes)
             if error_text is not None:
                 parts.append("error_text = ?"); vals.append(error_text)
+            if attachment_meta is not None:
+                parts.append("attachment_meta = ?"); vals.append(attachment_meta)
             vals.append(gmail_id)
             conn.execute(f"UPDATE inbox_items SET {', '.join(parts)} WHERE gmail_id = ?", vals)
         else:
             conn.execute("""
                 INSERT INTO inbox_items
                   (gmail_id, from_addr, subject, status, client_hint, division_hint,
-                   notes, error_text, priority)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'normal')
+                   notes, error_text, attachment_meta, priority)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal')
             """, (gmail_id, from_addr, subject, status, client_hint, division_hint,
-                  notes, error_text))
+                  notes, error_text, attachment_meta))
         conn.commit()
         row = conn.execute("SELECT id FROM inbox_items WHERE gmail_id = ?", (gmail_id,)).fetchone()
         return row["id"] if row else None
@@ -343,18 +347,82 @@ def get_inbox_row_by_gmail_id(gmail_id):
 
 
 def find_lead_by_email(email):
-    """Match QKBRQl email to a prior 68QDQA lead inbox row."""
+    """Match QKBRQl email to a prior 68QDQA lead inbox row.
+
+    Prefers an approved lead over a newer unapproved or dismissed one, so a
+    stray second submission from the same address cannot mask the real lead.
+    """
+    conn = _db_conn()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM inbox_items "
+            "WHERE from_addr = ? AND gmail_id LIKE 'tally:68QDQA:%' "
+            "ORDER BY created_at DESC",
+            (email,),
+        )]
+        if not rows:
+            return None
+        live = [r for r in rows if r.get("status") != "dismissed"] or rows
+        for r in live:
+            if r.get("lead_approved_at"):
+                return r
+        return live[0]
+    finally:
+        conn.close()
+
+
+def get_inbox_row_by_id(inbox_id):
     conn = _db_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM inbox_items "
-            "WHERE from_addr = ? AND gmail_id LIKE 'tally:68QDQA:%' "
-            "ORDER BY created_at DESC LIMIT 1",
-            (email,),
+            "SELECT * FROM inbox_items WHERE id = ?", (int(inbox_id),)
         ).fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def get_intake_meta(gmail_id):
+    """Read the intake progress blob stashed in inbox_items.attachment_meta."""
+    conn = _db_conn()
+    try:
+        row = conn.execute(
+            "SELECT attachment_meta FROM inbox_items WHERE gmail_id = ?", (gmail_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row["attachment_meta"]:
+        return {}
+    try:
+        return json.loads(row["attachment_meta"])
+    except (ValueError, TypeError):
+        return {}
+
+
+def set_intake_meta(gmail_id, **kv):
+    """Merge keys into the intake progress blob. upsert_inbox_row cannot do this
+    without also writing status, which would clobber the approval state."""
+    meta = get_intake_meta(gmail_id)
+    meta.update(kv)
+    conn = _db_conn()
+    try:
+        conn.execute(
+            "UPDATE inbox_items SET attachment_meta = ?, updated_at = datetime('now') "
+            "WHERE gmail_id = ?",
+            (json.dumps(meta), gmail_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return meta
+
+
+def set_intake_artifact(gmail_id, **kv):
+    """Merge keys into meta['artifacts'] — the per-step idempotency markers."""
+    meta = get_intake_meta(gmail_id)
+    artifacts = meta.get("artifacts") or {}
+    artifacts.update(kv)
+    return set_intake_meta(gmail_id, artifacts=artifacts)
 
 
 # ── Notion REST helpers ───────────────────────────────────────────────────────
@@ -610,183 +678,433 @@ def gmail_draft_to_nick(subject, body):
     return create_draft(service, "nick@linnflux.com", subject, body)
 
 
-# ── Stage 1 + 2 + 4: triage_lead ─────────────────────────────────────────────
+# ── Lead intake: notify on cron, research on approval ─────────────────────────
+#
+# Both Tally forms are public and unauthenticated. Everything that costs money
+# or writes to a durable shared record (the Notion Build Registry feeds
+# fluxcc_sites, which is the changes@flux.cc resolution chain) waits for an
+# operator approval in the dashboard inbox tab. The cron may only create the
+# inbox row and draft a notice to Nick.
+
+LEAD_PENDING = "new-lead"          # notified, awaiting approval
+LEAD_APPROVING = "lead-approving"  # approve worker in flight
+LEAD_APPROVED = "lead-approved"    # gated research done; scaffold permitted
+
+
+def _lead_fields(submission):
+    """Normalize a 68QDQA submission into the fields both stages need."""
+    f = normalize(submission, FIELD_MAP_68QDQA)
+    pages_needed = f.get("pages_needed") or []
+    site_type_raw = first_label(f.get("site_type")) or "Something else"
+    return {
+        "sid": submission["id"],
+        "biz_name": (f.get("biz_name") or f.get("name") or "Unknown").strip(),
+        "email": (f.get("email") or "").strip(),
+        "phone": (f.get("phone") or "").strip(),
+        "name": (f.get("name") or "").strip(),
+        "site_type_raw": site_type_raw,
+        "variant": VARIANT_MAP.get(site_type_raw, "fluxcc"),
+        "design_desc": f.get("design_description") or "",
+        "admired_raw": f.get("admired_urls") or "",
+        "biz_desc": f.get("biz_description") or "",
+        "design_intent": first_label(f.get("design_intent")) or "",
+        "content_intent": first_label(f.get("content_intent")) or "",
+        "pages_needed": pages_needed,
+        "pages_str": (", ".join(pages_needed) if isinstance(pages_needed, list)
+                      else str(pages_needed or "")),
+        "uploaded_designs": file_mimes(f.get("uploaded_designs")),
+    }
+
+
+def _qkbrql_url(biz_name, email):
+    return (f"https://tally.so/r/{FORM_QKBRQL}"
+            f"?XG9JPz={urllib.parse.quote(biz_name)}"
+            f"&0MGBRA={urllib.parse.quote(email)}")
+
 
 def triage_lead(submission):
-    """Process a 68QDQA submission: inbox row, design research, Nick draft."""
-    sid = submission["id"]
-    f = normalize(submission, FIELD_MAP_68QDQA)
+    """Notify only. Creates the inbox row and drafts a notice to Nick.
 
-    biz_name   = (f.get("biz_name") or f.get("name") or "Unknown").strip()
-    email      = (f.get("email") or "").strip()
-    phone      = (f.get("phone") or "").strip()
-    name       = (f.get("name") or "").strip()
-    site_type_raw = first_label(f.get("site_type")) or "Something else"
-    variant    = VARIANT_MAP.get(site_type_raw, "fluxcc")
-    design_desc = f.get("design_description") or ""
-    admired_raw = f.get("admired_urls") or ""
-    biz_desc   = f.get("biz_description") or ""
-    design_intent = first_label(f.get("design_intent")) or ""
-    content_intent = first_label(f.get("content_intent")) or ""
-    pages_needed  = f.get("pages_needed") or []
-    uploaded_designs = file_mimes(f.get("uploaded_designs"))
-
-    # ── Stage 1: slug, inbox row, Registry row, Notion task ──
+    Deliberately does no Notion writes, no outbound fetches of submitter-supplied
+    URLs, and no image generation — all of that is behind approve_lead().
+    """
+    d = _lead_fields(submission)
+    sid, biz_name = d["sid"], d["biz_name"]
     gmail_id = f"tally:{FORM_68QDQA}:{sid}"
 
-    # Re-run safety: reuse slug if row already exists
     existing_row = get_inbox_row_by_gmail_id(gmail_id)
     if existing_row:
+        # Already handled. Returning early keeps a reprocess (crash mid-tick, or
+        # a lost .intake-seen.json) from regressing an approved lead's status or
+        # drafting a duplicate notice.
+        if existing_row["status"] != LEAD_PENDING:
+            print(f"  Already processed (status={existing_row['status']}) — skipping {sid}")
+            return existing_row["client_hint"], d["variant"]
         slug = existing_row["client_hint"]
     else:
-        base_slug = slugify(biz_name)
-        slug = unique_slug(base_slug, exclude_gmail_id=gmail_id)
+        slug = unique_slug(slugify(biz_name), exclude_gmail_id=gmail_id)
 
     notes = (f"tally:{FORM_68QDQA} submission_id={sid}; "
-             f"variant={variant}; site_type={site_type_raw}")
+             f"variant={d['variant']}; site_type={d['site_type_raw']}")
+    # Only stash on first sight. Re-stashing would overwrite the artifacts blob
+    # and defeat the idempotency guards that live in it.
+    stash = None if existing_row else json.dumps(
+        {"v": 1, "form": FORM_68QDQA, "submission_id": sid,
+         "submission": submission, "artifacts": {}})
     inbox_id = upsert_inbox_row(
-        gmail_id=gmail_id, from_addr=email,
-        subject=f"[intake] {biz_name}", status="new-lead",
+        gmail_id=gmail_id, from_addr=d["email"],
+        subject=f"[intake] {biz_name}", status=LEAD_PENDING,
         client_hint=slug, division_hint="WordFlux", notes=notes,
+        attachment_meta=stash,
     )
     print(f"  inbox row id={inbox_id} slug={slug}")
 
-    # Build Registry
-    try:
-        if not find_registry_row_id(slug):
-            append_registry_row(client=biz_name, slug=slug, status="lead")
-            print(f"  Registry row appended: {slug}")
-        else:
-            print(f"  Registry row already exists: {slug}")
-    except Exception as e:
-        print(f"  [warn] Registry: {e}", file=sys.stderr)
+    if (get_intake_meta(gmail_id).get("artifacts") or {}).get("notify_draft_id"):
+        print("  Notify draft already sent — skipping")
+        return slug, d["variant"]
 
-    # Notion task
-    task_url = ""
-    try:
-        task_body = (
-            f"Lead from Tally 68QDQA\n"
-            f"Contact: {name} <{email}> {phone}\n"
-            f"Business: {biz_name}\n"
-            f"Site type: {site_type_raw} → template: {variant}\n"
-            f"Design intent: {design_intent}\n"
-            f"Design description: {design_desc}\n"
-            f"Business description: {biz_desc}\n"
-            f"Pages: {', '.join(pages_needed) if isinstance(pages_needed, list) else pages_needed}\n"
-            f"Inbox row id: {inbox_id} | Submission: {sid}\n"
-            f"Next step: Send QKBRQl link manually with pre-fill params."
-        )
-        task_page = create_notion_task(f"New lead: {biz_name}", task_body)
-        task_url = task_page.get("url", "")
-        print(f"  Notion task: {task_url}")
-    except Exception as e:
-        print(f"  [warn] Notion task: {e}", file=sys.stderr)
-
-    # ── Stage 2: Design research ──
-    DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    ref_paths = []
-    png_paths = []
-
-    if uploaded_designs:
-        # Skip generation — download uploads instead
-        for i, (url, mime) in enumerate(uploaded_designs[:3]):
-            ext = ".svg" if "svg" in mime else ".png" if "png" in mime else ".jpg"
-            dest = DEBUG_DIR / f"intake-{slug}-upload-{i+1}{ext}"
-            try:
-                download_file(url, dest)
-                ref_paths.append(str(dest))
-                png_paths.append(str(dest))
-                print(f"  Upload {i+1} → {dest}")
-            except Exception as e:
-                print(f"  [warn] upload download: {e}", file=sys.stderr)
-    else:
-        # Screenshot admired URLs
-        url_list = [
-            u.strip()
-            for u in re.split(r"[\n,]+", admired_raw)
-            if u.strip().startswith("http")
-        ]
-        for i, url in enumerate(url_list[:3], 1):
-            ref_path = DEBUG_DIR / f"intake-{slug}-ref-{i}.png"
-            try:
-                screenshot_url(url, str(ref_path))
-                ref_paths.append(str(ref_path))
-                print(f"  Screenshot {i} → {ref_path}")
-            except Exception as e:
-                print(f"  [warn] screenshot {url}: {e}", file=sys.stderr)
-
-        # 2-3 Nano Banana mockups
-        site_label = site_type_raw.lower().replace(" / ", " ")
-        prompts = [
-            (f"A modern website hero section mockup for a {site_label} business called "
-             f"'{biz_name}'. Style: {design_desc or 'clean and professional'}. "
-             f"Full-width web layout, realistic browser render."),
-            (f"Homepage wireframe mockup for '{biz_name}', a {site_label}. "
-             f"Visual style: {design_desc or 'contemporary'}. "
-             f"Show nav bar, hero, and one content section."),
-        ]
-        if biz_desc:
-            prompts.append(
-                f"Brand mood board for '{biz_name}': {biz_desc}. "
-                f"Style direction: {design_desc or 'professional'}. "
-                f"Color palette, typography, and visual feel."
-            )
-        for i, prompt in enumerate(prompts, 1):
-            out = DEBUG_DIR / f"intake-{slug}-{ts}-{i}.png"
-            try:
-                path = run_nano_banana(prompt, out, reference_paths=ref_paths or None)
-                png_paths.append(path)
-                print(f"  Nano Banana {i} → {path}")
-            except Exception as e:
-                print(f"  [warn] nano_banana {i}: {e}", file=sys.stderr)
-
-    # ── Stage 4: Draft to Nick ──
-    qkbrql_url = (
-        f"https://tally.so/r/QKBRQl"
-        f"?XG9JPz={urllib.parse.quote(biz_name)}"
-        f"&0MGBRA={urllib.parse.quote(email)}"
-    )
-    pages_str = (", ".join(pages_needed) if isinstance(pages_needed, list)
-                 else str(pages_needed or ""))
-    png_lines = "\n".join(f"  {p}" for p in png_paths) if png_paths else "  (none)"
     body = (
         f"New flux.cc lead arrived.\n\n"
-        f"Contact: {name}\n"
-        f"Email: {email}\n"
-        f"Phone: {phone or '(not provided)'}\n"
+        f"Contact: {d['name']}\n"
+        f"Email: {d['email']}\n"
+        f"Phone: {d['phone'] or '(not provided)'}\n"
         f"Business: {biz_name}\n"
-        f"Description: {biz_desc or '(not provided)'}\n\n"
-        f"Site type: {site_type_raw}\n"
-        f"Template: {variant}\n"
-        f"Design intent: {design_intent or '(not specified)'}\n"
-        f"Design description: {design_desc or '(not provided)'}\n"
-        f"Content intent: {content_intent or '(not specified)'}\n"
-        f"Pages needed: {pages_str or '(not specified)'}\n\n"
-        f"Admired URLs: {admired_raw.strip() or '(none)'}\n\n"
-        f"Design mockups:\n{png_lines}\n\n"
-        f"Notion task: {task_url or '(creation failed)'}\n"
-        f"Build Registry: https://www.notion.so/{BUILD_REGISTRY_TABLE_ID.replace('-','')}\n\n"
-        f"ACTION REQUIRED: Send QKBRQl link to {name or email} manually:\n"
-        f"{qkbrql_url}\n\n"
-        f"(Stage 3 — auto-draft to lead — is skipped. Manual follow-up only.)\n"
+        f"Description: {d['biz_desc'] or '(not provided)'}\n\n"
+        f"Site type: {d['site_type_raw']}\n"
+        f"Template: {d['variant']}\n"
+        f"Design intent: {d['design_intent'] or '(not specified)'}\n"
+        f"Design description: {d['design_desc'] or '(not provided)'}\n"
+        f"Content intent: {d['content_intent'] or '(not specified)'}\n"
+        f"Pages needed: {d['pages_str'] or '(not specified)'}\n\n"
+        f"Admired URLs: {d['admired_raw'].strip() or '(none)'}\n\n"
+        f"STATUS: awaiting your approval. Nothing else has run — no Notion task,\n"
+        f"no Build Registry row, no mockups, no repo, no deploy.\n\n"
+        f"Approve (creates the Notion task + Registry row + 2-3 Gemini mockups, ~30-90s):\n"
+        f"  dashboard → Inbox → \"[intake] {biz_name}\" → Approve & Research\n"
+        f"  or: python3 ~/OpenDia/scripts/intake_pipeline.py approve-lead {inbox_id}\n\n"
+        f"Dismiss: dashboard → Inbox → the item → Dismiss.\n\n"
+        f"After approving, send the QKBRQl link to {d['name'] or d['email']}:\n"
+        f"  {_qkbrql_url(biz_name, d['email'])}\n\n"
         f"Inbox row id: {inbox_id} | Submission: {sid}"
     )
     try:
-        gmail_draft_to_nick(f"[flux.cc] New lead: {biz_name}", body)
+        draft = gmail_draft_to_nick(f"[flux.cc] New lead: {biz_name}", body)
+        set_intake_artifact(gmail_id, notify_draft_id=(draft or {}).get("id", "sent"))
         print(f"  Draft created: [flux.cc] New lead: {biz_name}")
     except Exception as e:
         print(f"  [warn] Gmail draft: {e}", file=sys.stderr)
 
-    print(f"  triage_lead OK: slug={slug} variant={variant}")
-    return slug, variant
+    print(f"  triage_lead OK (awaiting approval): slug={slug} variant={d['variant']}")
+    return slug, d["variant"]
+
+
+def run_lead_research(submission, row):
+    """The gated work: Registry row, Notion task, screenshots, mockups.
+
+    Every step is guarded on the artifacts blob so a second approval is a no-op
+    rather than a duplicate Notion task and another round of Gemini billing.
+    """
+    d = _lead_fields(submission)
+    gmail_id, slug = row["gmail_id"], row["client_hint"]
+    artifacts = dict((get_intake_meta(gmail_id).get("artifacts") or {}))
+    warnings = []
+
+    # Build Registry
+    if not artifacts.get("registry_row_id"):
+        try:
+            row_id = find_registry_row_id(slug)
+            if not row_id:
+                append_registry_row(client=d["biz_name"], slug=slug, status="lead")
+                row_id = find_registry_row_id(slug)
+                print(f"  Registry row appended: {slug}")
+            else:
+                print(f"  Registry row already exists: {slug}")
+            artifacts["registry_row_id"] = row_id or "unknown"
+        except Exception as e:
+            warnings.append(f"Registry: {e}")
+            print(f"  [warn] Registry: {e}", file=sys.stderr)
+
+    # Notion task
+    if not artifacts.get("task_url"):
+        try:
+            task_body = (
+                f"Lead from Tally {FORM_68QDQA}\n"
+                f"Contact: {d['name']} <{d['email']}> {d['phone']}\n"
+                f"Business: {d['biz_name']}\n"
+                f"Site type: {d['site_type_raw']} → template: {d['variant']}\n"
+                f"Design intent: {d['design_intent']}\n"
+                f"Design description: {d['design_desc']}\n"
+                f"Business description: {d['biz_desc']}\n"
+                f"Pages: {d['pages_str']}\n"
+                f"Inbox row id: {row['id']} | Submission: {d['sid']}\n"
+                f"Next step: Send QKBRQl link manually with pre-fill params."
+            )
+            task_page = create_notion_task(f"New lead: {d['biz_name']}", task_body)
+            artifacts["task_url"] = task_page.get("url", "")
+            print(f"  Notion task: {artifacts['task_url']}")
+        except Exception as e:
+            warnings.append(f"Notion task: {e}")
+            print(f"  [warn] Notion task: {e}", file=sys.stderr)
+
+    # Design research. Filenames are stable so a re-run reuses what is on disk
+    # instead of re-billing Gemini.
+    DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+    ref_paths, png_paths = [], []
+
+    if d["uploaded_designs"]:
+        for i, (url, mime) in enumerate(d["uploaded_designs"][:3]):
+            ext = ".svg" if "svg" in mime else ".png" if "png" in mime else ".jpg"
+            dest = DEBUG_DIR / f"intake-{slug}-upload-{i+1}{ext}"
+            try:
+                if not (dest.exists() and dest.stat().st_size > 0):
+                    download_file(url, dest)
+                ref_paths.append(str(dest))
+                png_paths.append(str(dest))
+                print(f"  Upload {i+1} → {dest}")
+            except Exception as e:
+                warnings.append(f"upload download: {e}")
+                print(f"  [warn] upload download: {e}", file=sys.stderr)
+    else:
+        url_list = [u.strip() for u in re.split(r"[\n,]+", d["admired_raw"])
+                    if u.strip().startswith("http")]
+        for i, url in enumerate(url_list[:3], 1):
+            ref_path = DEBUG_DIR / f"intake-{slug}-ref-{i}.png"
+            try:
+                if not (ref_path.exists() and ref_path.stat().st_size > 0):
+                    screenshot_url(url, str(ref_path))
+                ref_paths.append(str(ref_path))
+                print(f"  Screenshot {i} → {ref_path}")
+            except Exception as e:
+                warnings.append(f"screenshot {url}: {e}")
+                print(f"  [warn] screenshot {url}: {e}", file=sys.stderr)
+
+        site_label = d["site_type_raw"].lower().replace(" / ", " ")
+        prompts = [
+            (f"A modern website hero section mockup for a {site_label} business called "
+             f"'{d['biz_name']}'. Style: {d['design_desc'] or 'clean and professional'}. "
+             f"Full-width web layout, realistic browser render."),
+            (f"Homepage wireframe mockup for '{d['biz_name']}', a {site_label}. "
+             f"Visual style: {d['design_desc'] or 'contemporary'}. "
+             f"Show nav bar, hero, and one content section."),
+        ]
+        if d["biz_desc"]:
+            prompts.append(
+                f"Brand mood board for '{d['biz_name']}': {d['biz_desc']}. "
+                f"Style direction: {d['design_desc'] or 'professional'}. "
+                f"Color palette, typography, and visual feel."
+            )
+        for i, prompt in enumerate(prompts, 1):
+            out = DEBUG_DIR / f"intake-{slug}-mockup-{i}.png"
+            try:
+                if out.exists() and out.stat().st_size > 0:
+                    print(f"  Mockup {i} already present → {out}")
+                    png_paths.append(str(out))
+                    continue
+                png_paths.append(run_nano_banana(prompt, out,
+                                                 reference_paths=ref_paths or None))
+                print(f"  Nano Banana {i} → {out}")
+            except Exception as e:
+                warnings.append(f"nano_banana {i}: {e}")
+                print(f"  [warn] nano_banana {i}: {e}", file=sys.stderr)
+
+    artifacts["png_paths"] = png_paths
+    artifacts["warnings"] = warnings
+    set_intake_artifact(gmail_id, **artifacts)
+    return artifacts
+
+
+def approve_lead(inbox_id, force=False):
+    """Operator-gated entry point. Runs the research, then drafts the assets notice."""
+    row = get_inbox_row_by_id(inbox_id)
+    if not row:
+        print(f"No inbox row with id={inbox_id}", file=sys.stderr)
+        return 1
+    if not (row.get("gmail_id") or "").startswith(f"tally:{FORM_68QDQA}:"):
+        print(f"Row {inbox_id} is not a Tally lead", file=sys.stderr)
+        return 1
+
+    gmail_id = row["gmail_id"]
+    allowed = ([LEAD_PENDING, "error"]
+               + ([LEAD_APPROVING, LEAD_APPROVED] if force else []))
+    conn = _db_conn()
+    try:
+        cur = conn.execute(
+            f"UPDATE inbox_items SET status = ?, error_text = NULL, "
+            f"updated_at = datetime('now') "
+            f"WHERE id = ? AND status IN ({','.join('?' * len(allowed))})",
+            [LEAD_APPROVING, int(inbox_id)] + allowed,
+        )
+        conn.commit()
+        claimed = cur.rowcount
+    finally:
+        conn.close()
+    if not claimed:
+        print(f"Row {inbox_id} is {row['status']} — nothing to approve "
+              f"(use --force to re-run)")
+        return 0
+
+    submission = _rehydrate_submission(row)
+    if not submission:
+        _fail_approval(inbox_id, gmail_id,
+                       "Could not recover the Tally submission for this lead.")
+        return 1
+
+    try:
+        conn = _db_conn()
+        try:
+            conn.execute("UPDATE inbox_items SET lead_approved_at = datetime('now') "
+                         "WHERE id = ?", (int(inbox_id),))
+            conn.commit()
+        finally:
+            conn.close()
+
+        artifacts = run_lead_research(submission, row)
+        d = _lead_fields(submission)
+        _draft_lead_assets(row, d, artifacts)
+
+        conn = _db_conn()
+        try:
+            conn.execute("UPDATE inbox_items SET status = ?, updated_at = datetime('now') "
+                         "WHERE id = ?", (LEAD_APPROVED, int(inbox_id)))
+            conn.commit()
+        finally:
+            conn.close()
+        print(f"  approve_lead OK: {row['client_hint']}")
+        return 0
+    except Exception:
+        _fail_approval(inbox_id, gmail_id, traceback.format_exc()[:2000])
+        return 1
+
+
+def _rehydrate_submission(row):
+    """Recover the raw submission — from the stash, else re-fetch from Tally."""
+    stashed = (get_intake_meta(row["gmail_id"]) or {}).get("submission")
+    if stashed:
+        return stashed
+    m = re.search(rf"tally:{FORM_68QDQA}:(\S+)", row["gmail_id"] or "")
+    if not m:
+        return None
+    sid = m.group(1)
+    try:
+        for sub in fetch_submissions_api(FORM_68QDQA):
+            if sub["id"] == sid:
+                return sub
+    except Exception as e:
+        print(f"  [warn] Tally re-fetch: {e}", file=sys.stderr)
+    return None
+
+
+def _fail_approval(inbox_id, gmail_id, error_text):
+    """Reset to pending so the modal offers a retry.
+
+    Deliberately not 'error': the modal's canRedispatch treats 'error' as
+    re-dispatchable and would offer a Claude-session button on a row with no
+    prompt_text.
+    """
+    conn = _db_conn()
+    try:
+        conn.execute(
+            "UPDATE inbox_items SET status = ?, error_text = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            (LEAD_PENDING, error_text, int(inbox_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"  approve_lead FAILED for row {inbox_id}:\n{error_text}", file=sys.stderr)
+
+
+def _draft_lead_assets(row, d, artifacts):
+    """Second draft — the one carrying the artifacts that only exist post-approval."""
+    gmail_id = row["gmail_id"]
+    if (get_intake_meta(gmail_id).get("artifacts") or {}).get("assets_draft_id"):
+        print("  Assets draft already sent — skipping")
+        return
+    pngs = artifacts.get("png_paths") or []
+    png_lines = "\n".join(f"  {p}" for p in pngs) if pngs else "  (none)"
+    warn_lines = artifacts.get("warnings") or []
+    warn_block = ("\nWarnings:\n" + "\n".join(f"  {w}" for w in warn_lines) + "\n") if warn_lines else ""
+    pending_sid = (get_intake_meta(gmail_id).get("artifacts") or {}).get("pending_intake_sid")
+    pending_block = ""
+    if pending_sid:
+        pending_block = (
+            f"\nA deep-intake form was already submitted for this lead and is on hold.\n"
+            f"To scaffold it now:\n"
+            f"  python3 ~/OpenDia/scripts/intake_pipeline.py scaffold-from-intake {pending_sid}\n"
+        )
+    body = (
+        f"Lead approved — research complete.\n\n"
+        f"Business: {d['biz_name']}\n"
+        f"Contact: {d['name']} <{d['email']}> {d['phone'] or ''}\n"
+        f"Template: {d['variant']}\n\n"
+        f"Design mockups:\n{png_lines}\n\n"
+        f"Notion task: {artifacts.get('task_url') or '(creation failed)'}\n"
+        f"Build Registry: https://www.notion.so/{BUILD_REGISTRY_TABLE_ID.replace('-','')}\n"
+        f"{warn_block}\n"
+        f"NEXT: send the QKBRQl link to {d['name'] or d['email']}:\n"
+        f"  {_qkbrql_url(d['biz_name'], d['email'])}\n"
+        f"{pending_block}\n"
+        f"Inbox row id: {row['id']} | Submission: {d['sid']}"
+    )
+    try:
+        draft = gmail_draft_to_nick(
+            f"[flux.cc] Lead approved — research ready: {d['biz_name']}", body)
+        set_intake_artifact(gmail_id, assets_draft_id=(draft or {}).get("id", "sent"))
+        print("  Assets draft created")
+    except Exception as e:
+        print(f"  [warn] assets draft: {e}", file=sys.stderr)
+
+
+# A lead in any of these states has already been through the scaffold path.
+SCAFFOLD_DONE_STATUSES = {"scaffolding", "first-draft", "deployed"}
+
+
+def _hold_unapproved_intake(submission, lead_row, sid, slug, biz_name, email):
+    """Park a deep-intake submission whose lead has not been approved.
+
+    Deliberately does NOT raise: _process_form marks a submission seen in its
+    error path too, so raising would consume the payload and strand a real
+    client with nothing but a line in the cron log. Parking keeps the payload
+    and tells Nick.
+    """
+    held_gmail_id = f"tally:{FORM_QKBRQL}:{sid}"
+    upsert_inbox_row(
+        gmail_id=held_gmail_id, from_addr=email,
+        subject=f"[intake-deep] {biz_name}", status="intake-held",
+        client_hint=slug, notes=f"tally:{FORM_QKBRQL} submission_id={sid}; "
+                                f"held: lead {slug} not approved",
+        attachment_meta=json.dumps({"v": 1, "form": FORM_QKBRQL,
+                                    "submission_id": sid,
+                                    "submission": submission, "artifacts": {}}),
+    )
+    set_intake_artifact(lead_row["gmail_id"], pending_intake_sid=sid)
+    print(f"  HELD: deep intake for unapproved lead {slug} (submission {sid})")
+
+    body = (
+        f"A deep-intake form (QKBRQl) arrived for a lead that has not been approved.\n\n"
+        f"Business: {biz_name}\n"
+        f"Email: {email}\n"
+        f"Lead slug: {slug}\n\n"
+        f"Nothing was scaffolded — no GitLab repo, no Cloudflare project, no deploy.\n"
+        f"The submission is parked and will not be reprocessed automatically.\n\n"
+        f"If this is a real client:\n"
+        f"  1. Approve the lead in the OpenDia dashboard inbox tab.\n"
+        f"  2. Then run:\n"
+        f"     python3 ~/OpenDia/scripts/intake_pipeline.py scaffold-from-intake {sid}\n\n"
+        f"If it is not, dismiss both rows in the inbox tab.\n"
+    )
+    try:
+        gmail_draft_to_nick(f"[flux.cc] Deep intake held (unapproved lead): {biz_name}", body)
+    except Exception as e:
+        print(f"  [warn] hold notice draft: {e}", file=sys.stderr)
 
 
 # ── Stage 5-8: scaffold_from_intake ──────────────────────────────────────────
 
-def scaffold_from_intake(submission):
+def scaffold_from_intake(submission, force=False):
     """Process a QKBRQl submission: scaffold repo, CF Pages, hero image, notify Nick."""
     f = normalize(submission, FIELD_MAP_QKBRQL)
+    sid      = submission["id"]
     email    = (f.get("email") or "").strip()
     biz_name = (f.get("biz_name") or "Unknown").strip()
 
@@ -806,6 +1124,24 @@ def scaffold_from_intake(submission):
     variant = m.group(1) if m else "fluxcc-business"
 
     print(f"  Matched lead: slug={slug} variant={variant}")
+
+    # Both Tally forms are public. Matching a lead row proves only that the same
+    # address filled in the first form, which anyone can do — so the lead must
+    # have been approved before this creates a GitLab repo, a CF Pages project,
+    # and a live deploy.
+    # Dismissing a lead revokes approval: lead_approved_at survives the dismissal
+    # so the audit trail is intact, but it must not still open the scaffold path.
+    if not force and (not lead_row.get("lead_approved_at")
+                      or lead_row.get("status") == "dismissed"):
+        _hold_unapproved_intake(submission, lead_row, sid, slug, biz_name, email)
+        return
+
+    # Re-run guard. Without this, a lost .intake-seen.json would re-force-push
+    # every historical client repo on the next tick.
+    if not force and lead_row.get("status") in SCAFFOLD_DONE_STATUSES:
+        print(f"  Already scaffolded (status={lead_row['status']}) — skipping {slug}. "
+              f"Use --force to rebuild.")
+        return
 
     # Upgrade status
     upsert_inbox_row(
@@ -1167,7 +1503,7 @@ def scaffold_from_intake(submission):
         f"Full-width website hero background image for '{biz_name}'. "
         f"Primary brand color: {primary_hex}, accent: {accent_hex}. "
         f"Style: {f.get('design_description') or 'professional and clean'}. "
-        f"Business: {f.get('elevator_pitch') or biz_desc or biz_name}. "
+        f"Business: {f.get('elevator_pitch') or biz_name}. "
         f"1920x600 pixels, no text, suitable as hero background."
     )
     hero_out = img_dir / "hero.png"
@@ -1316,6 +1652,14 @@ def main():
 
     p_scaffold = sub.add_parser("scaffold-from-intake")
     p_scaffold.add_argument("submission_id")
+    p_scaffold.add_argument("--force", action="store_true",
+                            help="Scaffold even if the lead is unapproved or already built")
+
+    p_approve = sub.add_parser("approve-lead",
+                               help="Run the gated research for an approved lead")
+    p_approve.add_argument("inbox_id")
+    p_approve.add_argument("--force", action="store_true",
+                           help="Re-run even if already approved or mid-flight")
 
     args = parser.parse_args()
 
@@ -1327,12 +1671,14 @@ def main():
         if args.submission_id not in sub_map:
             sys.exit(f"Submission {args.submission_id} not found in {FORM_68QDQA}")
         triage_lead(sub_map[args.submission_id])
+    elif args.command == "approve-lead":
+        sys.exit(approve_lead(args.inbox_id, force=args.force))
     elif args.command == "scaffold-from-intake":
         subs = fetch_submissions_api(FORM_QKBRQL)
         sub_map = {s["id"]: s for s in subs}
         if args.submission_id not in sub_map:
             sys.exit(f"Submission {args.submission_id} not found in {FORM_QKBRQL}")
-        scaffold_from_intake(sub_map[args.submission_id])
+        scaffold_from_intake(sub_map[args.submission_id], force=args.force)
     else:
         parser.print_help()
         sys.exit(1)

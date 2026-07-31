@@ -5,6 +5,13 @@ const STATUS_COLORS = {
   dispatched: { bg: "#1a3a2a", text: "#4ade80", label: "Running" },
   done:       { bg: "#1a2e1a", text: "#86efac", label: "Done" },
   error:      { bg: "#3b1a1a", text: "#f87171", label: "Error" },
+  deployed:   { bg: "#1a2a3a", text: "#38bdf8", label: "Deployed" },
+  "new-lead":       { bg: "#3a2f1a", text: "#fbbf24", label: "Awaiting approval" },
+  "lead-approving": { bg: "#1a3a2a", text: "#4ade80", label: "Researching" },
+  "lead-approved":  { bg: "#1a2e1a", text: "#86efac", label: "Approved" },
+  "intake-held":    { bg: "#3a2f1a", text: "#fbbf24", label: "Held" },
+  scaffolding:      { bg: "#1a3a2a", text: "#4ade80", label: "Scaffolding" },
+  "first-draft":    { bg: "#1a2a3a", text: "#38bdf8", label: "First draft" },
 };
 
 const PRIORITY_DOT = { high: "#f87171", normal: "#94a3b8", low: "#475569" };
