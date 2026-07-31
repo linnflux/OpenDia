@@ -1457,15 +1457,9 @@ def scaffold_from_intake(submission, force=False):
         else:
             print(f"  CF Pages: https://{slug}.pages.dev")
 
-    # Set GitLab CI var CF_API_KEY
-    r = subprocess.run(
-        [str(GLAB_PATH), "variable", "set", "CF_API_KEY",
-         "--value", cf_api_key, "--repo", gitlab_repo],
-        capture_output=True, text=True,
-        env={**os.environ, "GITLAB_TOKEN": gitlab_token},
-    )
-    if r.returncode != 0:
-        print(f"  [warn] glab variable set: {r.stderr[:150]}", file=sys.stderr)
+    # No per-project CI variable: the pipelines authenticate with the masked
+    # group-level CF_API_TOKEN. This used to copy the account-wide Cloudflare
+    # key into every new project's variables, unmasked and unused.
 
     # Push to new remote
     try:
