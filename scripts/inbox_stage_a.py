@@ -26,7 +26,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from classify_email import classify_email
-from inbox_db import create_inbox_item, update_inbox_item, ensure_project_for_inbox
+from inbox_db import (
+    create_inbox_item,
+    update_inbox_item,
+    ensure_project_for_inbox,
+    lookup_alias,
+)
 from gmail_helper import (
     _load_service,
     create_draft,
@@ -42,6 +47,12 @@ from gmail_helper import (
 )
 
 QUEUE_ADDR = "opendia-queue@linnflux.com"
+
+# The public client change-request address. Anything arriving here is untrusted
+# input from outside the company, so it is held to a stricter rule than mail sent
+# to Nick directly: the sender must already be a known client contact.
+CHANGES_ADDR = "changes@flux.cc"
+ADDRESSED_TO_HEADERS = ("to", "cc", "delivered-to", "x-original-to", "x-forwarded-to")
 
 LOG_DIR = Path.home() / "OpenDia" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -92,6 +103,65 @@ def run():
     log.info("Stage A complete")
 
 
+def _addressed_to_changes(msg: dict) -> bool:
+    """True if this message was sent to the public changes@ address."""
+    headers = msg.get("payload", {}).get("headers", [])
+    for h in headers:
+        if h.get("name", "").lower() in ADDRESSED_TO_HEADERS:
+            if CHANGES_ADDR in (h.get("value") or "").lower():
+                return True
+    return False
+
+
+def _park_unknown_sender(service, thread_id, stubs, msg_id, from_addr, subject,
+                         body, inbox_id, processed_id):
+    """Record an unrecognised changes@ sender and tell Nick. Never dispatches.
+
+    Anyone on the internet can email changes@flux.cc. Dispatch runs a Claude
+    session against a client repo, so an unknown sender must not reach it — the
+    message is recorded, surfaced, and left for a human.
+    """
+    create_inbox_item(
+        gmail_id=msg_id, thread_id=thread_id, from_addr=from_addr, subject=subject,
+        client_hint="unknown", division_hint="FluxCC", priority="normal",
+        short_slug=None, prompt_text=None,
+        requires_server_access=False, estimated_minutes=0,
+        project_hint="unknown", project_id=None,
+    )
+    update_inbox_item(msg_id, status="unknown_sender")
+    log.warning(f"  UNKNOWN SENDER on {CHANGES_ADDR}: {from_addr!r} — parked, not dispatched")
+
+    excerpt = (body or "").strip()
+    if len(excerpt) > 800:
+        excerpt = excerpt[:800] + "\n[...truncated]"
+    draft_body = (
+        f"A message arrived at {CHANGES_ADDR} from an address that is not a known "
+        f"client contact. It was NOT dispatched and no work has been done.\n\n"
+        f"From:    {from_addr}\n"
+        f"Subject: {subject}\n\n"
+        f"--- message ---\n{excerpt}\n--- end ---\n\n"
+        f"If this is a real client contact, authorize them:\n"
+        f"  curl -X POST http://localhost:8038/api/client-aliases \\\n"
+        f"    -H 'Content-Type: application/json' \\\n"
+        f"    -d '{{\"match_type\":\"email\",\"match_value\":\"{from_addr}\","
+        f"\"client_hint\":\"<client-slug>\",\"division_hint\":\"FluxCC\"}}'\n"
+        f"then move this Gmail thread's label back to \"OpenDia Inbox\" — Stage A will\n"
+        f"reprocess it on the next tick and it will classify normally.\n\n"
+        f"If it is not, dismiss the item in the dashboard inbox tab.\n"
+    )
+    try:
+        create_draft(service, "nick@linnflux.com",
+                     f"[flux.cc] Unknown sender at changes@: {from_addr}", draft_body)
+    except Exception as e:
+        log.error(f"  could not draft unknown-sender notice: {e}")
+
+    for stub in stubs:
+        try:
+            modify_message_labels(service, stub["id"], [processed_id], [inbox_id])
+        except Exception:
+            pass
+
+
 def _process_thread(
     service, thread_id: str, stubs: list[dict],
     inbox_id: str, processed_id: str, error_id: str
@@ -130,6 +200,17 @@ def _process_thread(
     subject, from_addr, date_str, body = extract_message_text(latest_customer_msg)
     log.info(f"  Subject: {subject!r}  From: {from_addr!r}  history_msgs: {len(prior_msgs)}")
 
+    # changes@ is a public address, so the sender must be a known client contact.
+    # Checked before classification so an unknown sender costs no model call.
+    is_changes_intake = _addressed_to_changes(latest_customer_msg)
+    changes_alias = lookup_alias(from_addr, subject) if is_changes_intake else None
+    if is_changes_intake and not changes_alias:
+        _park_unknown_sender(
+            service, thread_id, stubs, latest_customer_msg["id"],
+            from_addr, subject, body, inbox_id, processed_id,
+        )
+        return
+
     # Extract attachment metadata
     attachments = extract_attachment_meta(latest_customer_msg)
     if attachments:
@@ -154,6 +235,17 @@ def _process_thread(
         attachments_line=attachments_line,
     )
     log.info(f"  Classified: {result}")
+
+    if is_changes_intake:
+        # The alias table is authoritative for who the client is — not the
+        # classifier, which reads attacker-supplied text. And a client change
+        # request never legitimately needs server access, so the flag is refused
+        # here regardless of what the classifier decided.
+        result["client_hint"] = changes_alias["client_hint"]
+        result["division_hint"] = changes_alias.get("division_hint") or result["division_hint"]
+        if result.get("requires_server_access"):
+            log.warning("  refusing requires_server_access on the changes@ path")
+        result["requires_server_access"] = False
 
     # Ensure a project exists — auto-create in wfhuman if no match found
     project_id = result.get("project_id")
@@ -215,6 +307,12 @@ def _process_thread(
         attachment_meta=attachment_meta_json,
     )
     log.info(f"  Written to inbox_items DB (gmail_id={canonical_gmail_id})")
+
+    if is_changes_intake:
+        # create_inbox_item is INSERT OR IGNORE, so a message that was parked as
+        # unknown_sender and is being reprocessed after the sender was authorized
+        # would otherwise keep the parked status forever.
+        update_inbox_item(canonical_gmail_id, status="classified")
 
     # Relabel ALL stubs in this thread: remove OpenDia Inbox, add OpenDia Processed
     for stub in stubs:

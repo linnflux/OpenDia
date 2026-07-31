@@ -94,6 +94,7 @@ const STATUS_COLORS = {
   "lead-approving": { bg: "#1a3a2a", text: "#4ade80", label: "Researching" },
   "lead-approved":  { bg: "#1a2e1a", text: "#86efac", label: "Approved" },
   "intake-held":    { bg: "#3a2f1a", text: "#fbbf24", label: "Held" },
+  unknown_sender:   { bg: "#3b1a1a", text: "#f87171", label: "Unknown sender" },
   scaffolding:      { bg: "#1a3a2a", text: "#4ade80", label: "Scaffolding" },
   "first-draft":    { bg: "#1a2a3a", text: "#38bdf8", label: "First draft" },
 };
