@@ -1,12 +1,22 @@
 import { useState, useRef, useEffect } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { TAGS, hasTag } from "../tags.js";
 import { DIVISION_COLORS, STATUS_OPTIONS } from "../constants.js";
 
 const INBOX_PREFIX = "Auto-created from inbox: ";
 
-export default function Card({ project, onClick, hasActiveTimer, onStatusChange, onToggleTag }) {
+// The whole card is the drag handle, which means every nested control sits
+// inside a pointerdown listener that would start a drag. Stopping propagation
+// on those keeps buttons and menus behaving like buttons and menus.
+const noDrag = { onPointerDown: (e) => e.stopPropagation() };
+
+export default function Card({ project, onClick, hasActiveTimer, onStatusChange, onToggleTag, sortable }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: project.id, disabled: !sortable });
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -27,12 +37,17 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
     if (onClick) onClick(project);
   }
 
+  // Enter opens the card; Space is handed to dnd-kit's keyboard sensor to
+  // pick up / drop, with the arrow keys moving it. Both need to live on the
+  // same element, and dnd-kit's own onKeyDown would otherwise swallow Enter.
   function handleCardKeyDown(e) {
     if (e.target !== e.currentTarget) return; // let nested buttons handle their own keys
-    if (e.key === "Enter" || e.key === " ") {
+    if (e.key === "Enter") {
       e.preventDefault();
       handleCardClick(e);
+      return;
     }
+    listeners?.onKeyDown?.(e);
   }
 
   function handlePillClick(e) {
@@ -48,10 +63,18 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
 
   return (
     <div
-      className={`card${hasActiveTimer ? " card-timer-active" : ""}`}
-      onClick={handleCardClick}
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        ...(isDragging ? { opacity: 0.35 } : {}),
+      }}
+      className={`card${hasActiveTimer ? " card-timer-active" : ""}${isDragging ? " card-dragging" : ""}${sortable ? " card-sortable" : ""}`}
+      {...attributes}
+      {...listeners}
       role="button"
       tabIndex={0}
+      onClick={handleCardClick}
       onKeyDown={handleCardKeyDown}
     >
       <span className="card-corner">
@@ -64,6 +87,7 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
               style={on ? { backgroundColor: tag.color } : {}}
               title={on ? `Tagged for ${tag.label} — click to untag` : `Tag for ${tag.label}`}
               onClick={(e) => { e.stopPropagation(); onToggleTag && onToggleTag(project, tag.key); }}
+              {...noDrag}
             >
               {tag.letter}
             </button>
@@ -102,6 +126,7 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
               style={{ borderColor: currentStatus.color, color: currentStatus.color }}
               onClick={handlePillClick}
               title="Change status"
+              {...noDrag}
             >
               {currentStatus.label}
               <span className="card-status-caret">▾</span>
@@ -114,6 +139,7 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
                     className={`card-status-option${s.key === project.status ? " active" : ""}`}
                     style={{ color: s.color }}
                     onClick={(e) => handleStatusSelect(e, s.key)}
+                    {...noDrag}
                   >
                     <span className="card-status-dot" style={{ backgroundColor: s.color }} />
                     {s.label}

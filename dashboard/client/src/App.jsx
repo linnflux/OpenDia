@@ -36,7 +36,7 @@ function getInitialCollapsed() {
 }
 
 export default function App() {
-  const { grouped, projects, loading, moveProject, updateProject, refresh } = useProjects();
+  const { grouped, projects, loading, moveProject, updateProject, reorderProjects, refresh } = useProjects();
   const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
   const companies = useCompanies(projects);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -191,15 +191,11 @@ export default function App() {
     updateProject(project.id, { tags: toggleTag(project, tagKey) });
   }
 
-  // Stable-sort each column: timer-active cards bubble to top, relative order preserved within each group
-  if (activeTimerIds.size > 0) {
-    for (const status of Object.keys(filtered)) {
-      const list = filtered[status];
-      const withTimer = list.filter((p) => activeTimerIds.has(p.id));
-      const without = list.filter((p) => !activeTimerIds.has(p.id));
-      if (withTimer.length > 0) filtered[status] = [...withTimer, ...without];
-    }
-  }
+  // Timer-active cards used to bubble to the top here. That was a render-time
+  // sort fighting the persisted one: drag a card above a running timer and it
+  // would snap back on the next render. Cards with a live timer already carry
+  // a green ring (.card-timer-active), so the signal survives without
+  // overriding the order the user dragged.
 
   // Global Cmd+K / Ctrl+K shortcut
   useEffect(() => {
@@ -225,6 +221,25 @@ export default function App() {
     moveProject(projectId, newStatus);
     setStatusToast(`${project?.name || "Card"} → ${label}`);
     setTimeout(() => setStatusToast(null), 3000);
+  }
+
+  /**
+   * Drag-and-drop reorder. `visibleIds` is the new order of the cards the user
+   * can actually see, which is usually a filtered subset of the column.
+   *
+   * The reorder endpoint writes sort_order = 0..n-1 for exactly the ids it is
+   * given, so sending the visible subset would silently rewrite the position
+   * of every filtered-out card. Instead, merge: walk the full column and, at
+   * each slot currently occupied by a visible card, drop in the next id from
+   * the new visible order. Hidden cards keep their absolute positions and the
+   * visible ones permute among the slots they already held.
+   */
+  function handleReorder(visibleIds) {
+    const full = grouped[activeStatus] || [];
+    const visible = new Set(visibleIds);
+    let i = 0;
+    const merged = full.map((p) => (visible.has(p.id) ? visibleIds[i++] : p.id));
+    reorderProjects(activeStatus, merged);
   }
 
   function handleActiveStatusChange(status) {
@@ -446,6 +461,7 @@ export default function App() {
                   activeTimerIds={activeTimerIds}
                   onStatusChange={handleStatusChange}
                   onToggleTag={handleToggleTag}
+                  onReorder={handleReorder}
                 />
                 {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
               </>

@@ -532,6 +532,39 @@ body.has-bg::before {
   box-shadow: 0 0 0 2px #54af4d;
 }
 
+/* ── Drag to reorder ─────────────────────────────────────────── */
+.card-sortable {
+  cursor: grab;
+  touch-action: manipulation;
+}
+
+.card-sortable:active {
+  cursor: grabbing;
+}
+
+/* The origin slot while its card is airborne: a dashed outline showing where
+   it will land if dropped here. The card itself is dimmed inline by Card.jsx. */
+.card-dragging {
+  border-style: dashed;
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+/* The floating copy under the cursor. Lives in a DragOverlay outside the grid,
+   so it needs its own surface rather than inheriting the glass treatment. */
+.card-drag-overlay {
+  cursor: grabbing;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  box-shadow: 0 12px 32px var(--shadow-modal);
+  transform: rotate(1.5deg);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-drag-overlay { transform: none; }
+}
+
 .card:hover {
   border-color: var(--border-hover);
 }

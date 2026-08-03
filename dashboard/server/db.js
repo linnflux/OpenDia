@@ -65,6 +65,15 @@ export function ensureProjectsColumns() {
   if (!cols.includes("tags")) {
     getDb().exec("ALTER TABLE projects ADD COLUMN tags TEXT");
   }
+  // SQLite sorts NULLs FIRST, so a project with no sort_order pins itself to
+  // the top of its column and cannot be dragged off it — drag writes 0..n-1
+  // to the rest, which are all still greater than NULL. Park them at the back
+  // instead; the first reorder of that column then renumbers everything.
+  getDb().exec(`
+    UPDATE projects SET sort_order = (
+      SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects
+    ) WHERE sort_order IS NULL
+  `);
 }
 
 export function updateProject(id, fields) {
