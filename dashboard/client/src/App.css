@@ -209,12 +209,14 @@ body.has-bg::before {
 
 /* Collapse the desktop rail. Hidden below 900px, where the rail is a drawer
    and the hamburger takes over instead. */
+/* --text-primary, not --text-muted: a 1.5px stroke icon needs the contrast,
+   and muted only reached 2.3-3.4:1 against --bg-body depending on theme. */
 .sidebar-toggle {
   display: flex;
   align-items: center;
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--text-primary);
   cursor: pointer;
   padding: 0.3rem;
   border-radius: var(--radius-sm);
@@ -4260,11 +4262,15 @@ body.has-bg::before {
   margin-top: 0.6rem;
 }
 
+/* --text-faint is unreadable against --bg-surface in every theme (1.2:1 in
+   monokai, 1.4:1 in nord, 1.5:1 in light and tokyo-night). --text-secondary
+   is the same colour the idle nav items use, so hierarchy comes from the
+   size, weight and tracking instead of from the colour. */
 .nav-sidebar-heading {
-  font-size: 0.62rem;
+  font-size: 0.63rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: var(--text-faint);
+  color: var(--text-secondary);
   padding: 0.35rem 1rem 0.2rem;
 }
 
@@ -4557,7 +4563,7 @@ body.has-bg::before {
     align-items: center;
     background: none;
     border: none;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     cursor: pointer;
     padding: 0.25rem;
     border-radius: var(--radius-sm);
