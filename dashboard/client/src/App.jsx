@@ -191,11 +191,23 @@ export default function App() {
     updateProject(project.id, { tags: toggleTag(project, tagKey) });
   }
 
-  // Timer-active cards used to bubble to the top here. That was a render-time
-  // sort fighting the persisted one: drag a card above a running timer and it
-  // would snap back on the next render. Cards with a live timer already carry
-  // a green ring (.card-timer-active), so the signal survives without
-  // overriding the order the user dragged.
+  /**
+   * Cards with a running timer pin to the top of the column: the lowest-ranked
+   * timer-active card always sits above the highest-ranked idle one. Within
+   * each group the persisted order applies, so timer cards can be dragged
+   * among themselves.
+   *
+   * This is a DISPLAY-only partition. `filtered` stays in logical (persisted)
+   * order, and handleReorder maps a dragged display order back onto it, so a
+   * card is never permanently promoted just for having had a timer — when the
+   * timer stops it drops back to the position it actually holds.
+   */
+  function pinActive(list) {
+    if (activeTimerIds.size === 0) return list;
+    const active = list.filter((p) => activeTimerIds.has(p.id));
+    if (active.length === 0 || active.length === list.length) return list;
+    return [...active, ...list.filter((p) => !activeTimerIds.has(p.id))];
+  }
 
   // Global Cmd+K / Ctrl+K shortcut
   useEffect(() => {
@@ -224,21 +236,37 @@ export default function App() {
   }
 
   /**
-   * Drag-and-drop reorder. `visibleIds` is the new order of the cards the user
-   * can actually see, which is usually a filtered subset of the column.
+   * Drag-and-drop reorder. `displayIds` is the new order of the cards the user
+   * can actually see — a filtered subset of the column, with timer-active
+   * cards pinned to the front.
    *
-   * The reorder endpoint writes sort_order = 0..n-1 for exactly the ids it is
-   * given, so sending the visible subset would silently rewrite the position
-   * of every filtered-out card. Instead, merge: walk the full column and, at
-   * each slot currently occupied by a visible card, drop in the next id from
-   * the new visible order. Hidden cards keep their absolute positions and the
-   * visible ones permute among the slots they already held.
+   * Two merges, both the same shape: walk a list and, at each slot held by a
+   * member of some group, drop in the next id from that group's new order.
+   *
+   *  1. Un-pin. Split the dragged order into timer-active and idle, then lay
+   *     those two sequences back over the logical (unpinned) visible order.
+   *     A timer card dragged into the idle region therefore lands last among
+   *     the timer cards rather than crossing the boundary, and dragging an
+   *     idle card cannot promote it above a running timer.
+   *  2. Un-filter. The endpoint writes sort_order = 0..n-1 for exactly the ids
+   *     it is sent, so sending only the visible subset would silently rewrite
+   *     the position of every filtered-out card. Lay the visible order back
+   *     over the full column so hidden cards keep their absolute slots.
    */
-  function handleReorder(visibleIds) {
-    const full = grouped[activeStatus] || [];
-    const visible = new Set(visibleIds);
+  function handleReorder(displayIds) {
+    const logicalVisible = (filtered[activeStatus] || []).map((p) => p.id);
+    const draggedActive = displayIds.filter((id) => activeTimerIds.has(id));
+    const draggedIdle = displayIds.filter((id) => !activeTimerIds.has(id));
+    let a = 0, d = 0;
+    const unpinned = logicalVisible.map((id) =>
+      activeTimerIds.has(id) ? draggedActive[a++] : draggedIdle[d++]
+    );
+
+    const visible = new Set(unpinned);
     let i = 0;
-    const merged = full.map((p) => (visible.has(p.id) ? visibleIds[i++] : p.id));
+    const merged = (grouped[activeStatus] || []).map((p) =>
+      visible.has(p.id) ? unpinned[i++] : p.id
+    );
     reorderProjects(activeStatus, merged);
   }
 
@@ -456,7 +484,7 @@ export default function App() {
                   onChange={handleActiveStatusChange}
                 />
                 <StatusGrid
-                  projects={filtered[activeStatus] || []}
+                  projects={pinActive(filtered[activeStatus] || [])}
                   onCardClick={handleCardClick}
                   activeTimerIds={activeTimerIds}
                   onStatusChange={handleStatusChange}

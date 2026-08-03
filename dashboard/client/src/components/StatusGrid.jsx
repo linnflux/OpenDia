@@ -18,9 +18,6 @@ import Card from "./Card.jsx";
 
 export default function StatusGrid({ projects, onCardClick, activeTimerIds, onStatusChange, onToggleTag, onReorder }) {
   const [activeId, setActiveId] = useState(null);
-  // Order held locally from the moment of the drop until the parent's state
-  // catches up, so the grid never flashes back to the old order in between.
-  const [dragOrder, setDragOrder] = useState(null);
 
   const sensors = useSensors(
     // 6px of travel before a drag begins, so a plain click still opens the
@@ -33,18 +30,12 @@ export default function StatusGrid({ projects, onCardClick, activeTimerIds, onSt
     return <div className="status-grid-empty">No projects here.</div>;
   }
 
-  // Drop the local override as soon as the parent reflects it, so filter and
-  // poll updates aren't held behind a stale drag order.
-  const parentIds = projects.map((p) => p.id);
-  const stale = dragOrder && (dragOrder.length !== parentIds.length
-    || dragOrder.some((id) => !parentIds.includes(id))
-    || dragOrder.every((id, i) => parentIds[i] === id));
-  const order = stale ? null : dragOrder;
-
-  const list = order
-    ? order.map((id) => projects.find((p) => p.id === id)).filter(Boolean)
-    : projects;
-  const ids = list.map((p) => p.id);
+  // `projects` is the display order the parent hands down, already filtered
+  // and with timer-active cards pinned. The parent applies its optimistic
+  // update synchronously in onReorder, so there is no gap to bridge with a
+  // local copy — and a local copy would mask the pin clamping a drop that
+  // crossed the timer boundary.
+  const ids = projects.map((p) => p.id);
   const activeProject = activeId ? projects.find((p) => p.id === activeId) : null;
 
   function handleDragEnd({ active, over }) {
@@ -53,9 +44,7 @@ export default function StatusGrid({ projects, onCardClick, activeTimerIds, onSt
     const from = ids.indexOf(active.id);
     const to = ids.indexOf(over.id);
     if (from === -1 || to === -1) return;
-    const next = arrayMove(ids, from, to);
-    setDragOrder(next);
-    onReorder?.(next);
+    onReorder?.(arrayMove(ids, from, to));
   }
 
   return (
@@ -68,7 +57,7 @@ export default function StatusGrid({ projects, onCardClick, activeTimerIds, onSt
     >
       <SortableContext items={ids} strategy={rectSortingStrategy}>
         <div className="status-grid">
-          {list.map((p) => (
+          {projects.map((p) => (
             <Card
               key={p.id}
               project={p}
