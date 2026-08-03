@@ -1340,10 +1340,30 @@ body.has-bg::before {
   z-index: 50;
 }
 
+/* Was --text-faint, which is 1.2:1 against the modal surface in monokai and
+   under 2:1 in most themes — unreadable, and this is a value people copy out
+   by hand to run /od-go. Quiet, but legible, and now click-to-copy. */
 .modal-id {
   font-size: 0.7rem;
-  color: var(--text-faint);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.35rem;
+  margin-left: -0.35rem;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+/* Derived, not --badge-bg: that is identical to --bg-surface in monokai,
+   catppuccin, nord and solarized-dark, so the hover chip would be invisible
+   in exactly the themes this was reported against. Mixing toward the text
+   colour always moves away from the surface, whichever way a theme runs. */
+.modal-id:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 20%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 55%, transparent);
 }
 
 /* Timer entries */

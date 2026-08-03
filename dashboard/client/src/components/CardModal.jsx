@@ -203,28 +203,31 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
     // (if the protocol handler opened, the user won't need this)
     setTimeout(() => {
       const cmd = `ssh linnflux@opendia -t 'tmux attach -t ${session} || tmux new-session -s ${session}'`;
-      try {
-        // navigator.clipboard requires secure context (HTTPS/localhost)
-        // Fall back to execCommand for HTTP connections
-        if (navigator.clipboard && window.isSecureContext) {
-          navigator.clipboard.writeText(cmd).then(() => {
-            showToast("Command copied to clipboard");
-          });
-        } else {
-          const textarea = document.createElement("textarea");
-          textarea.value = cmd;
-          textarea.style.position = "fixed";
-          textarea.style.opacity = "0";
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          document.body.removeChild(textarea);
-          showToast("Command copied to clipboard");
-        }
-      } catch {
-        showToast(cmd);
-      }
+      copyText(cmd, "Command copied to clipboard");
     }, 500);
+  }
+
+  // navigator.clipboard needs a secure context. localhost qualifies, but
+  // reaching the dashboard over Tailscale by IP does not, so keep the
+  // execCommand fallback.
+  function copyText(text, message) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => showToast(message));
+        return;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      showToast(message);
+    } catch {
+      showToast(text);
+    }
   }
 
   async function handleReview() {
@@ -768,7 +771,15 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
         </>}
 
         <div className="modal-footer">
-          <span className="modal-id">ID: {project.id}</span>
+          {/* Click to copy: this id is what /od-go takes to hit the card
+              fast-path, so it gets transcribed by hand a lot. */}
+          <button
+            className="modal-id"
+            onClick={() => copyText(String(project.id), `Card ID ${project.id} copied`)}
+            title={`Copy card ID ${project.id} — /od-go ${project.id}`}
+          >
+            ID: {project.id}
+          </button>
           {inboxSource && (
             <span className="modal-inbox-origin" title={inboxSource}>
               <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style={{ verticalAlign: "middle", marginRight: "0.25rem" }}>
