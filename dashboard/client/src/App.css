@@ -6,6 +6,12 @@
   --bg-overlay: rgba(15, 23, 42, 0.82);
   --bg-backdrop: rgba(0, 0, 0, 0.6);
   --bg-input: #0f172a;
+  /* Recessed nested region (e.g. entry rows inside a billing client row).
+     Derived, not per-theme: no fixed palette colour differs from --bg-card
+     on all 10 themes — light collapses card/surface, dark collapses
+     card/body. Mixing toward --text-primary always moves AWAY from the
+     surface whichever direction the theme runs, so it stays visible. */
+  --bg-recessed: color-mix(in srgb, var(--bg-card) 88%, var(--text-primary));
   --border: #334155;
   --border-hover: #475569;
   --text-primary: #e2e8f0;
@@ -81,9 +87,82 @@ body.has-bg::before {
   content: "";
   position: fixed;
   inset: 0;
-  background: var(--bg-overlay);
+  background: color-mix(in srgb, var(--bg-overlay) var(--glass-scrim), transparent);
   z-index: 0;
   pointer-events: none;
+}
+
+/* ── Glass surfaces ──────────────────────────────────────────────
+   Only active when a background image is set (body.has-bg), so the
+   default no-wallpaper dashboard stays fully opaque and pays zero
+   compositing cost. Colors are derived with color-mix() from each
+   theme's own vars, so all 10 themes work with no per-theme edits.
+
+   Tune here — these four knobs drive everything below:
+     --glass-scrim   how much of the theme's full-screen scrim survives
+     --glass-sidebar sidebar opacity (lower = more wallpaper)
+     --glass-card    card opacity
+     --glass-blur    blur radius; cards use 70% of it
+   ────────────────────────────────────────────────────────────── */
+:root {
+  --glass-scrim: 50%;
+  --glass-sidebar: 28%;
+  --glass-card: 62%;
+  --glass-blur: 18px;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  body.has-bg .status-sidebar {
+    background: color-mix(in srgb, var(--bg-surface) var(--glass-sidebar), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    border-right-color: color-mix(in srgb, var(--border) 55%, transparent);
+  }
+
+  /* Sidebar row states are solid fills by default — soften them so they
+     read as tint on glass rather than opaque blocks punched through it. */
+  body.has-bg .status-sidebar-item:hover {
+    background: color-mix(in srgb, var(--bg-card) 45%, transparent);
+  }
+
+  body.has-bg .status-sidebar-item.active {
+    background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+  }
+
+  body.has-bg .status-sidebar-count {
+    background: color-mix(in srgb, var(--badge-bg) 55%, transparent);
+  }
+
+  /* Cards sit directly on the wallpaper (the grid has no surface of its
+     own), so each needs its own backdrop. Kept lighter than the sidebar:
+     ~34 cards can be in the DOM at once and every backdrop-filter is a
+     separate compositing layer. */
+  body.has-bg .card {
+    background: color-mix(in srgb, var(--bg-card) var(--glass-card), transparent);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  }
+
+  body.has-bg .card:hover {
+    background: color-mix(in srgb, var(--bg-card) 78%, transparent);
+    border-color: var(--border-hover);
+  }
+}
+
+/* Accessibility + weak-GPU escape hatch: drop the blur entirely and go
+   back to near-solid surfaces. Also covers browsers without color-mix. */
+@media (prefers-reduced-transparency: reduce) {
+  body.has-bg::before { background: var(--bg-overlay); }
+
+  body.has-bg .status-sidebar,
+  body.has-bg .card {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  body.has-bg .status-sidebar { background: var(--bg-surface); }
+  body.has-bg .card { background: var(--bg-card); }
 }
 
 .app {
@@ -371,81 +450,6 @@ body.has-bg::before {
   color: var(--text-secondary);
 }
 
-/* Board */
-.board {
-  display: flex;
-  gap: 1rem;
-  overflow-x: auto;
-  align-items: flex-start;
-  min-height: calc(100vh - 6rem);
-  scrollbar-color: var(--bg-card) var(--bg-main);
-}
-
-.board::-webkit-scrollbar {
-  height: 8px;
-}
-
-.board::-webkit-scrollbar-track {
-  background: var(--bg-main);
-  border-radius: var(--radius-sm);
-}
-
-.board::-webkit-scrollbar-thumb {
-  background: var(--bg-card);
-  border-radius: var(--radius-sm);
-}
-
-.board::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
-
-/* Column */
-.column {
-  flex: 1;
-  min-width: 260px;
-  max-width: 360px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  border-top: 3px solid;
-  display: flex;
-  flex-direction: column;
-}
-
-.column-over {
-  background: var(--border-hover);
-}
-
-.column-header {
-  padding: 0.75rem 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-}
-
-.column-title {
-  font-weight: 600;
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.column-count {
-  background: var(--badge-bg);
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  padding: 0.125rem 0.5rem;
-  border-radius: var(--radius-pill);
-}
-
-.column-cards {
-  padding: 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-height: 60px;
-}
-
 /* Card */
 .card {
   position: relative;
@@ -632,7 +636,7 @@ body.has-bg::before {
   padding: 1.5rem;
   position: relative;
   box-shadow: 0 25px 50px var(--shadow-modal);
-  scrollbar-color: var(--bg-card) var(--bg-main);
+  scrollbar-color: var(--bg-card) var(--bg-body);
 }
 
 @property --timer-angle {
@@ -681,7 +685,7 @@ body.has-bg::before {
 }
 
 .modal::-webkit-scrollbar-track {
-  background: var(--bg-main);
+  background: var(--bg-body);
   border-radius: var(--radius-sm);
 }
 
@@ -1297,7 +1301,7 @@ body.has-bg::before {
   gap: 0.5rem;
   max-height: 320px;
   overflow-y: auto;
-  scrollbar-color: var(--bg-card) var(--bg-main);
+  scrollbar-color: var(--bg-card) var(--bg-body);
 }
 
 .timer-list::-webkit-scrollbar {
@@ -1305,7 +1309,7 @@ body.has-bg::before {
 }
 
 .timer-list::-webkit-scrollbar-track {
-  background: var(--bg-main);
+  background: var(--bg-body);
   border-radius: var(--radius-sm);
 }
 
@@ -3142,7 +3146,7 @@ body.has-bg::before {
 }
 
 .analytics-week-btn {
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-primary);
@@ -3423,7 +3427,7 @@ body.has-bg::before {
 
 .analytics-days-input {
   width: 3rem;
-  background: var(--bg-secondary);
+  background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
@@ -3438,7 +3442,7 @@ body.has-bg::before {
 }
 
 .analytics-stale-go {
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
@@ -3747,7 +3751,7 @@ body.has-bg::before {
 
 .billing-entries {
   padding: 0.2rem 0 0.4rem 2.5rem;
-  background: var(--bg-secondary, rgba(0,0,0,0.15));
+  background: var(--bg-recessed);
   display: flex;
   flex-direction: column;
   overflow-x: auto;
@@ -3815,7 +3819,7 @@ body.has-bg::before {
 
 .billing-entry-billable-btn.is-nonbill {
   color: var(--text-faint);
-  background: var(--bg-secondary);
+  background: var(--badge-bg);
   border-color: var(--border);
 }
 
@@ -3874,7 +3878,7 @@ body.has-bg::before {
 .billing-push-note code {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.7rem;
-  background: var(--bg-secondary);
+  background: var(--badge-bg);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -3956,7 +3960,7 @@ body.has-bg::before {
 }
 
 .billing-confirm-cancel:hover:not(:disabled) {
-  background: var(--bg-secondary);
+  background: var(--badge-bg);
 }
 
 .billing-confirm-push {
@@ -4104,7 +4108,7 @@ body.has-bg::before {
 .newsletter-list-item.active {
   border-color: var(--accent, #4f8ef7);
   color: var(--text-primary);
-  background: var(--bg-secondary);
+  background: var(--pill-active-bg);
 }
 
 .newsletter-error {
@@ -4173,7 +4177,7 @@ body.has-bg::before {
 .newsletter-preview li { margin-bottom: 0.4rem; }
 .newsletter-preview em { color: var(--text-faint); }
 .newsletter-preview hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
-.newsletter-preview code { font-family: 'JetBrains Mono', monospace; font-size: 0.78em; background: var(--bg-secondary); padding: 1px 4px; border-radius: 3px; }
+.newsletter-preview code { font-family: 'JetBrains Mono', monospace; font-size: 0.78em; background: var(--badge-bg); padding: 1px 4px; border-radius: 3px; }
 .newsletter-preview strong { color: var(--text-primary); }
 
 .newsletter-actions {
