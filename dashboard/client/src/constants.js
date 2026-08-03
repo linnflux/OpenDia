@@ -34,3 +34,41 @@ export const STATUS_OPTIONS = [
   { key: "ice",        label: "Ice",          color: "#6b7280" },
   { key: "completed",  label: "Completed",    color: "#22c55e" },
 ];
+
+// Every destination in the app, in sidebar order. NavSidebar and the Ctrl+K
+// palette both build their lists from this, so a view can never end up in one
+// surface and not the other — which is exactly how Billing and Newsletter
+// ended up palette-only, and Sweep ended up in three places at once.
+//
+// `icon` is the palette's text glyph; NavSidebar renders its own SVGs keyed by
+// `key`. `badge` names which count feeds the row, or null for no badge.
+export const NAV_SECTIONS = [
+  {
+    title: "WORK",
+    items: [
+      { key: "board",   label: "Board",   icon: "▣",     badge: null },
+      { key: "today",   label: "Today",   icon: "\u{1F4C5}",  badge: null },
+      { key: "inbox",   label: "Inbox",   icon: "\u{1F4E5}",  badge: "inbox" },
+      { key: "clients", label: "Clients", icon: "\u{1F3E2}",  badge: null },
+    ],
+  },
+  {
+    title: "REVIEW",
+    items: [
+      { key: "sweep",     label: "Sweep",     icon: "⚡",    badge: "sweep" },
+      { key: "analytics", label: "Analytics", icon: "\u{1F4CA}", badge: null },
+    ],
+  },
+  {
+    title: "ADMIN",
+    adminOnly: true,
+    items: [
+      { key: "billing",    label: "Billing",    icon: "\u{1F4B0}", badge: null },
+      { key: "newsletter", label: "Newsletter", icon: "\u{1F4F0}", badge: null },
+    ],
+  },
+];
+
+export const NAV_ITEMS = NAV_SECTIONS.flatMap((s) =>
+  s.items.map((i) => ({ ...i, section: s.title, adminOnly: !!s.adminOnly }))
+);

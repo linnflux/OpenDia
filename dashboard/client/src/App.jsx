@@ -1,48 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-
-function BoardIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <rect x="1" y="1" width="3.5" height="12" rx="1" fill="currentColor" opacity="0.9" />
-      <rect x="5.25" y="1" width="3.5" height="9" rx="1" fill="currentColor" opacity="0.9" />
-      <rect x="9.5" y="1" width="3.5" height="11" rx="1" fill="currentColor" opacity="0.9" />
-    </svg>
-  );
-}
-
-function InboxIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M1 9h3l1.5 2.5h3L10 9h3V12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V9z" />
-      <path d="M4 5l3 3 3-3M7 1v7" />
-    </svg>
-  );
-}
-
-function ClientsIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="5" cy="4.5" r="2" />
-      <path d="M1 12c0-2.2 1.8-4 4-4s4 1.8 4 4" />
-      <circle cx="10.5" cy="4.5" r="1.5" />
-      <path d="M13 12c0-1.7-1.1-3.1-2.5-3.5" />
-    </svg>
-  );
-}
-
-function TodayIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="1" y="2.5" width="12" height="10" rx="1.5" />
-      <path d="M4.5 1v3M9.5 1v3M1 6h12" />
-      <path d="M4.5 9h1.5M7.5 9H9M4.5 11.5h1.5" />
-    </svg>
-  );
-}
 import { useProjects } from "./hooks/useProjects.js";
 import { useInbox } from "./hooks/useInbox.js";
 import { useCompanies } from "./hooks/useCompanies.js";
-import StatusSidebar from "./components/StatusSidebar.jsx";
+import NavSidebar from "./components/NavSidebar.jsx";
+import StatusFilterBar from "./components/StatusFilterBar.jsx";
 import StatusGrid from "./components/StatusGrid.jsx";
 import CardModal from "./components/CardModal.jsx";
 import InboxCard from "./components/InboxCard.jsx";
@@ -70,6 +31,10 @@ function getInitialStatus() {
   return valid.includes(saved) ? saved : "in_progress";
 }
 
+function getInitialCollapsed() {
+  return localStorage.getItem("opendia.sidebarCollapsed") === "1";
+}
+
 export default function App() {
   const { grouped, projects, loading, moveProject, updateProject, refresh } = useProjects();
   const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
@@ -77,7 +42,9 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [selectedInboxItem, setSelectedInboxItem] = useState(null);
   const [pendingClientKey, setPendingClientKey] = useState(null);
-  const [view, setView] = useState("board"); // "board" | "inbox" | "clients"
+  // One of the NAV_ITEMS keys. "tara" used to live here too; it is a filter on
+  // the board (tag = tara), not a destination, so it is `taraOnly` below.
+  const [view, setView] = useState("board");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [themes, setThemes] = useState([]);
@@ -85,6 +52,8 @@ export default function App() {
 
   const [activeStatus, setActiveStatus] = useState(getInitialStatus);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(getInitialCollapsed);
+  const [taraOnly, setTaraOnly] = useState(false);
   const [filter, setFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [inboxFilter, setInboxFilter] = useState("active");
@@ -92,7 +61,6 @@ export default function App() {
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
   const [me, setMe] = useState(null);
   const [statusToast, setStatusToast] = useState(null);
-  const [moreOpen, setMoreOpen] = useState(false);
 
   // Derive the live project object from the current projects list so the open
   // modal automatically reflects status/next-step/notes changes pushed in by
@@ -213,8 +181,8 @@ export default function App() {
       // Division filter
       filtered[status] = list.filter((p) => p.division === filter);
     }
-    // The Tara view is the same board, additionally limited to tagged cards
-    if (view === "tara") {
+    // Tara is a filter on the same board, not a separate view
+    if (taraOnly) {
       filtered[status] = filtered[status].filter((p) => hasTag(p, "tara"));
     }
   }
@@ -262,7 +230,13 @@ export default function App() {
   function handleActiveStatusChange(status) {
     setActiveStatus(status);
     localStorage.setItem("opendia.activeStatus", status);
-    setSidebarOpen(false);
+  }
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((v) => {
+      localStorage.setItem("opendia.sidebarCollapsed", v ? "0" : "1");
+      return !v;
+    });
   }
 
   function handleModalUpdate(id, fields) {
@@ -305,32 +279,28 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="app-logo">
+          <button
+            className="sidebar-toggle"
+            onClick={toggleSidebarCollapsed}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
+            className="sidebar-hamburger"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open navigation"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
           <img src="/opendia_mark.svg" alt="OpenDia" className="app-mark" />
           <h1 className="app-wordmark"><span className="wm-open">Open</span><span className="wm-dia">Dia</span></h1>
         </div>
-        <nav className="view-toggle view-toggle-centered" aria-label="View">
-          <button className={`view-toggle-btn${view === "board" ? " active" : ""}`} onClick={() => setView("board")}>
-            <BoardIcon />
-            <span>Board</span>
-          </button>
-          <button className={`view-toggle-btn${view === "tara" ? " active" : ""}`} onClick={() => setView("tara")}>
-            <span className="tara-tab-t">T</span>
-            <span>Tara</span>
-          </button>
-          <button className={`view-toggle-btn${view === "today" ? " active" : ""}`} onClick={() => setView("today")}>
-            <TodayIcon />
-            <span>Today</span>
-          </button>
-          <button className={`view-toggle-btn${view === "inbox" ? " active" : ""}`} onClick={() => setView("inbox")}>
-            <InboxIcon />
-            <span>Inbox</span>
-            {pendingInbox > 0 && <span className="inbox-badge">{pendingInbox}</span>}
-          </button>
-          <button className={`view-toggle-btn${view === "clients" ? " active" : ""}`} onClick={() => setView("clients")}>
-            <ClientsIcon />
-            <span>Clients</span>
-          </button>
-        </nav>
 
         <div className="app-header-actions">
           {view === "inbox" && (
@@ -362,7 +332,18 @@ export default function App() {
               )}
             </div>
           )}
-          {(view === "board" || view === "tara") && (
+          {view === "board" && (
+            <button
+              className={`tara-chip${taraOnly ? " active" : ""}`}
+              onClick={() => setTaraOnly((v) => !v)}
+              title={taraOnly ? "Showing only Tara's cards" : "Show only Tara's cards"}
+              aria-pressed={taraOnly}
+            >
+              <span className="tara-tab-t">T</span>
+              <span>Tara</span>
+            </button>
+          )}
+          {view === "board" && (
             <div className="filter-dropdown-wrap">
               {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
               <button
@@ -414,33 +395,6 @@ export default function App() {
               )}
             </div>
           )}
-          <div className="filter-dropdown-wrap">
-            {moreOpen && <div className="filter-backdrop" onClick={() => setMoreOpen(false)} />}
-            <button
-              className={`filter-dropdown-btn${view === "sweep" || view === "analytics" ? " active" : ""}`}
-              onClick={() => setMoreOpen((v) => !v)}
-            >
-              More
-              {sweepAttention > 0 && <span className="inbox-badge">{sweepAttention}</span>}
-              <span className="filter-caret">▾</span>
-            </button>
-            {moreOpen && (
-              <div className="filter-dropdown-menu">
-                <button
-                  className={`filter-option${view === "sweep" ? " active" : ""}`}
-                  onClick={() => { setView("sweep"); setMoreOpen(false); }}
-                >
-                  Sweep{sweepAttention > 0 && <span className="inbox-badge" style={{ marginLeft: 6 }}>{sweepAttention}</span>}
-                </button>
-                <button
-                  className={`filter-option${view === "analytics" ? " active" : ""}`}
-                  onClick={() => { setView("analytics"); setMoreOpen(false); }}
-                >
-                  Analytics
-                </button>
-              </div>
-            )}
-          </div>
           {me?.source === "tailscale" && (
             <span className="app-user-pill" title={me.login}>
               {me.name || me.login}
@@ -453,76 +407,83 @@ export default function App() {
         </div>
       </header>
 
-      {view === "board" || view === "tara" ? (
-        loading ? (
-          <div className="loading">Loading projects...</div>
-        ) : (
-          <div className="board-layout">
-            <StatusSidebar
-              active={activeStatus}
-              counts={{
-                in_progress: filtered.in_progress?.length ?? 0,
-                wfhuman:     filtered.wfhuman?.length ?? 0,
-                ice:         filtered.ice?.length ?? 0,
-                completed:   filtered.completed?.length ?? 0,
-              }}
-              onChange={handleActiveStatusChange}
-              mobileOpen={sidebarOpen}
-              onMobileClose={() => setSidebarOpen(false)}
-              onOpenSweep={() => setView("sweep")}
-              sweepCount={sweepAttention}
-            />
-            <div className="board-main">
-              <div className="board-main-toolbar">
-                <button className="sidebar-hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open status menu">
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                    <path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </div>
-              <StatusGrid
-                projects={filtered[activeStatus] || []}
-                onCardClick={handleCardClick}
-                activeTimerIds={activeTimerIds}
-                onStatusChange={handleStatusChange}
-                onToggleTag={handleToggleTag}
-              />
-            </div>
-            {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
-          </div>
-        )
-      ) : view === "inbox" ? (
-        <div className="inbox-view">
-          {inboxLoading ? (
-            <div className="loading">Loading inbox...</div>
-          ) : filteredInbox.length === 0 ? (
-            <div className="inbox-empty">{inboxItems.length === 0 ? "No inbox items. Label an email \"OpenDia Inbox\" in Gmail to get started." : "Nothing to see here."}</div>
-          ) : (
-            <div className="inbox-grid">
-              {filteredInbox.map((item) => (
-                <InboxCard key={item.id} item={item} onClick={setSelectedInboxItem} />
-              ))}
-            </div>
-          )}
-        </div>
-      ) : view === "today" ? (
-        <Today onOpenProject={handleProjectClick} />
-      ) : view === "sweep" ? (
-        <Sweep projects={projects} onOpenProject={handleProjectClick} isAdmin={!!me?.is_admin} />
-      ) : view === "analytics" ? (
-        <Analytics />
-      ) : view === "billing" && me?.is_admin ? (
-        <Billing />
-      ) : view === "newsletter" && me?.is_admin ? (
-        <Newsletter />
-      ) : (
-        <Clients
-          projects={projects}
-          pendingKey={pendingClientKey}
-          onPendingConsumed={() => setPendingClientKey(null)}
-          onProjectClick={handleCardClick}
+      {/* The sidebar is the app's navigation, so it lives in the shell and
+          renders for every view — it used to be board-only, which is why
+          Sweep had to be duplicated into the header's More dropdown. */}
+      <div className="app-layout">
+        {/* collapsed is forced off while the mobile drawer is open — below
+            900px the rail becomes a 240px drawer, and a collapsed one would
+            render as a labelless icon column. */}
+        <NavSidebar
+          view={view}
+          onChange={setView}
+          collapsed={sidebarCollapsed && !sidebarOpen}
+          isAdmin={!!me?.is_admin}
+          badges={{ inbox: pendingInbox, sweep: sweepAttention }}
+          mobileOpen={sidebarOpen}
+          onMobileClose={() => setSidebarOpen(false)}
         />
-      )}
+
+        <main className="app-main">
+          {view === "board" ? (
+            loading ? (
+              <div className="loading">Loading projects...</div>
+            ) : (
+              <>
+                <StatusFilterBar
+                  active={activeStatus}
+                  counts={{
+                    in_progress: filtered.in_progress?.length ?? 0,
+                    wfhuman:     filtered.wfhuman?.length ?? 0,
+                    ice:         filtered.ice?.length ?? 0,
+                    completed:   filtered.completed?.length ?? 0,
+                  }}
+                  onChange={handleActiveStatusChange}
+                />
+                <StatusGrid
+                  projects={filtered[activeStatus] || []}
+                  onCardClick={handleCardClick}
+                  activeTimerIds={activeTimerIds}
+                  onStatusChange={handleStatusChange}
+                  onToggleTag={handleToggleTag}
+                />
+                {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
+              </>
+            )
+          ) : view === "inbox" ? (
+            <div className="inbox-view">
+              {inboxLoading ? (
+                <div className="loading">Loading inbox...</div>
+              ) : filteredInbox.length === 0 ? (
+                <div className="inbox-empty">{inboxItems.length === 0 ? "No inbox items. Label an email \"OpenDia Inbox\" in Gmail to get started." : "Nothing to see here."}</div>
+              ) : (
+                <div className="inbox-grid">
+                  {filteredInbox.map((item) => (
+                    <InboxCard key={item.id} item={item} onClick={setSelectedInboxItem} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : view === "today" ? (
+            <Today onOpenProject={handleProjectClick} />
+          ) : view === "sweep" ? (
+            <Sweep projects={projects} onOpenProject={handleProjectClick} isAdmin={!!me?.is_admin} />
+          ) : view === "analytics" ? (
+            <Analytics />
+          ) : view === "billing" && me?.is_admin ? (
+            <Billing />
+          ) : view === "newsletter" && me?.is_admin ? (
+            <Newsletter />
+          ) : (
+            <Clients
+              projects={projects}
+              pendingKey={pendingClientKey}
+              onPendingConsumed={() => setPendingClientKey(null)}
+              onProjectClick={handleCardClick}
+            />
+          )}
+        </main>
+      </div>
 
       {selectedProject && (
         <CardModal
@@ -553,12 +514,8 @@ export default function App() {
         onSelectProject={(p) => setSelectedProjectId(p.id)}
         onSelectCompany={(key) => { setPaletteOpen(false); openClientPanel(key); }}
         onOpenThemeModal={() => { setPaletteOpen(false); setThemeModalOpen(true); }}
-        onOpenAnalytics={() => { setPaletteOpen(false); setView("analytics"); }}
-        onOpenToday={() => { setPaletteOpen(false); setView("today"); }}
-        onOpenSweep={() => { setPaletteOpen(false); setView("sweep"); }}
+        onNavigate={(key) => { setPaletteOpen(false); setView(key); }}
         isAdmin={!!me?.is_admin}
-        onOpenBilling={() => { setPaletteOpen(false); setView("billing"); }}
-        onOpenNewsletter={() => { setPaletteOpen(false); setView("newsletter"); }}
       />
       {themeModalOpen && (
         <ThemeModal

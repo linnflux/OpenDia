@@ -1,19 +1,24 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { NAV_ITEMS } from "../constants.js";
 
 const BG_STORAGE_KEY = "opendia-bg-image";
 const BG_POSITION_KEY = "opendia-bg-position";
 
-function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onOpenAnalytics, onOpenToday, onOpenSweep, isAdmin, onOpenBilling, onOpenNewsletter }) {
+// Destinations come from NAV_ITEMS, the same array the sidebar renders, so the
+// palette can never fall out of sync with the visible navigation. Only the
+// palette-specific commands (theme, refresh, wallpaper) are listed here.
+function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onNavigate, isAdmin }) {
   return [
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", action: onRefresh },
     { id: "theme-select", icon: "\u25D0", label: "Select Theme\u2026", action: onOpenThemeModal },
-    { id: "today", icon: "\u{1F4C5}", label: "Open Today", action: onOpenToday },
-    { id: "sweep", icon: "\u26A1", label: "Open Sweep", action: onOpenSweep },
-    { id: "analytics", icon: "\u{1F4CA}", label: "Open Analytics", action: onOpenAnalytics },
-    ...(isAdmin ? [
-      { id: "billing", icon: "\u{1F4B0}", label: "Open Billing", action: onOpenBilling },
-      { id: "newsletter", icon: "\u{1F4F0}", label: "Open Newsletter", action: onOpenNewsletter },
-    ] : []),
+    ...NAV_ITEMS
+      .filter((item) => !item.adminOnly || isAdmin)
+      .map((item) => ({
+        id: `nav-${item.key}`,
+        icon: item.icon,
+        label: `Open ${item.label}`,
+        action: () => onNavigate(item.key),
+      })),
     { id: "upload-bg", icon: "\u{1F5BC}", label: "Upload Background Image", action: onUploadBg },
     ...(hasBg
       ? [
@@ -24,7 +29,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onO
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, onOpenThemeModal, onOpenAnalytics, onOpenToday, onOpenSweep, isAdmin, onOpenBilling, onOpenNewsletter }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, onOpenThemeModal, onNavigate, isAdmin }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -119,14 +124,10 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
       onReposition: handleStartReposition,
       hasBg: !!bgImage,
       onOpenThemeModal: () => { onOpenThemeModal(); onClose(); },
-      onOpenAnalytics: () => { onOpenAnalytics?.(); onClose(); },
-      onOpenToday: () => { onOpenToday?.(); onClose(); },
-      onOpenSweep: () => { onOpenSweep?.(); onClose(); },
+      onNavigate: (key) => { onNavigate?.(key); onClose(); },
       isAdmin,
-      onOpenBilling: () => { onOpenBilling?.(); onClose(); },
-      onOpenNewsletter: () => { onOpenNewsletter?.(); onClose(); },
     }),
-    [bgImage, bgPosition, onRefresh, onClose, onOpenThemeModal, onOpenAnalytics, onOpenToday, onOpenSweep, isAdmin, onOpenBilling, onOpenNewsletter]
+    [bgImage, bgPosition, onRefresh, onClose, onOpenThemeModal, onNavigate, isAdmin]
   );
 
   const filteredActions = useMemo(() => {

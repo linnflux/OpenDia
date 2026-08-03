@@ -112,7 +112,7 @@ body.has-bg::before {
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  body.has-bg .status-sidebar {
+  body.has-bg .nav-sidebar {
     background: color-mix(in srgb, var(--bg-surface) var(--glass-sidebar), transparent);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
     backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
@@ -121,16 +121,27 @@ body.has-bg::before {
 
   /* Sidebar row states are solid fills by default — soften them so they
      read as tint on glass rather than opaque blocks punched through it. */
-  body.has-bg .status-sidebar-item:hover {
+  body.has-bg .nav-sidebar-item:hover {
     background: color-mix(in srgb, var(--bg-card) 45%, transparent);
   }
 
-  body.has-bg .status-sidebar-item.active {
+  body.has-bg .nav-sidebar-item.active {
     background: color-mix(in srgb, var(--bg-card) 60%, transparent);
   }
 
-  body.has-bg .status-sidebar-count {
+  body.has-bg .nav-sidebar-count,
+  body.has-bg .status-filter-count {
     background: color-mix(in srgb, var(--badge-bg) 55%, transparent);
+  }
+
+  /* The status pills sit on the wallpaper with no surface behind them, so
+     they need the same treatment or they read as an opaque strip. One
+     backdrop each, but there are only ever four. */
+  body.has-bg .status-filter-pill {
+    background: color-mix(in srgb, var(--bg-surface) var(--glass-card), transparent);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
   }
 
   /* Cards sit directly on the wallpaper (the grid has no surface of its
@@ -155,20 +166,24 @@ body.has-bg::before {
 @media (prefers-reduced-transparency: reduce) {
   body.has-bg::before { background: var(--bg-overlay); }
 
-  body.has-bg .status-sidebar,
+  body.has-bg .nav-sidebar,
+  body.has-bg .status-filter-pill,
   body.has-bg .card {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
 
-  body.has-bg .status-sidebar { background: var(--bg-surface); }
+  body.has-bg .nav-sidebar,
+  body.has-bg .status-filter-pill { background: var(--bg-surface); }
   body.has-bg .card { background: var(--bg-card); }
 }
 
+/* No horizontal padding: the header and .app-main each carry their own, so
+   this was a third inset that cost 32px of card width at every viewport. */
 .app {
   position: relative;
   z-index: 1;
-  padding: 1rem;
+  padding: 1rem 0;
   max-width: 100%;
 }
 
@@ -177,7 +192,7 @@ body.has-bg::before {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1.5rem;
-  padding: 0 0.5rem;
+  padding: 0 1.5rem;
   position: relative;
 }
 
@@ -190,6 +205,58 @@ body.has-bg::before {
 .app-mark {
   height: 32px;
   width: auto;
+}
+
+/* Collapse the desktop rail. Hidden below 900px, where the rail is a drawer
+   and the hamburger takes over instead. */
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.3rem;
+  border-radius: var(--radius-sm);
+  transition: color 0.12s, background 0.12s;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+/* Mirror image of the above: drawer trigger, mobile only. */
+.sidebar-hamburger {
+  display: none;
+}
+
+/* Tara is a filter on the board, not a destination — so it is a toggle chip
+   beside the division filter rather than a nav tab. */
+.tara-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.tara-chip:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.tara-chip.active {
+  background: var(--pill-active-bg);
+  border-color: var(--pill-active-border);
+  color: var(--pill-active-color);
 }
 
 .app-wordmark {
@@ -1630,108 +1697,19 @@ body.has-bg::before {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-/* View toggle */
-.view-toggle {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.view-toggle-btn {
-  padding: 0.25rem 0.75rem;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-}
-
-.view-toggle-btn:not(:last-child) {
-  border-right: 1px solid var(--border);
-}
-
-.view-toggle-btn.active {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-}
-
-.view-toggle-btn:hover:not(.active) {
-  background: var(--bg-surface);
-}
-
-.view-toggle-centered {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.view-toggle-btn svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  opacity: 0.7;
-  transition: opacity 0.15s;
-}
-
-.view-toggle-btn.active svg {
-  opacity: 1;
-}
-
-.view-toggle-btn.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
-}
+/* The top-bar view toggle (.view-toggle*) and its .inbox-badge lived here.
+   Navigation moved into the sidebar, so all of it is gone — the sidebar owns
+   the destinations and .nav-sidebar-count owns the badges. */
 
 @media (max-width: 900px) {
-  .view-toggle-centered {
-    position: static;
-    transform: none;
-    margin: 0 auto;
-    order: 3;
-    max-width: 100%;
-  }
   .app-header {
     flex-wrap: wrap;
     gap: 0.5rem;
-  }
-  /* The strip clips overflow (for the rounded-corner border), so let it
-     scroll horizontally instead of silently cutting off the last tab. */
-  .view-toggle {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
-  }
-  .view-toggle-btn {
-    min-height: 40px;
-    padding: 0.5rem 0.65rem;
-    flex-shrink: 0;
   }
   /* Meaningless on touch and eats header width */
   .cp-trigger-kbd {
     display: none;
   }
-}
-
-.inbox-badge {
-  background: #ef4444;
-  color: #fff;
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 0.1rem 0.35rem;
-  border-radius: var(--radius-pill);
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 /* Inbox view */
@@ -3385,11 +3363,11 @@ body.has-bg::before {
   color: #22c55e;
   margin-top: 0.15rem;
 }
-.status-sidebar-divider {
+.nav-sidebar-divider {
   border-top: 1px solid var(--border);
   margin: 0.4rem 0.75rem;
 }
-.status-sidebar-count.sweep-attention {
+.nav-sidebar-count.sweep-attention {
   background: rgba(239,68,68,0.18);
   color: #ef4444;
 }
@@ -4210,14 +4188,18 @@ body.has-bg::before {
   margin-left: auto;
 }
 
-/* ── Sidebar layout ──────────────────────────────────────────── */
-.board-layout {
+/* ── App shell layout ────────────────────────────────────────────
+   The sidebar is the app's navigation, so this wraps EVERY view, not
+   just the board. Collapsing it to an icon rail is what buys back a
+   third card column between 976px and 1140px.
+   ────────────────────────────────────────────────────────────── */
+.app-layout {
   display: flex;
   height: calc(100vh - 3.75rem);
   overflow: hidden;
 }
 
-.status-sidebar {
+.nav-sidebar {
   width: 220px;
   flex-shrink: 0;
   background: var(--bg-surface);
@@ -4227,9 +4209,33 @@ body.has-bg::before {
   padding: 0.75rem 0;
   gap: 0.125rem;
   overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.15s ease;
 }
 
-.status-sidebar-item {
+.nav-sidebar.collapsed {
+  width: 56px;
+}
+
+.nav-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.nav-sidebar-section + .nav-sidebar-section {
+  margin-top: 0.6rem;
+}
+
+.nav-sidebar-heading {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  padding: 0.35rem 1rem 0.2rem;
+}
+
+.nav-sidebar-item {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -4243,30 +4249,33 @@ body.has-bg::before {
   letter-spacing: 0.06em;
   cursor: pointer;
   text-align: left;
+  white-space: nowrap;
   transition: background 0.12s, color 0.12s;
 }
 
-.status-sidebar-item:hover {
+.nav-sidebar-item:hover {
   background: var(--bg-card);
   color: var(--text-primary);
 }
 
-.status-sidebar-item.active {
+.nav-sidebar-item.active {
   background: var(--bg-card);
+  color: var(--text-primary);
+  border-left-color: var(--accent);
   font-weight: 700;
 }
 
-.status-sidebar-icon {
+.nav-sidebar-icon {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 
-.status-sidebar-label {
+.nav-sidebar-label {
   flex: 1;
 }
 
-.status-sidebar-count {
+.nav-sidebar-count {
   background: var(--badge-bg);
   color: var(--text-secondary);
   font-size: 0.7rem;
@@ -4277,18 +4286,91 @@ body.has-bg::before {
   text-align: center;
 }
 
-/* ── Board main area ─────────────────────────────────────────── */
-.board-main {
+/* Collapsed: icons centred, labels gone, badges shrink to a corner dot-pill
+   so a count is still visible without a label to sit beside. */
+.nav-sidebar.collapsed .nav-sidebar-item {
+  justify-content: center;
+  padding: 0.6rem 0;
+  gap: 0;
+  position: relative;
+}
+
+.nav-sidebar.collapsed .nav-sidebar-count {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.25rem;
+  min-width: 0;
+  padding: 0 0.25rem;
+  font-size: 0.6rem;
+  line-height: 1.4;
+}
+
+.nav-sidebar.collapsed .nav-sidebar-section + .nav-sidebar-section {
+  margin-top: 0.25rem;
+}
+
+/* ── Main pane ───────────────────────────────────────────────── */
+.app-main {
   flex: 1;
   overflow-y: auto;
   padding: 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0;
 }
 
-.board-main-toolbar {
-  display: none;
+/* ── Board status filter ─────────────────────────────────────────
+   Was the sidebar's job until the sidebar became navigation. Sits
+   directly above the cards it filters.
+   ────────────────────────────────────────────────────────────── */
+.status-filter-bar {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.status-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.status-filter-pill:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.status-filter-pill.active {
+  font-weight: 700;
+}
+
+.status-filter-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.status-filter-count {
+  background: var(--badge-bg);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-pill);
+  min-width: 1.4rem;
+  text-align: center;
 }
 
 /* ── Status card grid ────────────────────────────────────────── */
@@ -4389,13 +4471,16 @@ body.has-bg::before {
 
 /* ── Mobile: hamburger + drawer ──────────────────────────────── */
 @media (max-width: 900px) {
-  .board-layout {
+  .app-layout {
     flex-direction: column;
     height: auto;
     overflow: visible;
   }
 
-  .status-sidebar {
+  /* Drawer. Width is fixed here so a collapsed rail doesn't produce a
+     56px-wide drawer — collapse is a desktop affordance only. */
+  .nav-sidebar,
+  .nav-sidebar.collapsed {
     position: fixed;
     top: 0;
     left: -260px;
@@ -4407,7 +4492,8 @@ body.has-bg::before {
     padding-top: 1rem;
   }
 
-  .status-sidebar.open {
+  .nav-sidebar.open,
+  .nav-sidebar.collapsed.open {
     left: 0;
     box-shadow: 4px 0 24px rgba(0,0,0,0.4);
   }
@@ -4420,7 +4506,7 @@ body.has-bg::before {
     background: rgba(0,0,0,0.4);
   }
 
-  .board-main {
+  .app-main {
     padding: 0.75rem 1rem;
   }
 
@@ -4428,12 +4514,14 @@ body.has-bg::before {
     padding: 1rem;
   }
 
-  .board-main-toolbar {
-    display: flex;
-    align-items: center;
+  /* Collapse toggle is meaningless once the rail is a drawer */
+  .sidebar-toggle {
+    display: none;
   }
 
   .sidebar-hamburger {
+    display: flex;
+    align-items: center;
     background: none;
     border: none;
     color: var(--text-secondary);
