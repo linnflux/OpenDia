@@ -218,7 +218,14 @@ body.has-bg::before {
    and the hamburger takes over instead. */
 /* --text-primary, not --text-muted: a 1.5px stroke icon needs the contrast,
    and muted only reached 2.3-3.4:1 against --bg-body depending on theme. */
+/* The negative margin-left pulls the icon onto the same vertical line as the
+   sidebar's own icons — measured, it sat 7.8px to their right with the rail
+   collapsed. The equal-and-opposite margin-right leaves the total advance
+   unchanged so the logo does not move. Aligning to the COLLAPSED rail leaves
+   it ~2.5px off the expanded one, which still reads as aligned and avoids the
+   icon jumping sideways every time you toggle. */
 .sidebar-toggle {
+  --toggle-align-shift: 7.8px;
   display: flex;
   align-items: center;
   background: none;
@@ -226,6 +233,8 @@ body.has-bg::before {
   color: var(--text-primary);
   cursor: pointer;
   padding: 0.3rem;
+  margin-left: calc(-1 * var(--toggle-align-shift));
+  margin-right: var(--toggle-align-shift);
   border-radius: var(--radius-sm);
   transition: color 0.12s, background 0.12s;
 }
