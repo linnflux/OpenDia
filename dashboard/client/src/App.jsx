@@ -548,6 +548,7 @@ export default function App() {
           onUpdate={handleModalUpdate}
           hasActiveTimer={activeTimerIds.has(selectedProject.id)}
           onInboxItemClick={handleInboxItemClick}
+          isAdmin={!!me?.is_admin}
         />
       )}
       {selectedInboxItem && (

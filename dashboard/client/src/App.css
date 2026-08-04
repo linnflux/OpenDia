@@ -4752,3 +4752,600 @@ body.has-bg::before {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Spark Panel ─────────────────────────────────────────────────────────────
+   Deliberately NOT a terminal: sans-serif body copy, generous whitespace, no
+   cursor, no fixed-width columns. The only monospace element is the
+   first-action chip, because it is literally a command. */
+
+.spark-panel {
+  padding: 0 0.5rem 0.5rem;
+}
+
+.spark-stage {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  min-height: 340px;
+}
+
+/* ── idle ── */
+
+.spark-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 1.25rem;
+}
+
+.spark-idle-copy {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.spark-go {
+  padding: 0.6rem 2.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--launch-color, #fff);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.spark-go:hover:not(:disabled) { background: var(--accent-hover); }
+.spark-go:active:not(:disabled) { transform: translateY(1px); }
+.spark-go:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.spark-last-run {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 46ch;
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.spark-last-run:hover { border-color: var(--border-hover); }
+.spark-last-run-meta { font-size: 0.7rem; color: var(--text-faint); }
+.spark-last-run-headline { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4; }
+
+/* ── thinking ── */
+
+.spark-thinking {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-height: 1.8rem;
+  margin-bottom: 1.5rem;
+}
+
+.spark-thinking-verb {
+  font-size: 1.02rem;
+  color: var(--text-secondary);
+  animation: spark-verb-in 0.25s ease-out;
+  background: linear-gradient(
+    90deg,
+    var(--text-secondary) 0%,
+    var(--text-primary) 45%,
+    var(--text-secondary) 90%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: spark-verb-in 0.25s ease-out, spark-shimmer 2.6s linear infinite;
+}
+
+@keyframes spark-verb-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spark-shimmer {
+  from { background-position: 120% 0; }
+  to   { background-position: -120% 0; }
+}
+
+.spark-dots { display: inline-flex; gap: 3px; }
+.spark-dot {
+  width: 4px; height: 4px;
+  border-radius: var(--radius-circle);
+  background: var(--text-faint);
+  animation: spark-dot-bounce 1.2s ease-in-out infinite;
+}
+.spark-dot:nth-child(2) { animation-delay: 0.15s; }
+.spark-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes spark-dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30%           { transform: translateY(-3px); opacity: 1; }
+}
+
+/* ── front checklist ── */
+
+.spark-fronts {
+  list-style: none;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.spark-front {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  animation: spark-front-in 0.3s ease-out backwards;
+}
+@keyframes spark-front-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.spark-front-glyph {
+  width: 1rem;
+  flex: 0 0 1rem;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 0.8rem;
+}
+.spark-front-spin {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: var(--radius-circle);
+  animation: spin 1s linear infinite;
+}
+
+.spark-front-label { color: var(--text-secondary); min-width: 8.5rem; }
+.spark-front-detail { color: var(--text-muted); font-size: 0.78rem; }
+
+.spark-front.is-done .spark-front-glyph { color: var(--timer-open); }
+.spark-front.is-done .spark-front-label { color: var(--text-primary); }
+/* Skipped fades back; unavailable stays at full weight — an unread front is
+   information, and it just cost 15 points of certitude. */
+.spark-front.is-skipped { opacity: 0.55; }
+.spark-front.is-unavailable .spark-front-glyph { color: var(--pill-warn-color); }
+.spark-front.is-unavailable .spark-front-detail { color: var(--pill-warn-color); }
+
+/* ── running footer ── */
+
+.spark-runfoot {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.78rem;
+}
+.spark-elapsed { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.spark-elapsed.over { color: var(--pill-warn-color); }
+.spark-elapsed-of { color: var(--text-faint); }
+.spark-accrual { color: var(--text-muted); }
+.spark-cancel {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.spark-cancel:hover { color: var(--text-primary); }
+
+/* ── certitude ── */
+
+.spark-certitude { margin-bottom: 1.4rem; }
+.spark-certitude-head { display: flex; align-items: baseline; gap: 0.6rem; }
+.spark-certitude-num {
+  font-size: 2.2rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.spark-certitude-band {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.spark-certitude-track {
+  height: 6px;
+  margin-top: 0.6rem;
+  background: var(--bg-input);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.spark-certitude-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width 0.15s linear;
+}
+.spark-certitude-reason {
+  margin: 0.55rem 0 0;
+  font-size: 0.79rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* ── recommendation ── */
+
+.spark-headline {
+  margin: 0 0 1rem;
+  font-size: 1.14rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-heading);
+  max-width: 56ch;
+}
+
+.spark-nextstep {
+  padding: 0.9rem 1.05rem;
+  margin-bottom: 1.1rem;
+  background: var(--next-step-modal-bg);
+  border: 1px solid var(--next-step-modal-border);
+  border-radius: var(--radius-md);
+}
+.spark-nextstep-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.4rem;
+}
+.spark-nextstep-owner {
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-pill);
+  background: var(--pill-active-bg);
+  color: var(--pill-active-color);
+  border: 1px solid var(--pill-active-border);
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 0.7rem;
+}
+.spark-nextstep-when { letter-spacing: 0; text-transform: none; }
+.spark-nextstep-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--next-step-modal-color);
+}
+.spark-nextstep-action {
+  margin-top: 0.65rem;
+  padding: 0.3rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  background: var(--kbd-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.spark-nextstep-action:hover { border-color: var(--border-hover); color: var(--text-primary); }
+
+/* ── who does what ── */
+
+.spark-who { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.1rem; }
+.spark-who-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+}
+.spark-who-main { display: flex; align-items: baseline; gap: 0.5rem; flex: 1; min-width: 0; }
+.spark-who-name { font-weight: 600; color: var(--text-primary); flex: 0 0 auto; }
+.spark-who-does { color: var(--text-secondary); line-height: 1.5; }
+.spark-who-when {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.7rem;
+  border-radius: var(--radius-pill);
+  background: var(--pill-active-bg);
+  color: var(--pill-active-color);
+  border: 1px solid var(--pill-active-border);
+}
+.spark-who-blocked {
+  flex-basis: 100%;
+  padding-left: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--pill-warn-color);
+}
+
+.spark-risk {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.81rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.spark-risk-label {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pill-warn-color);
+  padding-top: 0.15rem;
+}
+
+/* ── report body ── */
+
+.spark-body-wrap { position: relative; margin-bottom: 1.25rem; }
+.spark-body {
+  max-width: 62ch;
+  line-height: 1.65;
+  font-family: var(--font-sans);
+}
+.spark-skip-hint {
+  position: absolute;
+  right: 0;
+  bottom: -1.1rem;
+  font-size: 0.68rem;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+/* ── footer ── */
+
+.spark-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-subtle);
+}
+.spark-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.spark-chip {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+}
+.spark-chip-warn { color: var(--pill-warn-color); cursor: help; }
+
+.spark-actions-row { display: flex; gap: 0.45rem; margin-left: auto; flex-wrap: wrap; }
+.spark-btn {
+  padding: 0.35rem 0.75rem;
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.spark-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+}
+.spark-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.spark-btn-primary {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.spark-btn-primary:hover:not(:disabled) {
+  color: var(--launch-color, #fff);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── error ── */
+
+.spark-error { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; text-align: center; }
+.spark-error-msg { margin: 0; max-width: 56ch; color: var(--danger, #ef4444); font-size: 0.86rem; line-height: 1.55; }
+.spark-error-raw { width: 100%; max-width: 62ch; text-align: left; }
+.spark-error-raw summary { font-size: 0.75rem; color: var(--text-muted); cursor: pointer; }
+.spark-error-raw pre {
+  margin-top: 0.5rem;
+  max-height: 240px;
+  overflow: auto;
+  padding: 0.6rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+}
+
+.modal-tab-dot-spark { background: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .spark-thinking-verb,
+  .spark-dot,
+  .spark-front,
+  .spark-front-spin {
+    animation: none !important;
+  }
+  .spark-thinking-verb {
+    background: none;
+    -webkit-text-fill-color: var(--text-secondary);
+    color: var(--text-secondary);
+  }
+  .spark-certitude-fill { transition: none; }
+}
+
+/* ── Spark: proposals, drafts, ledger ────────────────────────────────────── */
+
+.spark-proposals, .spark-handoffs { margin-top: 1.4rem; }
+
+.spark-proposals-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.spark-proposals-round { margin-left: auto; letter-spacing: 0; text-transform: none; }
+
+.spark-action {
+  padding: 0.8rem 0.95rem;
+  margin-bottom: 0.6rem;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s, opacity 0.15s;
+}
+.spark-action.picked-do { border-color: var(--accent); }
+.spark-action.picked-skip { opacity: 0.5; }
+
+.spark-action-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+.spark-action-label { font-size: 0.86rem; font-weight: 600; color: var(--text-primary); }
+.spark-action-mins {
+  margin-left: auto;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.68rem;
+  border-radius: var(--radius-pill);
+  background: var(--pill-active-bg);
+  color: var(--pill-active-color);
+  border: 1px solid var(--pill-active-border);
+}
+.spark-tier-badge {
+  padding: 0.05rem 0.45rem;
+  font-size: 0.65rem;
+  border-radius: var(--radius-pill);
+  background: var(--pill-warn-bg);
+  color: var(--pill-warn-color);
+  border: 1px solid var(--pill-warn-border);
+}
+.spark-action-what { margin: 0 0 0.25rem; font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary); }
+.spark-action-why { margin: 0; font-size: 0.76rem; line-height: 1.5; color: var(--text-muted); }
+.spark-action-preview {
+  display: block;
+  margin-top: 0.45rem;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--kbd-bg);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre;
+}
+.spark-action-buttons { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
+.spark-btn-chosen { border-color: var(--border-hover); color: var(--text-primary); background: var(--bg-hover); }
+
+.spark-proposals-run { display: flex; align-items: center; gap: 0.7rem; margin-top: 0.8rem; }
+.spark-proposals-hint { font-size: 0.72rem; color: var(--text-faint); }
+
+.spark-handoff {
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.5rem;
+  border-left: 2px solid var(--pill-warn-color);
+  background: var(--bg-recessed);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* ── drafts ── */
+
+.spark-draft {
+  margin-top: 1.2rem;
+  padding: 0.9rem 1rem;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.spark-draft-head { display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.6rem; }
+.spark-draft-title { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+.spark-draft-unsent { font-size: 0.7rem; color: var(--text-faint); }
+.spark-draft-sent { font-size: 0.7rem; color: var(--timer-open); }
+.spark-draft-field {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  padding: 0.15rem 0;
+}
+.spark-draft-field span { flex: 0 0 4rem; color: var(--text-faint); }
+.spark-draft-body {
+  margin: 0.6rem 0 0;
+  padding: 0.7rem 0.85rem;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.spark-draft-actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.7rem; }
+.spark-draft-arming { font-size: 0.78rem; color: var(--pill-warn-color); font-variant-numeric: tabular-nums; }
+
+/* ── ledger ── */
+
+.spark-ledger { list-style: none; margin: 1.1rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.spark-ledger-row { display: flex; gap: 0.55rem; align-items: baseline; font-size: 0.78rem; color: var(--text-muted); }
+.spark-ledger-glyph { flex: 0 0 0.9rem; text-align: center; color: var(--text-faint); }
+.spark-ledger-row.is-done .spark-ledger-glyph { color: var(--timer-open); }
+.spark-ledger-row.is-sent .spark-ledger-glyph { color: var(--timer-open); }
+.spark-ledger-row.is-failed .spark-ledger-glyph,
+.spark-ledger-row.is-warn .spark-ledger-glyph,
+.spark-ledger-row.is-blocked .spark-ledger-glyph { color: var(--pill-warn-color); }
+
+.spark-acting { margin-top: 1rem; }
+
+.spark-ballmoved {
+  display: flex;
+  gap: 0.6rem;
+  margin: 1rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.spark-ballmoved span {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-top: 0.15rem;
+}
+
+.spark-accrual-pause {
+  margin: 1.1rem 0 0;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--pill-warn-color);
+  background: var(--pill-warn-bg);
+  border: 1px solid var(--pill-warn-border);
+  border-radius: var(--radius-sm);
+}

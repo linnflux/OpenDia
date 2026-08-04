@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { marked } from "marked";
 import TerminalPanel from "./TerminalPanel.jsx";
+import SparkPanel from "./SparkPanel.jsx";
+import useSparkRun from "../hooks/useSparkRun.js";
 import { TAGS, hasTag, toggleTag } from "../tags.js";
 import { DIVISION_COLORS, DIVISION_LOGOS, STATUS_OPTIONS as STATUSES } from "../constants.js";
 
@@ -75,7 +77,7 @@ const INBOX_STATUS_DOT = {
   dismissed: "#475569",
 };
 
-export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick }) {
+export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
@@ -95,6 +97,9 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [notionTitle, setNotionTitle] = useState(null);
   const [divisionOpen, setDivisionOpen] = useState(false);
   const [tab, setTab] = useState("details");
+  // Owned here, not in SparkPanel: panels unmount on every tab switch, and a
+  // run has to survive a glance at Details.
+  const spark = useSparkRun(project.id);
   const backdropRef = useRef(null);
   const notesRef = useRef(null);
 
@@ -481,9 +486,27 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
             Terminal
             {project.tmux_session && <span className="modal-tab-dot" />}
           </button>
+          <button
+            className={`modal-tab${tab === "spark" ? " active" : ""}`}
+            onClick={() => setTab("spark")}
+          >
+            Spark
+            {spark.status === "scanning" && <span className="modal-tab-dot modal-tab-dot-spark" />}
+          </button>
         </div>
 
         {tab === "terminal" && <TerminalPanel project={project} hasActiveTimer={hasActiveTimer} />}
+
+        {tab === "spark" && (
+          <SparkPanel
+            spark={spark}
+            project={project}
+            onUpdate={onUpdate}
+            showToast={showToast}
+            onGoToTerminal={() => setTab("terminal")}
+            isAdmin={isAdmin}
+          />
+        )}
 
         {tab === "details" && <>
 

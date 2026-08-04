@@ -174,6 +174,22 @@ od-room close <id|all>
 
 Runs as a systemd user service (`opendia-rooms`), stdlib-only Python (Pillow optional, for thumbnails), registry persisted to a JSON file so rooms survive restarts. Served over HTTPS via `tailscale serve`, which terminates TLS with an auto-renewed ts.net certificate — the daemon never touches certs, and requests arriving through the proxy are recognized by their injected identity headers so they can't inherit local-process trust. See [`docs/rooms.md`](docs/rooms.md).
 
+## Spark — the Next-Step Tab
+
+A project card's Details tab shows stored fields, which are a snapshot rather than state, and its Terminal tab mirrors a tmux session. Neither answers the question actually being asked when a card is reopened after three quiet weeks: **what changed, whose court is the ball in, and what happens next?**
+
+**Spark** is a third tab that answers it, and then offers to do something about it. Press Go and it sweeps six fronts for that card — recent work sessions, the Notion task, email (including an `in:draft` check, because an unsent draft is a silent blocker), Google Voice relay texts, Google Chat, and whether the artifacts on disk actually moved — then reports one next step, who has to do what, and **how certain it is**, rated 0-100 with a reason that has to name the specific unknown.
+
+Then it proposes at most three things worth doing right now. Each is approved or skipped individually; only the approved ones run, in the same session that did the sweep, so every finding is still in context. A round can propose the next set, so the ball moves several spaces without ever opening a terminal.
+
+- **The pane is not a terminal.** Sans-serif, generous whitespace, no cursor. While it works, a thinking line and a front-by-front checklist tick over; when the answer lands it types itself out on an accelerating curve. Reduced-motion renders instantly, a click skips, and a replay never re-animates something already read.
+- **Tiered by what it may touch.** Tier 1 is performed on approval (card and Notion updates, drafting a reply, opening a Room, read-only diagnostics). Tier 2 is only *sending* a drafted email, and the dashboard does it after a human reads the exact text and a Send button arms for three seconds. Tier 3 — servers, live client systems, calendar, money, git — is never performed; it becomes a handoff brief and a working session.
+- **The tiers are enforced, not requested.** `--disallowedTools` removes tools from the session outright (it holds even under bypassed permissions, unlike `--allowedTools`, which is merely additive), and a PreToolUse guard hook fences the shell, which has no tool name to deny — no outbound mail, no remote systems, no git writes, no file writes outside the run directory. Every refusal is logged. The model never holds the ability to send email.
+- **It bills like a human would.** A Spark opens a timer at a 15-minute estimate — the cost of diving back into a project to refresh yourself — and each completed action adds its own minutes, pausing at 60 so continuing becomes an explicit decision. The timer starts *lazily*, on the first completed front, so a run that dies in its first twenty seconds leaves nothing in the ledger. Its state file carries a deliberately empty session name so the Terminal tab's own timer logic can never confuse the two.
+- **Report text is treated as hostile.** It is derived from client email and chat, so every string is escaped server-side before it leaves the API: markdown still renders, HTML cannot.
+
+Streamed over SSE with a full snapshot on connect, so switching tabs, closing the modal or reloading the page all resume the same run. See [`docs/spark.md`](docs/spark.md).
+
 ## Custom Commands
 
 Custom commands are markdown prompt files that define repeatable workflows. The Operator types a slash command, and Claude executes the full routine.
@@ -427,6 +443,7 @@ Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk)
 | [`docs/outage-fallback.md`](docs/outage-fallback.md) | AI provider outage runbook, what degrades, Bedrock setup |
 | [`docs/session-reaper.md`](docs/session-reaper.md) | Idle session reclamation, protections, disaster recovery |
 | [`docs/rooms.md`](docs/rooms.md) | Standing file-exchange daemon, room lifecycle, security posture |
+| [`docs/spark.md`](docs/spark.md) | Next-step tab: front sweep, certitude rubric, action tiers and how they're enforced |
 
 Reference formats and config templates live in [`examples/`](examples/): a completed [time entry](examples/time-entry.md), a running [timer state file](examples/timer-state.json), and templates for [`.opendia.conf`](examples/opendia.conf.example) and [`.od-fallback.conf`](examples/od-fallback.conf.example).
 
