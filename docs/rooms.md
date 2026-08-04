@@ -10,7 +10,7 @@ habit of binding `0.0.0.0`.
 ## Usage
 
 ```
-od-room open <dir> [--read-only] [--name NAME]   # → http://<host>:9099/r/<id>/
+od-room open <dir> [--read-only] [--name NAME]   # → https://<host>.ts.net:9443/r/<id>/
 od-room list
 od-room close <id|all>       # 'all' lists what it would close and confirms
 ```
@@ -62,12 +62,34 @@ Close button; that view is the hygiene mechanism.
   or any directory containing a `.env` file. This is a mistake-catcher, not a
   security boundary — the tailnet is trusted.
 
+## HTTPS
+
+Rooms are served over HTTPS via `tailscale serve`, which terminates TLS with
+an auto-provisioned, auto-renewed Let's Encrypt cert for the machine's ts.net
+name — the daemon itself never touches certificates:
+
+```
+tailscale serve --bg --https=9443 http://127.0.0.1:9099
+```
+
+The daemon probes the serve config at boot and prints `https://` URLs when the
+proxy exists, falling back to plain http URLs when it doesn't. Direct
+plain-http access on 9099 keeps working either way.
+
+**Gate hardening that makes this safe:** the serve proxy delivers requests
+from loopback, which would open the loopback-only registry API to every
+tailnet member. The daemon therefore treats any loopback request carrying
+proxy-injected headers (`Tailscale-User-Login`, `X-Forwarded-For`) as
+non-local — the same pattern the dashboard uses for its cloudflared tunnel.
+A genuinely local caller that spoofs those headers only locks itself out.
+
 ## Install (new machine)
 
 ```
 cp repo/systemd/opendia-rooms.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now opendia-rooms
+tailscale serve --bg --https=9443 http://127.0.0.1:9099   # HTTPS (optional)
 ```
 
 ## Deliberately not included (build on it later)

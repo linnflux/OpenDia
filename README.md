@@ -172,7 +172,7 @@ od-room close <id|all>
 - The daemon refuses rooms on sensitive paths (home root, `~/.ssh`, credential dirs, anything containing a `.env`) — a mistake-catcher, not a security boundary.
 - The management API answers loopback only (it reveals filesystem paths); the dashboard reaches it through an admin-gated proxy, and the CLI talks to it directly.
 
-Runs as a systemd user service (`opendia-rooms`), stdlib-only Python, registry persisted to a JSON file so rooms survive restarts. See [`docs/rooms.md`](docs/rooms.md).
+Runs as a systemd user service (`opendia-rooms`), stdlib-only Python (Pillow optional, for thumbnails), registry persisted to a JSON file so rooms survive restarts. Served over HTTPS via `tailscale serve`, which terminates TLS with an auto-renewed ts.net certificate — the daemon never touches certs, and requests arriving through the proxy are recognized by their injected identity headers so they can't inherit local-process trust. See [`docs/rooms.md`](docs/rooms.md).
 
 ## Custom Commands
 

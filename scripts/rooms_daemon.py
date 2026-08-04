@@ -158,7 +158,36 @@ TS = tailscale_self()
 URL_HOST = TS["dns_name"] or TS["ip4"] or "127.0.0.1"
 
 
+def serve_https_port() -> int | None:
+    """If `tailscale serve` proxies an HTTPS port to this daemon, prefer it in
+    printed URLs — Tailscale terminates TLS with an auto-renewed ts.net cert,
+    so HTTPS costs this daemon nothing. Probed at boot; if the serve config is
+    ever removed, URLs revert to plain http on the next restart."""
+    try:
+        out = subprocess.run(["tailscale", "serve", "status", "--json"],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:
+            return None
+        cfg = json.loads(out.stdout or "{}")
+        target = f"http://127.0.0.1:{PORT}"
+        for hostport, site in (cfg.get("Web") or {}).items():
+            for handler in (site.get("Handlers") or {}).values():
+                if handler.get("Proxy") == target:
+                    p = int(hostport.rsplit(":", 1)[-1])
+                    if (cfg.get("TCP") or {}).get(str(p), {}).get("HTTPS"):
+                        return p
+    except Exception:
+        pass
+    return None
+
+
+HTTPS_PORT = serve_https_port()
+
+
 def room_url(rid: str) -> str:
+    if HTTPS_PORT and TS["dns_name"]:
+        port = "" if HTTPS_PORT == 443 else f":{HTTPS_PORT}"
+        return f"https://{TS['dns_name']}{port}/r/{rid}/"
     return f"http://{URL_HOST}:{PORT}/r/{rid}/"
 
 
@@ -396,8 +425,21 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"{self.client_address[0]} {fmt % args}", flush=True)
 
-    def _is_loopback(self) -> bool:
-        return self.client_address[0] in ("127.0.0.1", "::1")
+    # Headers the tailscale-serve proxy stamps on everything it forwards
+    # (verified by probing the live proxy). Their presence means the request
+    # originated on the tailnet, not from a local process — even though the
+    # proxy delivers it over loopback.
+    PROXY_HEADERS = ("tailscale-user-login", "x-forwarded-for")
+
+    def _is_local_process(self) -> bool:
+        """True only for genuinely local callers (the CLI, the dashboard's
+        Express proxy). The serve proxy connects from loopback too, so a bare
+        source-address check would open the registry API — which reveals
+        filesystem paths — to every tailnet member over the HTTPS port. Same
+        trap and same fix as the dashboard's cloudflared handling in auth.js."""
+        if self.client_address[0] not in ("127.0.0.1", "::1"):
+            return False
+        return not any(h in self.headers for h in self.PROXY_HEADERS)
 
     def _send(self, code: int, body: bytes, ctype: str = "text/html; charset=utf-8",
               extra: dict | None = None):
@@ -550,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
     # ---- management API (loopback only) ----
 
     def api_list(self):
-        if not self._is_loopback():
+        if not self._is_local_process():
             return self._json(403, {"error": "loopback only"})
         with _lock:
             rooms = []
@@ -561,7 +603,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, sorted(rooms, key=lambda r: r["created"]))
 
     def api_create(self):
-        if not self._is_loopback():
+        if not self._is_local_process():
             return self._json(403, {"error": "loopback only"})
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -593,7 +635,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(201, {**room, "url": room_url(rid)})
 
     def api_close(self, rid: str):
-        if not self._is_loopback():
+        if not self._is_local_process():
             return self._json(403, {"error": "loopback only"})
         with _lock:
             room = _rooms.pop(rid, None)
