@@ -387,6 +387,7 @@ def parse_multipart(spool_path: Path, boundary: bytes) -> list[tuple[str, Path]]
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/assets/mark.svg">
 <title>{title} — OpenDia Rooms</title><style>
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
  background:#0f172a;color:#e2e8f0;max-width:680px;margin:2rem auto;padding:0 1rem}}
