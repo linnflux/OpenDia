@@ -141,6 +141,38 @@ A lightweight dashboard with three coordinated views — **Board** (project kanb
 - **Project matching API:** `GET /api/projects/match?client=X&division=Y` resolves timer fields to a dashboard project, enabling automatic next-step updates when timers end.
 - **Filtered responses:** The projects API excludes completed projects by default for performance at scale (`?include_completed=true` to override).
 
+## Rooms — Standing File Exchange
+
+Agent sessions constantly need to move files between the server and a human's browser: previewing a rendered PDF, handing over a deliverable, receiving a spreadsheet back. Before Rooms, every session improvised a `python3 -m http.server` — re-deciding port, bind address, and cleanup each time, and paying reasoning tokens to do it. In practice that produced orphaned servers, the same directory served on three ports at once, and everything bound to `0.0.0.0`. And `http.server` is download-only, so the upload direction got improvised separately.
+
+Rooms replaces all of that with one long-lived daemon on one fixed port. A **room** is a directory exposed at an unguessable subpath: the page lists the directory's files for download and (unless the room is read-only) has an upload box that writes back into it. Both directions, one URL.
+
+```
+od-room open ~/Deliverables/proposal      → http://<host>:9099/r/a7f3c2Xq/
+od-room open ~/proofs --read-only         → same page, no upload box
+od-room list
+od-room close <id|all>
+```
+
+**Use cases:**
+
+- **Deliverable handoff** — render a PDF on the server, open a room on its directory, send the human one URL. They download it in the browser; no scp, no email attachment.
+- **Round-trip review** — the human downloads a draft from the room, marks it up, and uploads the revision *to the same URL*. The agent reads it straight off disk.
+- **Receiving source files** — "send me the spreadsheet": open a room on an empty working directory, the human drags the file in, the session continues with it immediately.
+- **Preview during remote work** — when the operator is attached over SSH/tmux and can't open GUI apps, any rendered HTML/image/PDF is one `od-room open` away from their browser.
+- **Cheap-model delegation** — the design decisions (port, bind, registry, cleanup) are made once in the daemon, so a small model can handle "get this file to the user" with a single command instead of re-deriving a server.
+
+**Design points:**
+
+- Binds the **Tailscale interface and loopback only** — never `0.0.0.0`. Room ids are `secrets.token_urlsafe` — unguessable, the intended protection level inside a trusted tailnet.
+- **One directory, one room**: opening a dir that already has a room returns the existing URL, so the registry makes duplicate servers structurally impossible.
+- **No TTL by choice** — rooms live until closed. The hygiene mechanism is visibility, not a reaper: the dashboard's admin-only **Rooms** view lists every open room with a copy-URL button and a Close button.
+- Uploads are spooled to disk (500 MB cap, never held in RAM), filenames sanitized, and collisions renamed `file-2.ext` — an upload can never overwrite an existing file.
+- The daemon refuses rooms on sensitive paths (home root, `~/.ssh`, credential dirs, anything containing a `.env`) — a mistake-catcher, not a security boundary.
+- The management API answers loopback only (it reveals filesystem paths); the dashboard reaches it through an admin-gated proxy, and the CLI talks to it directly.
+
+Runs as a systemd user service (`opendia-rooms`), stdlib-only Python, registry persisted to a JSON file so rooms survive restarts. See [`docs/rooms.md`](docs/rooms.md).
+
 ## Custom Commands
 
 Custom commands are markdown prompt files that define repeatable workflows. The Operator types a slash command, and Claude executes the full routine.
@@ -393,6 +425,7 @@ Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk)
 | [`docs/calendar-sync.md`](docs/calendar-sync.md) | Notion task due dates → Google Calendar, dedupe and locking |
 | [`docs/outage-fallback.md`](docs/outage-fallback.md) | AI provider outage runbook, what degrades, Bedrock setup |
 | [`docs/session-reaper.md`](docs/session-reaper.md) | Idle session reclamation, protections, disaster recovery |
+| [`docs/rooms.md`](docs/rooms.md) | Standing file-exchange daemon, room lifecycle, security posture |
 
 Reference formats and config templates live in [`examples/`](examples/): a completed [time entry](examples/time-entry.md), a running [timer state file](examples/timer-state.json), and templates for [`.opendia.conf`](examples/opendia.conf.example) and [`.od-fallback.conf`](examples/od-fallback.conf.example).
 

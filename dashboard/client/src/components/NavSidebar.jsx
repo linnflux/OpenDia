@@ -58,6 +58,13 @@ const NAV_ICONS = {
       <path d="M4 5.5h5M4 8h5M4 10h3" />
     </svg>
   ),
+  rooms: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 13.5V2.5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v11" />
+      <path d="M1.5 13.5h12" />
+      <circle cx="9.5" cy="8" r="0.5" fill="currentColor" />
+    </svg>
+  ),
 };
 
 export default function NavSidebar({

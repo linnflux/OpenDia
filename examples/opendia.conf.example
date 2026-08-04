@@ -40,3 +40,6 @@ NOTION_BUILD_REGISTRY_ID=
 # --- Toggl ------------------------------------------------------------------
 # Numeric workspace ID, visible in the Toggl web app URL.
 TOGGL_WORKSPACE_ID=
+
+# Optional: port for the rooms file-exchange daemon (default 9099)
+# ROOMS_PORT=9099

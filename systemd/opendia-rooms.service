@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenDia Rooms (file-exchange daemon)
+After=network.target tailscaled.service
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/OpenDia/repo/scripts/rooms_daemon.py
+Restart=always
+RestartSec=5
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

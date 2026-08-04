@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""od-room — open, list, and close OpenDia file-exchange rooms.
+
+    od-room open <dir> [--read-only] [--name NAME]
+    od-room list
+    od-room close <id|all>
+
+A room is a directory served at http://opendia:<port>/r/<id>/ on the
+tailnet: the page lists the directory's files for download and (unless
+read-only) accepts uploads into it. Rooms persist until closed.
+
+Talks to the rooms daemon over loopback; if it's down:
+    systemctl --user start opendia-rooms
+"""
+
+import argparse
+import json
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from opendia_config import get_id  # noqa: E402
+
+PORT = int(get_id("ROOMS_PORT", default="9099"))
+API = f"http://127.0.0.1:{PORT}/api/rooms"
+
+
+def call(method: str, url: str, body: dict | None = None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+    except (urllib.error.URLError, OSError):
+        sys.exit("rooms daemon is not running — start it with:\n"
+                 "  systemctl --user start opendia-rooms")
+
+
+def cmd_open(args):
+    body = {"dir": str(Path(args.dir).expanduser().resolve())}
+    if args.name:
+        body["name"] = args.name
+    if args.read_only:
+        body["read_only"] = True
+    code, room = call("POST", API, body)
+    if code not in (200, 201):
+        sys.exit(f"error: {room.get('error', room)}")
+    tag = " (already open)" if room.get("existing") else ""
+    ro = "  [read-only]" if room.get("read_only") else ""
+    print(f"{room['url']}{tag}{ro}")
+
+
+def cmd_list(_args):
+    code, rooms = call("GET", API)
+    if code != 200:
+        sys.exit(f"error: {rooms}")
+    if not rooms:
+        print("No open rooms.")
+        return
+    for r in rooms:
+        ro = " ro" if r.get("read_only") else "   "
+        print(f"{r['id']:10} {r['files']:3} file(s){ro}  {r['url']}  {r['dir']}")
+
+
+def cmd_close(args):
+    if args.id == "all":
+        _, rooms = call("GET", API)
+        if not rooms:
+            print("No open rooms.")
+            return
+        for r in rooms:
+            call("DELETE", f"{API}/{r['id']}")
+            print(f"closed {r['id']}  ({r['dir']})")
+        return
+    code, resp = call("DELETE", f"{API}/{args.id}")
+    if code != 200:
+        sys.exit(f"error: {resp.get('error', resp)}")
+    print(f"closed {args.id}")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="od-room", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    po = sub.add_parser("open", help="open a room on a directory")
+    po.add_argument("dir")
+    po.add_argument("--read-only", action="store_true",
+                    help="disable uploads into this room")
+    po.add_argument("--name", help="display name (defaults to the dir name)")
+    po.set_defaults(fn=cmd_open)
+
+    pl = sub.add_parser("list", help="list open rooms")
+    pl.set_defaults(fn=cmd_list)
+
+    pc = sub.add_parser("close", help="close a room (or 'all')")
+    pc.add_argument("id")
+    pc.set_defaults(fn=cmd_close)
+
+    args = p.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -14,6 +14,7 @@ import Clients from "./components/Clients.jsx";
 import Analytics from "./components/Analytics.jsx";
 import Billing from "./components/Billing.jsx";
 import Newsletter from "./components/Newsletter.jsx";
+import Rooms from "./components/Rooms.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
 import { hasTag, toggleTag } from "./tags.js";
@@ -95,7 +96,7 @@ export default function App() {
     fetch("/api/me").then(r => r.ok ? r.json() : null).then(user => {
       setMe(user);
       // Snap non-admins off the billing view if they somehow land on it
-      if (user && !user.is_admin && (view === "billing" || view === "newsletter")) setView("board");
+      if (user && !user.is_admin && (view === "billing" || view === "newsletter" || view === "rooms")) setView("board");
     }).catch(() => {});
   }, []);
 
@@ -524,6 +525,8 @@ export default function App() {
             <Billing />
           ) : view === "newsletter" && me?.is_admin ? (
             <Newsletter />
+          ) : view === "rooms" && me?.is_admin ? (
+            <Rooms />
           ) : (
             <Clients
               projects={projects}

@@ -2,7 +2,7 @@ import http from "http";
 import express from "express";
 import { resolve, dirname, sep } from "path";
 import { fileURLToPath } from "url";
-import { PORT, BILLING_MASTER_SHEET_ID } from "./config.js";
+import { PORT, BILLING_MASTER_SHEET_ID, confValue } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
@@ -639,6 +639,32 @@ function lastMonthYYYYMM() {
   d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
+
+// ── Rooms (admin) ─────────────────────────────────────────────────
+// The rooms daemon's own API answers loopback only (it reveals filesystem
+// paths); admins reach it through this proxy so the gate stays in auth.js.
+const ROOMS_API = `http://127.0.0.1:${confValue("ROOMS_PORT", "9099")}/api/rooms`;
+
+app.get("/api/rooms", requireAdmin, async (_req, res) => {
+  try {
+    const r = await fetch(ROOMS_API);
+    res.status(r.status).json(await r.json());
+  } catch {
+    res.status(502).json({ error: "rooms daemon unreachable" });
+  }
+});
+
+app.delete("/api/rooms/:id", requireAdmin, async (req, res) => {
+  if (!/^[A-Za-z0-9_-]+$/.test(req.params.id)) {
+    return res.status(400).json({ error: "bad id" });
+  }
+  try {
+    const r = await fetch(`${ROOMS_API}/${req.params.id}`, { method: "DELETE" });
+    res.status(r.status).json(await r.json());
+  } catch {
+    res.status(502).json({ error: "rooms daemon unreachable" });
+  }
+});
 
 app.get("/api/billing/preview", requireAdmin, (req, res) => {
   const month = req.query.month || lastMonthYYYYMM();
