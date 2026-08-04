@@ -188,7 +188,9 @@ Then it proposes at most three things worth doing right now. Each is approved or
 - **It bills like a human would.** A Spark opens a timer at a 15-minute estimate — the cost of diving back into a project to refresh yourself — and each completed action adds its own minutes, pausing at 60 so continuing becomes an explicit decision. The timer starts *lazily*, on the first completed front, so a run that dies in its first twenty seconds leaves nothing in the ledger. Its state file carries a deliberately empty session name so the Terminal tab's own timer logic can never confuse the two.
 - **Report text is treated as hostile.** It is derived from client email and chat, so every string is escaped server-side before it leaves the API: markdown still renders, HTML cannot.
 
-Streamed over SSE with a full snapshot on connect, so switching tabs, closing the modal or reloading the page all resume the same run. See [`docs/spark.md`](docs/spark.md).
+Streamed over SSE with a full snapshot on connect, so switching tabs, closing the modal or reloading the page all resume the same run.
+
+The wider point Spark is aimed at: **most of a working day should not require a terminal.** A card already carries its own tmux session, its own timer controls and its own file exchange; Spark adds the part that was still missing — deciding what to do next, and doing the small safe parts of it — so the dashboard becomes somewhere work happens rather than somewhere work is recorded. See [`docs/spark.md`](docs/spark.md), including its known limitations.
 
 ## Custom Commands
 

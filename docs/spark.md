@@ -121,6 +121,21 @@ Runs cost roughly $0.90-1.00 each on Opus. Hard limits: 4 rounds, 8 executed
 actions, 20 minutes per invocation, and a 30-minute idle wrap so a walked-away
 decision never leaves a timer open.
 
+## Known limitations
+
+- **"Discuss in Terminal" only switches tabs.** It does not hand anything over:
+  the session on the other side has no knowledge of the run. The findings are
+  written to `~/OpenDia/handoffs/` only by the separate **Hand off to session**
+  action, which also closes the Spark timer. Merging the two — write the brief,
+  ensure a session exists, seed it — is the obvious next improvement.
+- **Typing requires Take Control**, which opens a 30-minute timer. That is a
+  heavy door for a short follow-up question about the recommendation.
+- The email draft-and-send path is implemented but has not yet run end to end;
+  no run on an internal card has proposed a draft.
+- The non-admin gate is untested from a real non-admin identity — loopback is
+  unconditionally admin, so it can only be exercised through Tailscale
+  identity headers.
+
 ## Layout
 
 | Path | Role |
