@@ -1888,11 +1888,13 @@ body.has-bg::before {
   text-align: center;
 }
 
+/* Kept narrow on purpose: full path is in the title tooltip, and the URL
+   column is the one that needs the width on small screens. */
 .rooms-dir {
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 0.7rem;
-  max-width: 300px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

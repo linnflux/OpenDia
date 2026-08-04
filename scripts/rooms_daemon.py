@@ -24,6 +24,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -40,7 +41,6 @@ from opendia_config import get_id  # noqa: E402
 PORT = int(get_id("ROOMS_PORT", default="9099"))
 REGISTRY_PATH = Path.home() / "OpenDia" / "rooms.json"
 MAX_UPLOAD = 500 * 1024 * 1024  # 500 MB
-HOSTNAME = "opendia"  # Tailscale MagicDNS name, used in printed/displayed URLs
 
 # Not a security boundary (the tailnet is trusted); this catches mistakes —
 # an agent absent-mindedly opening a room on a credentials directory.
@@ -105,29 +105,48 @@ def deny_reason(path: Path) -> str | None:
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
-def tailscale_ip() -> str | None:
+def tailscale_self() -> dict:
+    """{'ip4', 'ip6', 'dns_name'} — any may be None."""
+    info = {"ip4": None, "ip6": None, "dns_name": None}
     try:
-        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True,
-                             text=True, timeout=5)
-        ip = out.stdout.strip().splitlines()[0].strip() if out.returncode == 0 else ""
-        if re.fullmatch(r"100\.\d+\.\d+\.\d+", ip):
-            return ip
-    except Exception:
-        pass
-    # fallback: read the interface directly
-    try:
-        out = subprocess.run(["ip", "-4", "-o", "addr", "show", "tailscale0"],
+        out = subprocess.run(["tailscale", "status", "--json"],
                              capture_output=True, text=True, timeout=5)
-        m = re.search(r"inet (100\.\d+\.\d+\.\d+)", out.stdout)
-        if m:
-            return m.group(1)
+        if out.returncode == 0:
+            self_ = json.loads(out.stdout).get("Self", {})
+            for ip in self_.get("TailscaleIPs") or []:
+                if re.fullmatch(r"100\.\d+\.\d+\.\d+", ip):
+                    info["ip4"] = ip
+                elif ":" in ip:
+                    info["ip6"] = ip
+            dns = (self_.get("DNSName") or "").rstrip(".")
+            if dns:
+                info["dns_name"] = dns
     except Exception:
         pass
-    return None
+    if not info["ip4"]:
+        # fallback: read the interface directly
+        try:
+            out = subprocess.run(["ip", "-4", "-o", "addr", "show", "tailscale0"],
+                                 capture_output=True, text=True, timeout=5)
+            m = re.search(r"inet (100\.\d+\.\d+\.\d+)", out.stdout)
+            if m:
+                info["ip4"] = m.group(1)
+        except Exception:
+            pass
+    return info
+
+
+# Resolved once at boot. URLs use the MagicDNS FQDN (opendia.tailXXXX.ts.net):
+# it resolves via public DNS as well as MagicDNS, so it works in browsers with
+# secure-DNS enabled and on devices without a MagicDNS search domain. The bare
+# machine hostname does NOT — it resolves to 127.0.1.1 via /etc/hosts on this
+# box and to nothing at all elsewhere, which shipped as "site can't be reached".
+TS = tailscale_self()
+URL_HOST = TS["dns_name"] or TS["ip4"] or "127.0.0.1"
 
 
 def room_url(rid: str) -> str:
-    return f"http://{HOSTNAME}:{PORT}/r/{rid}/"
+    return f"http://{URL_HOST}:{PORT}/r/{rid}/"
 
 
 def list_files(room_dir: Path) -> list[dict]:
@@ -463,8 +482,13 @@ class Handler(BaseHTTPRequestHandler):
 
 # ── main ─────────────────────────────────────────────────────────────────
 
+class ThreadingHTTPServer6(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
 def serve_on(host: str):
-    srv = ThreadingHTTPServer((host, PORT), Handler)
+    cls = ThreadingHTTPServer6 if ":" in host else ThreadingHTTPServer
+    srv = cls((host, PORT), Handler)
     print(f"listening on {host}:{PORT}", flush=True)
     srv.serve_forever()
 
@@ -472,13 +496,17 @@ def serve_on(host: str):
 def main():
     load_registry()
     print(f"loaded {len(_rooms)} room(s) from {REGISTRY_PATH}", flush=True)
+    print(f"room URLs use host: {URL_HOST}", flush=True)
     hosts = ["127.0.0.1"]
-    ts = tailscale_ip()
-    if ts:
-        hosts.append(ts)
+    if TS["ip4"]:
+        hosts.append(TS["ip4"])
     else:
         print("WARNING: no tailscale IP found — rooms reachable from this "
               "machine only", flush=True)
+    # The ts.net name can resolve to AAAA on some resolvers; answer there too
+    # or a v6-preferring browser sees connection refused.
+    if TS["ip6"]:
+        hosts.append(TS["ip6"])
     threads = [threading.Thread(target=serve_on, args=(h,), daemon=True) for h in hosts]
     for t in threads:
         t.start()

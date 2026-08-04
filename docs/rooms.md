@@ -12,11 +12,16 @@ habit of binding `0.0.0.0`.
 ```
 od-room open <dir> [--read-only] [--name NAME]   # → http://<host>:9099/r/<id>/
 od-room list
-od-room close <id|all>
+od-room close <id|all>       # 'all' lists what it would close and confirms
 ```
 
 `open` on a directory that already has a room returns the existing URL —
-one directory, one room, always.
+one directory, one room, always. URLs use the machine's MagicDNS FQDN
+(`<machine>.tailXXXX.ts.net`), which resolves via public DNS as well as
+MagicDNS — so they work in browsers with secure-DNS enabled and on
+devices without a MagicDNS search domain. Agents cleaning up after
+themselves should close by id; `close all` requires confirmation (or
+`--yes`) because the registry is shared across every session.
 
 Rooms have **no TTL**: they live until closed. The admin **Rooms** view in the
 dashboard (sidebar → ADMIN) lists every open room with a copy-URL button and a

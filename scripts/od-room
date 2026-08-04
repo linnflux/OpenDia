@@ -73,6 +73,19 @@ def cmd_close(args):
         if not rooms:
             print("No open rooms.")
             return
+        # The registry is shared across every session — "all" includes rooms
+        # someone else may be actively using. Show exactly what would close
+        # and require an explicit yes (interactive prompt, or --yes when
+        # scripted). An agent cleaning up after itself should close by id.
+        print(f"This will close {len(rooms)} room(s):")
+        for r in rooms:
+            print(f"  {r['id']:10} {r['dir']}")
+        if not args.yes:
+            if not sys.stdin.isatty():
+                sys.exit("refusing to close all rooms non-interactively — "
+                         "close by id, or pass --yes if you really mean all of them")
+            if input("Close all of these? [y/N] ").strip().lower() not in ("y", "yes"):
+                sys.exit("aborted")
         for r in rooms:
             call("DELETE", f"{API}/{r['id']}")
             print(f"closed {r['id']}  ({r['dir']})")
@@ -98,8 +111,10 @@ def main():
     pl = sub.add_parser("list", help="list open rooms")
     pl.set_defaults(fn=cmd_list)
 
-    pc = sub.add_parser("close", help="close a room (or 'all')")
+    pc = sub.add_parser("close", help="close a room (or 'all', which confirms)")
     pc.add_argument("id")
+    pc.add_argument("--yes", action="store_true",
+                    help="skip the confirmation when closing all rooms")
     pc.set_defaults(fn=cmd_close)
 
     args = p.parse_args()
