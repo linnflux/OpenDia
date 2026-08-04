@@ -4,6 +4,104 @@ import { NAV_ITEMS } from "../constants.js";
 const BG_STORAGE_KEY = "opendia-bg-image";
 const BG_POSITION_KEY = "opendia-bg-position";
 
+// The wallpaper lives in localStorage, which caps around 5MB, and base64
+// inflates a file by a third — so anything past roughly 3.7MB on disk cannot
+// be stored. It used to fail silently: setItem threw before setBgImage ran,
+// so the upload appeared to work and nothing changed.
+//
+// The image is painted with background-size: cover, so a 5200px-wide photo is
+// being scaled down to the viewport anyway. Downscaling before storage costs
+// nothing visible and takes a 20MB photo to about 2.4MB.
+//
+// The ladder is walked by ATTEMPTING the write rather than predicting the
+// quota — it varies by browser and by whatever else is already stored, so the
+// only honest test is to try it.
+const RESIZE_STEPS = [
+  { edge: 2560, quality: 0.82 },
+  { edge: 2048, quality: 0.78 },
+  { edge: 1600, quality: 0.72 },
+  { edge: 1280, quality: 0.68 },
+];
+// Below this, store the original untouched: keeps PNG transparency and avoids
+// re-encoding something that already fits.
+const STORE_DIRECT_UNDER = 2 * 1024 * 1024;
+
+function tryStore(dataUrl) {
+  try {
+    localStorage.setItem(BG_STORAGE_KEY, dataUrl);
+    return true;
+  } catch {
+    return false;                              // QuotaExceededError
+  }
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+// createImageBitmap honours EXIF orientation, so phone photos don't come out
+// rotated. Falls back to an <img> for browsers without it.
+async function decode(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch { /* fall through */ }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("decode failed"));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function toJpeg(bitmap, maxEdge, quality) {
+  const w = bitmap.width, h = bitmap.height;
+  const scale = Math.min(1, maxEdge / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  // JPEG has no alpha; paint a black base so transparent PNGs don't go pink
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+/** Returns {dataUrl, resizedTo} on success, or null if it never fit. */
+async function storeBackground(file) {
+  if (file.size <= STORE_DIRECT_UNDER) {
+    const dataUrl = await readAsDataUrl(file);
+    if (tryStore(dataUrl)) return { dataUrl, resizedTo: null };
+  }
+  const bitmap = await decode(file);
+  try {
+    for (const { edge, quality } of RESIZE_STEPS) {
+      // Skip steps that wouldn't actually shrink an already-small image
+      if (edge >= Math.max(bitmap.width, bitmap.height) && edge !== RESIZE_STEPS[0].edge) continue;
+      const dataUrl = toJpeg(bitmap, edge, quality);
+      if (tryStore(dataUrl)) {
+        return { dataUrl, resizedTo: Math.min(edge, Math.max(bitmap.width, bitmap.height)) };
+      }
+    }
+    return null;
+  } finally {
+    bitmap.close?.();
+  }
+}
+
 // Destinations come from NAV_ITEMS, the same array the sidebar renders, so the
 // palette can never fall out of sync with the visible navigation. Only the
 // palette-specific commands (theme, refresh, wallpaper) are listed here.
@@ -29,7 +127,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onO
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, onOpenThemeModal, onNavigate, isAdmin }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, onOpenThemeModal, onNavigate, isAdmin, onNotify }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -68,17 +166,24 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
     setTimeout(() => fileRef.current?.click(), 100);
   }
 
-  function handleFileChange(e) {
+  async function handleFileChange(e) {
     const file = e.target.files?.[0];
+    e.target.value = "";                       // allow re-picking the same file
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      localStorage.setItem(BG_STORAGE_KEY, dataUrl);
-      setBgImage(dataUrl);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+    try {
+      const result = await storeBackground(file);
+      if (!result) {
+        onNotify?.("That image is too large for browser storage, even resized");
+        return;
+      }
+      setBgImage(result.dataUrl);
+      if (result.resizedTo) {
+        onNotify?.(`Background set — resized to ${result.resizedTo}px to fit browser storage`);
+      }
+    } catch (err) {
+      console.error("background upload failed:", err);
+      onNotify?.("Couldn't read that image");
+    }
   }
 
   function handleClearBg() {

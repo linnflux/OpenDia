@@ -225,14 +225,21 @@ export default function App() {
     setSelectedProjectId(project.id);
   }
 
+  // Shared toast. Lives at the app shell rather than inside the board branch,
+  // because the command palette can fire one from any view (e.g. a background
+  // upload that had to be resized).
+  function showToast(message, ms = 3000) {
+    setStatusToast(message);
+    setTimeout(() => setStatusToast(null), ms);
+  }
+
   function handleStatusChange(projectId, newStatus) {
     // The grid is filtered to a single status, so changing status here makes
     // the card vanish from view immediately — surface a toast so it isn't silent.
     const project = projects.find((p) => p.id === projectId);
     const label = STATUS_OPTIONS.find((s) => s.key === newStatus)?.label || newStatus;
     moveProject(projectId, newStatus);
-    setStatusToast(`${project?.name || "Card"} → ${label}`);
-    setTimeout(() => setStatusToast(null), 3000);
+    showToast(`${project?.name || "Card"} → ${label}`);
   }
 
   /**
@@ -491,7 +498,6 @@ export default function App() {
                   onToggleTag={handleToggleTag}
                   onReorder={handleReorder}
                 />
-                {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
               </>
             )
           ) : view === "inbox" ? (
@@ -529,6 +535,8 @@ export default function App() {
         </main>
       </div>
 
+      {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
+
       {selectedProject && (
         <CardModal
           key={selectedProject.id}
@@ -560,6 +568,7 @@ export default function App() {
         onOpenThemeModal={() => { setPaletteOpen(false); setThemeModalOpen(true); }}
         onNavigate={(key) => { setPaletteOpen(false); setView(key); }}
         isAdmin={!!me?.is_admin}
+        onNotify={showToast}
       />
       {themeModalOpen && (
         <ThemeModal
