@@ -42,18 +42,28 @@ PORT = int(get_id("ROOMS_PORT", default="9099"))
 REGISTRY_PATH = Path.home() / "OpenDia" / "rooms.json"
 MAX_UPLOAD = 500 * 1024 * 1024  # 500 MB
 
-# Image rows get a server-generated thumbnail (made once, cached by
-# content identity) so listing a room of phone photos costs kilobytes,
-# not the megabytes the originals weigh. Needs Pillow; without it the
-# page degrades to plain rows.
+# Image and video rows get a server-generated thumbnail (made once, cached
+# by content identity) so listing a room of phone media costs kilobytes,
+# not the megabytes the originals weigh. Images need Pillow; videos need
+# ffmpeg. Without either, those rows degrade to plain rows.
 THUMB_CACHE = Path.home() / "OpenDia" / ".rooms-thumbs"
 THUMB_EDGE = 160
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"}
+# Only containers browsers actually play; anything else stays download-only.
+VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
 try:
     from PIL import Image  # noqa: F401
     HAVE_PIL = True
 except ImportError:
     HAVE_PIL = False
+
+FFMPEG = shutil.which("ffmpeg") or (
+    str(Path.home() / ".local/bin/ffmpeg")
+    if (Path.home() / ".local/bin/ffmpeg").exists() else None)
+
+# The dashboard's mark, served at /assets/mark.svg for the room-page header.
+# Same repo checkout; if it moves, the header degrades to text only.
+MARK_SVG = Path(__file__).resolve().parent.parent / "dashboard" / "client" / "public" / "opendia_mark.svg"
 
 # Not a security boundary (the tailnet is trusted); this catches mistakes —
 # an agent absent-mindedly opening a room on a credentials directory.
@@ -229,22 +239,59 @@ def is_image(name: str) -> bool:
     return Path(name).suffix.lower() in IMAGE_EXTS
 
 
-def thumb_for(target: Path) -> Path | None:
-    """Cached thumbnail path for an image, generating on first request.
+def is_video(name: str) -> bool:
+    return Path(name).suffix.lower() in VIDEO_EXTS
 
-    Cache key is path+mtime+size, so editing a file naturally invalidates
-    its thumb. Returns None if Pillow is missing or the file won't decode.
-    """
-    if not HAVE_PIL:
-        return None
+
+def has_thumb(name: str) -> bool:
+    return (HAVE_PIL and is_image(name)) or (FFMPEG is not None and is_video(name))
+
+
+def thumb_for(target: Path) -> Path | None:
+    """Cached thumbnail path for an image or video, generating on first
+    request. Cache key is path+mtime+size, so editing a file naturally
+    invalidates its thumb. Returns None if the needed tool is missing or
+    the file won't decode."""
     import hashlib
     st = target.stat()
     key = hashlib.sha1(f"{target}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest()
     out = THUMB_CACHE / f"{key}.jpg"
     if out.exists():
         return out
+    fail = THUMB_CACHE / f"{key}.fail"
+    # Negative cache: without it every page load re-spawns (up to two) ffmpeg
+    # attempts for a file that will never decode — a slow undecodable input
+    # would tax a connection thread on each render, forever.
+    if fail.exists():
+        return None
+    THUMB_CACHE.mkdir(parents=True, exist_ok=True)
+    # Unique per attempt: a shared tmp path let concurrent generators of the
+    # same file yank each other's work mid-write — the loser's fallback frame
+    # could then win the final rename and be cached, wrong, forever.
+    tmp = out.parent / f"{out.stem}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
-        THUMB_CACHE.mkdir(parents=True, exist_ok=True)
+        if is_video(target.name):
+            if not FFMPEG:
+                return None
+            # frame at 1s (falls back to first frame on very short clips),
+            # scaled to the thumb edge; -update 1 writes a single image
+            r = subprocess.run(
+                [FFMPEG, "-y", "-loglevel", "error", "-ss", "1", "-i", str(target),
+                 "-frames:v", "1", "-update", "1",
+                 "-vf", f"scale={THUMB_EDGE}:-2", "-f", "image2", str(tmp)],
+                capture_output=True, timeout=30)
+            if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+                r = subprocess.run(
+                    [FFMPEG, "-y", "-loglevel", "error", "-i", str(target),
+                     "-frames:v", "1", "-update", "1",
+                     "-vf", f"scale={THUMB_EDGE}:-2", "-f", "image2", str(tmp)],
+                    capture_output=True, timeout=30)
+            if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+                raise RuntimeError(r.stderr.decode()[:200] or "ffmpeg produced nothing")
+            tmp.replace(out)
+            return out
+        if not HAVE_PIL:
+            return None
         with Image.open(target) as im:
             im.thumbnail((THUMB_EDGE, THUMB_EDGE), Image.LANCZOS)
             # JPEG has no alpha; flatten onto dark grey so transparent PNGs
@@ -254,23 +301,28 @@ def thumb_for(target: Path) -> Path | None:
                 bg = _I.new("RGB", im.size, (30, 34, 43))
                 bg.paste(im, mask=im.convert("RGBA").getchannel("A"))
                 im = bg
-            tmp = out.with_suffix(".tmp")
             im.convert("RGB").save(tmp, "JPEG", quality=70, optimize=True)
             tmp.replace(out)
         return out
     except Exception as e:
+        tmp.unlink(missing_ok=True)
+        try:
+            fail.touch()
+        except OSError:
+            pass
         print(f"thumbnail failed for {target.name}: {e}", flush=True)
         return None
 
 
 def prune_thumb_cache(max_age_days: int = 30):
     """Thumbs key on content identity, so stale entries only accumulate as
-    files change or rooms close — a slow drip. Age them out at boot."""
+    files change or rooms close — a slow drip. Age them out at boot, along
+    with failure sentinels and any tmp left by a crashed generation."""
     import time
     cutoff = time.time() - max_age_days * 86400
     try:
-        for f in THUMB_CACHE.glob("*.jpg"):
-            if f.stat().st_mtime < cutoff:
+        for f in THUMB_CACHE.iterdir():
+            if f.suffix == ".tmp" or f.stat().st_mtime < cutoff:
                 f.unlink(missing_ok=True)
     except OSError:
         pass
@@ -335,16 +387,28 @@ def parse_multipart(spool_path: Path, boundary: bytes) -> list[tuple[str, Path]]
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title><style>
+<title>{title} — OpenDia Rooms</title><style>
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
  background:#0f172a;color:#e2e8f0;max-width:680px;margin:2rem auto;padding:0 1rem}}
-h1{{font-size:1.1rem}} h1 small{{color:#64748b;font-weight:400;font-size:.8rem}}
+header{{display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem}}
+header img{{height:30px;width:auto}}
+/* Space Grotesk matches the dashboard wordmark where installed; the
+   fallback stack is deliberate — room pages make no external requests,
+   so no Google Fonts fetch. */
+.brand{{font-family:"Space Grotesk",-apple-system,sans-serif;font-size:1.4rem;line-height:1;color:#f1f5f9}}
+.brand .open{{font-weight:300}} .brand .dia{{font-weight:700}}
+.brand .rooms{{font-weight:700;margin-left:.15rem}}
+h1{{font-size:1rem;color:#94a3b8;font-weight:600;margin:.25rem 0 0}}
 table{{width:100%;border-collapse:collapse;margin:1rem 0}}
 td,th{{padding:.45rem .5rem;border-bottom:1px solid #1e293b;text-align:left;font-size:.9rem}}
 th{{color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}}
 td.num{{text-align:right;color:#94a3b8;white-space:nowrap}}
-td.th{{width:52px}} td.th img{{display:block;width:48px;height:36px;object-fit:cover;
- border-radius:4px;cursor:pointer;border:1px solid #1e293b}}
+td.th{{width:52px}} .thumb{{position:relative;display:block;width:48px;height:36px;cursor:pointer}}
+.thumb img{{display:block;width:48px;height:36px;object-fit:cover;
+ border-radius:4px;border:1px solid #1e293b}}
+.thumb.noimg{{background:#1e293b;border-radius:4px;border:1px solid #334155}}
+.thumb.vid::after{{content:"▶";position:absolute;inset:0;display:flex;align-items:center;
+ justify-content:center;color:#fff;font-size:.8rem;text-shadow:0 0 4px rgba(0,0,0,.9)}}
 a{{color:#7dd3fc;text-decoration:none}} a:hover{{text-decoration:underline}}
 form{{margin:1.25rem 0;padding:1rem;border:1px dashed #334155;border-radius:8px}}
 input[type=file]{{color:#94a3b8}}
@@ -352,33 +416,43 @@ button{{background:#164e63;color:#22d3ee;border:none;border-radius:6px;
  padding:.45rem .9rem;cursor:pointer;font-size:.85rem}}
 .empty{{color:#64748b;padding:1.5rem 0}} .msg{{color:#4ade80;font-size:.85rem}}
 footer{{color:#475569;font-size:.72rem;margin-top:2rem}}
-#lb{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10;
+#lb{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:10;
  flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:1.5rem}}
 #lb.open{{display:flex}}
-#lb img{{max-width:92vw;max-height:80vh;border-radius:6px}}
+#lb img,#lb video{{max-width:92vw;max-height:80vh;border-radius:6px}}
 #lb .bar{{display:flex;gap:.75rem;align-items:center}}
 #lb .name{{color:#94a3b8;font-size:.85rem}}
 #lb a.dl{{background:#164e63;color:#22d3ee;border-radius:6px;padding:.45rem .9rem}}
 #lb button{{background:#1e293b;color:#94a3b8}}
 </style></head><body>
-<h1>{title} <small>OpenDia room</small></h1>
+<header>{logo}<span class="brand"><span class="open">Open</span><span class="dia">Dia</span><span class="rooms"> Rooms</span></span></header>
+<h1>{title}</h1>
 {msg}{table}{form}
 <footer>Files live in this room until it is closed.</footer>
 <div id="lb">
-  <img id="lb-img" alt="">
+  <img id="lb-img" alt="" style="display:none">
+  <video id="lb-vid" controls playsinline style="display:none"></video>
   <div class="bar"><span class="name" id="lb-name"></span>
     <a class="dl" id="lb-dl" download>Download</a>
     <button onclick="lbClose()">Close</button></div>
 </div>
 <script>
-var lb=document.getElementById('lb');
-function lbOpen(name){{
-  document.getElementById('lb-img').src=encodeURIComponent(name);
+var lb=document.getElementById('lb'),
+    lbImg=document.getElementById('lb-img'),
+    lbVid=document.getElementById('lb-vid');
+function lbOpen(name,kind){{
+  var url=encodeURIComponent(name);
+  if(kind==='vid'){{lbVid.src=url;lbVid.style.display='block';lbImg.style.display='none';
+    lbVid.play().catch(function(){{}});}}
+  else{{lbImg.src=url;lbImg.style.display='block';lbVid.style.display='none';}}
   document.getElementById('lb-name').textContent=name;
-  document.getElementById('lb-dl').href=encodeURIComponent(name);
+  document.getElementById('lb-dl').href=url;
   lb.classList.add('open');
 }}
-function lbClose(){{lb.classList.remove('open');document.getElementById('lb-img').src='';}}
+function lbClose(){{
+  lb.classList.remove('open');
+  lbVid.pause();lbVid.removeAttribute('src');lbVid.load();lbImg.src='';
+}}
 lb.addEventListener('click',function(e){{if(e.target===lb)lbClose();}});
 document.addEventListener('keydown',function(e){{if(e.key==='Escape')lbClose();}});
 </script>
@@ -391,12 +465,19 @@ def render_room(room: dict, msg: str = "") -> str:
         rows = []
         for f in files:
             q = quote(f["name"])
-            if HAVE_PIL and is_image(f["name"]):
+            playable = is_video(f["name"])
+            if has_thumb(f["name"]) or playable:
+                # Playable rows keep their click target even with no ffmpeg —
+                # the thumbnail is decoration, playback is the feature.
+                kind = "vid" if playable else "img"
+                img = (f'<img src="t/{q}" loading="lazy" alt="">'
+                       if has_thumb(f["name"]) else "")
+                cls = "thumb" + (" vid" if playable else "") + ("" if img else " noimg")
                 # data-name + JS keeps filenames out of inline handlers, so a
                 # file named with quotes can't break out of the attribute
-                thumb = (f'<img src="t/{q}" loading="lazy" alt="" '
-                         f'data-name="{escape(f["name"], quote=True)}" '
-                         f'onclick="lbOpen(this.dataset.name)">')
+                thumb = (f'<span class="{cls}" '
+                         f'data-name="{escape(f["name"], quote=True)}" data-kind="{kind}" '
+                         f'onclick="lbOpen(this.dataset.name,this.dataset.kind)">{img}</span>')
             else:
                 thumb = ""
             rows.append(
@@ -412,8 +493,9 @@ def render_room(room: dict, msg: str = "") -> str:
             '<form method="post" action="upload" enctype="multipart/form-data">'
             '<input type="file" name="file" multiple> <button>Upload</button></form>')
     msg_html = f'<p class="msg">{escape(msg)}</p>' if msg else ""
+    logo = '<img src="/assets/mark.svg" alt="">' if MARK_SVG.is_file() else ""
     return PAGE.format(title=escape(room.get("name") or Path(room["dir"]).name),
-                       msg=msg_html, table=table, form=form)
+                       msg=msg_html, table=table, form=form, logo=logo)
 
 
 # ── request handler ──────────────────────────────────────────────────────
@@ -422,8 +504,21 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "OpenDiaRooms/1"
     protocol_version = "HTTP/1.1"
 
+    head_only = False  # set per-request by do_HEAD
+
     def log_message(self, fmt, *args):
         print(f"{self.client_address[0]} {fmt % args}", flush=True)
+
+    def do_HEAD(self):
+        # Same routing and headers as GET with the body suppressed. Without
+        # this, BaseHTTPRequestHandler answers 501 with Connection: close —
+        # inconsistent with advertising Accept-Ranges, and it kills anything
+        # pipelined behind it (curl -I, Safari media probes, unfurl bots).
+        self.head_only = True
+        try:
+            self.do_GET()
+        finally:
+            self.head_only = False
 
     # Headers the tailscale-serve proxy stamps on everything it forwards
     # (verified by probing the live proxy). Their presence means the request
@@ -449,7 +544,8 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        if not self.head_only:
+            self.wfile.write(body)
 
     def _json(self, code: int, obj):
         self._send(code, json.dumps(obj).encode(), "application/json")
@@ -469,6 +565,17 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/r/([A-Za-z0-9_-]+)/([^/]+)", path)
         if m:
             return self.room_file(m.group(1), m.group(2))
+        if path == "/assets/mark.svg" and MARK_SVG.is_file():
+            # Unlike thumbs, this URL is stable but its bytes can change (a
+            # repo update to the mark), so it needs a validator alongside the
+            # max-age or a stale logo has no revalidation path.
+            st = MARK_SVG.stat()
+            etag = f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+            if self.headers.get("If-None-Match") == etag:
+                return self._send(304, b"", "image/svg+xml", {"ETag": etag})
+            return self._send(200, MARK_SVG.read_bytes(), "image/svg+xml",
+                              {"Cache-Control": "max-age=86400", "ETag": etag,
+                               "Last-Modified": self.date_time_string(int(st.st_mtime))})
         if path == "/":
             return self._send(200, b"OpenDia Rooms is running.", "text/plain")
         self._send(404, b"not found", "text/plain")
@@ -518,19 +625,76 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_relative_to(room_dir) or not target.is_file():
             return self._send(404, b"not found", "text/plain")
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        size = target.stat().st_size
-        self.send_response(200)
+        st = target.stat()
+        size = st.st_size
+        # Weak validators, so clients can revalidate and If-Range can work —
+        # without them a browser holding cached 206 segments has no way to
+        # notice the file changed and can stitch a corrupt buffer.
+        etag = f'"{st.st_mtime_ns:x}-{size:x}"'
+        last_mod = self.date_time_string(int(st.st_mtime))
+
+        # Single-range support (RFC 9110): browsers require 206 responses to
+        # seek within <video>; without this the player works but the seek bar
+        # does not. Multi-range and syntactically invalid ranges are answered
+        # with the full file, which is what the RFC prescribes — 416 is only
+        # for a start at or past end-of-file.
+        start, end, status = 0, size - 1, 200
+        rng = self.headers.get("Range", "")
+        if_range = self.headers.get("If-Range", "")
+        if if_range and if_range not in (etag, last_mod):
+            rng = ""  # file changed since the client's cached ranges: send full
+        m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng.strip()) if rng else None
+        if m and (m.group(1) or m.group(2)):
+            if m.group(1):
+                first = int(m.group(1))
+                last = int(m.group(2)) if m.group(2) else size - 1
+                if first >= size:
+                    return self._send(416, b"", "text/plain",
+                                      {"Content-Range": f"bytes */{size}"})
+                if last >= first:  # invalid (5-2) ⇒ ignore the header entirely
+                    start, end, status = first, min(last, size - 1), 206
+            else:  # suffix form: last N bytes; -0 is unsatisfiable per RFC
+                n = int(m.group(2))
+                if n == 0:
+                    return self._send(416, b"", "text/plain",
+                                      {"Content-Range": f"bytes */{size}"})
+                start, status = max(0, size - n), 206
+
+        length = end - start + 1
+        self.send_response(status)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", last_mod)
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
+        if self.head_only:
+            return
         with open(target, "rb") as f:
-            shutil.copyfileobj(f, self.wfile)
+            f.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    # File shrank after Content-Length was committed. Fewer
+                    # bytes than declared on a keep-alive connection would
+                    # desync every response behind this one — kill it.
+                    self.close_connection = True
+                    return
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    self.close_connection = True
+                    return  # player seeked or closed; routine, not an error
+                remaining -= len(chunk)
 
     def room_thumb(self, rid: str, name: str):
         room = self._room_or_404(rid)
         if not room:
             return
-        if name.startswith(".") or "/" in name or "\\" in name or not is_image(name):
+        if name.startswith(".") or "/" in name or "\\" in name or not has_thumb(name):
             return self._send(404, b"not found", "text/plain")
         room_dir = Path(room["dir"]).resolve()
         target = (room_dir / name).resolve()
@@ -613,6 +777,14 @@ class Handler(BaseHTTPRequestHandler):
         raw = body.get("dir", "")
         if not raw:
             return self._json(400, {"error": "dir required"})
+        # Validate the name at the boundary: a non-string stored here would
+        # crash render_room's escape() forever after — bricking an in-use
+        # room until someone hand-edits the registry.
+        new_name = body.get("name")
+        if new_name is not None:
+            if not isinstance(new_name, str):
+                return self._json(400, {"error": "name must be a string"})
+            new_name = new_name.strip()[:120] or None
         room_dir = Path(raw).expanduser().resolve()
         if not room_dir.is_dir():
             return self._json(400, {"error": f"not a directory: {room_dir}"})
@@ -622,11 +794,27 @@ class Handler(BaseHTTPRequestHandler):
         with _lock:
             for rid, room in _rooms.items():
                 if Path(room["dir"]).resolve() == room_dir:
-                    # the whole point of the registry: never serve one dir twice
-                    return self._json(200, {**room, "url": room_url(rid), "existing": True})
+                    # the whole point of the registry: never serve one dir
+                    # twice. Re-opening updates in place — name and, when the
+                    # key was explicitly sent, read_only — so a room can be
+                    # fixed without changing its URL. Both changes are logged
+                    # and reported: the registry is shared across sessions.
+                    changed = {}
+                    if new_name and new_name != room.get("name"):
+                        changed["renamed_from"] = room.get("name")
+                        room["name"] = new_name
+                    if "read_only" in body and bool(body["read_only"]) != room.get("read_only"):
+                        changed["read_only_was"] = room.get("read_only")
+                        room["read_only"] = bool(body["read_only"])
+                    if changed:
+                        save_registry()
+                        print(f"room {rid} updated: {changed} -> "
+                              f"name={room['name']!r} read_only={room['read_only']}", flush=True)
+                    return self._json(200, {**room, "url": room_url(rid),
+                                            "existing": True, **changed})
             rid = secrets.token_urlsafe(6).replace("-", "a").replace("_", "b")
             room = {"id": rid, "dir": str(room_dir),
-                    "name": body.get("name") or room_dir.name,
+                    "name": new_name or room_dir.name,
                     "read_only": bool(body.get("read_only")),
                     "created": datetime.now(tz=timezone.utc).isoformat(timespec="seconds")}
             _rooms[rid] = room

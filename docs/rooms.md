@@ -10,13 +10,16 @@ habit of binding `0.0.0.0`.
 ## Usage
 
 ```
-od-room open <dir> [--read-only] [--name NAME]   # → https://<host>.ts.net:9443/r/<id>/
+od-room open <dir> [--read-only] [--name "<Client> <Content>"]  # → https://<host>.ts.net:9443/r/<id>/
 od-room list
 od-room close <id|all>       # 'all' lists what it would close and confirms
 ```
 
 `open` on a directory that already has a room returns the existing URL —
-one directory, one room, always. URLs use the machine's MagicDNS FQDN
+one directory, one room, always — and re-opening with `--name` renames the
+room in place without changing its URL. Name rooms for the human reading
+the dashboard list: `"<Client> <Content>"` ("Acme Videos"), never the bare
+directory name. URLs use the machine's MagicDNS FQDN
 (`<machine>.tailXXXX.ts.net`), which resolves via public DNS as well as
 MagicDNS — so they work in browsers with secure-DNS enabled and on
 devices without a MagicDNS search domain. Agents cleaning up after
@@ -46,12 +49,19 @@ Close button; that view is the hygiene mechanism.
 ## Behaviour details
 
 - Listing shows top-level plain files only — no dotfiles, no subdirectories.
-- Image rows carry a server-generated thumbnail (needs Pillow; degrades to
-  plain rows without it). Thumbs are built once per content identity
-  (path+mtime+size), cached under `~/OpenDia/.rooms-thumbs/`, pruned after
-  30 days at daemon boot, and served with a day of client caching — a 2 MB
-  photo costs ~1 KB per listing. Clicking a thumbnail opens an in-page
-  lightbox with a download button; the original is only fetched then.
+- Image and video rows carry a server-generated thumbnail (images need
+  Pillow, videos need ffmpeg; either degrades to plain rows if missing).
+  Thumbs are built once per content identity (path+mtime+size), cached under
+  `~/OpenDia/.rooms-thumbs/`, pruned after 30 days at daemon boot, and served
+  with a day of client caching — a 2 MB photo costs ~1 KB per listing.
+  Clicking a thumbnail opens an in-page lightbox with a download button;
+  video thumbnails (marked with a play badge) open an HTML5 player instead.
+  The originals are only fetched on open.
+- File serving honors single-byte-range requests (RFC 9110, 206/416) —
+  required for the video seek bar to work. Playable set: mp4/webm/mov/m4v;
+  other containers stay download-only.
+- Every room page carries the OpenDia mark + "Rooms" header, served from the
+  dashboard's own SVG at `/assets/mark.svg`; text-only if the file is absent.
 - Uploads: multipart, 500 MB cap, spooled to disk (never held in RAM),
   filename sanitised to a basename, collisions renamed `file-2.ext` — an
   upload can never overwrite an existing file.

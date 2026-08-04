@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """od-room — open, list, and close OpenDia file-exchange rooms.
 
-    od-room open <dir> [--read-only] [--name NAME]
+    od-room open <dir> [--read-only] [--name "<Client> <Content>"]
     od-room list
     od-room close <id|all>
+
+Name rooms for the human reading the dashboard list: "<Client> <Content>"
+("Acme Videos", "Acme Launch Flyers") — never the bare directory name.
 
 A room is a directory served at http://opendia:<port>/r/<id>/ on the
 tailnet: the page lists the directory's files for download and (unless
@@ -45,14 +48,24 @@ def cmd_open(args):
     body = {"dir": str(Path(args.dir).expanduser().resolve())}
     if args.name:
         body["name"] = args.name
+    # Send read_only only when the operator said something explicit, so a
+    # bare re-open never silently flips an existing room's posture.
+    if args.read_only and args.writable:
+        sys.exit("--read-only and --writable are mutually exclusive")
     if args.read_only:
         body["read_only"] = True
+    elif args.writable:
+        body["read_only"] = False
     code, room = call("POST", API, body)
     if code not in (200, 201):
         sys.exit(f"error: {room.get('error', room)}")
     tag = " (already open)" if room.get("existing") else ""
     ro = "  [read-only]" if room.get("read_only") else ""
     print(f"{room['url']}{tag}{ro}")
+    if "renamed_from" in room:
+        print(f"renamed: {room['renamed_from']!r} -> {room['name']!r}")
+    if "read_only_was" in room:
+        print(f"read-only: {room['read_only_was']} -> {room['read_only']}")
 
 
 def cmd_list(_args):
@@ -64,7 +77,8 @@ def cmd_list(_args):
         return
     for r in rooms:
         ro = " ro" if r.get("read_only") else "   "
-        print(f"{r['id']:10} {r['files']:3} file(s){ro}  {r['url']}  {r['dir']}")
+        name = (r.get("name") or "")[:28]
+        print(f"{r['id']:10} {name:28} {r['files']:3} file(s){ro}  {r['url']}  {r['dir']}")
 
 
 def cmd_close(args):
@@ -105,7 +119,13 @@ def main():
     po.add_argument("dir")
     po.add_argument("--read-only", action="store_true",
                     help="disable uploads into this room")
-    po.add_argument("--name", help="display name (defaults to the dir name)")
+    po.add_argument("--writable", action="store_true",
+                    help="re-enable uploads on an existing read-only room")
+    po.add_argument("--name",
+                    help='display name — use "<Client> <Content>", e.g. '
+                         '"Acme Videos", never a vague dir name like "videos". '
+                         'Re-opening an existing room with --name renames it '
+                         'in place (URL unchanged).')
     po.set_defaults(fn=cmd_open)
 
     pl = sub.add_parser("list", help="list open rooms")
