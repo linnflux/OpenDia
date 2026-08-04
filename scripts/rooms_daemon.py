@@ -42,6 +42,19 @@ PORT = int(get_id("ROOMS_PORT", default="9099"))
 REGISTRY_PATH = Path.home() / "OpenDia" / "rooms.json"
 MAX_UPLOAD = 500 * 1024 * 1024  # 500 MB
 
+# Image rows get a server-generated thumbnail (made once, cached by
+# content identity) so listing a room of phone photos costs kilobytes,
+# not the megabytes the originals weigh. Needs Pillow; without it the
+# page degrades to plain rows.
+THUMB_CACHE = Path.home() / "OpenDia" / ".rooms-thumbs"
+THUMB_EDGE = 160
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"}
+try:
+    from PIL import Image  # noqa: F401
+    HAVE_PIL = True
+except ImportError:
+    HAVE_PIL = False
+
 # Not a security boundary (the tailnet is trusted); this catches mistakes —
 # an agent absent-mindedly opening a room on a credentials directory.
 HOME = Path.home()
@@ -183,6 +196,57 @@ def unique_name(room_dir: Path, name: str) -> str:
         i += 1
 
 
+def is_image(name: str) -> bool:
+    return Path(name).suffix.lower() in IMAGE_EXTS
+
+
+def thumb_for(target: Path) -> Path | None:
+    """Cached thumbnail path for an image, generating on first request.
+
+    Cache key is path+mtime+size, so editing a file naturally invalidates
+    its thumb. Returns None if Pillow is missing or the file won't decode.
+    """
+    if not HAVE_PIL:
+        return None
+    import hashlib
+    st = target.stat()
+    key = hashlib.sha1(f"{target}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest()
+    out = THUMB_CACHE / f"{key}.jpg"
+    if out.exists():
+        return out
+    try:
+        THUMB_CACHE.mkdir(parents=True, exist_ok=True)
+        with Image.open(target) as im:
+            im.thumbnail((THUMB_EDGE, THUMB_EDGE), Image.LANCZOS)
+            # JPEG has no alpha; flatten onto dark grey so transparent PNGs
+            # look intentional rather than garbled
+            if im.mode not in ("RGB", "L"):
+                from PIL import Image as _I
+                bg = _I.new("RGB", im.size, (30, 34, 43))
+                bg.paste(im, mask=im.convert("RGBA").getchannel("A"))
+                im = bg
+            tmp = out.with_suffix(".tmp")
+            im.convert("RGB").save(tmp, "JPEG", quality=70, optimize=True)
+            tmp.replace(out)
+        return out
+    except Exception as e:
+        print(f"thumbnail failed for {target.name}: {e}", flush=True)
+        return None
+
+
+def prune_thumb_cache(max_age_days: int = 30):
+    """Thumbs key on content identity, so stale entries only accumulate as
+    files change or rooms close — a slow drip. Age them out at boot."""
+    import time
+    cutoff = time.time() - max_age_days * 86400
+    try:
+        for f in THUMB_CACHE.glob("*.jpg"):
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def sanitize_filename(name: str) -> str:
     # basename only, no dotfiles, printable, non-empty
     name = os.path.basename(name.replace("\\", "/")).strip()
@@ -244,12 +308,14 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title><style>
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
- background:#0f172a;color:#e2e8f0;max-width:640px;margin:2rem auto;padding:0 1rem}}
+ background:#0f172a;color:#e2e8f0;max-width:680px;margin:2rem auto;padding:0 1rem}}
 h1{{font-size:1.1rem}} h1 small{{color:#64748b;font-weight:400;font-size:.8rem}}
 table{{width:100%;border-collapse:collapse;margin:1rem 0}}
 td,th{{padding:.45rem .5rem;border-bottom:1px solid #1e293b;text-align:left;font-size:.9rem}}
 th{{color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}}
 td.num{{text-align:right;color:#94a3b8;white-space:nowrap}}
+td.th{{width:52px}} td.th img{{display:block;width:48px;height:36px;object-fit:cover;
+ border-radius:4px;cursor:pointer;border:1px solid #1e293b}}
 a{{color:#7dd3fc;text-decoration:none}} a:hover{{text-decoration:underline}}
 form{{margin:1.25rem 0;padding:1rem;border:1px dashed #334155;border-radius:8px}}
 input[type=file]{{color:#94a3b8}}
@@ -257,23 +323,60 @@ button{{background:#164e63;color:#22d3ee;border:none;border-radius:6px;
  padding:.45rem .9rem;cursor:pointer;font-size:.85rem}}
 .empty{{color:#64748b;padding:1.5rem 0}} .msg{{color:#4ade80;font-size:.85rem}}
 footer{{color:#475569;font-size:.72rem;margin-top:2rem}}
+#lb{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10;
+ flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:1.5rem}}
+#lb.open{{display:flex}}
+#lb img{{max-width:92vw;max-height:80vh;border-radius:6px}}
+#lb .bar{{display:flex;gap:.75rem;align-items:center}}
+#lb .name{{color:#94a3b8;font-size:.85rem}}
+#lb a.dl{{background:#164e63;color:#22d3ee;border-radius:6px;padding:.45rem .9rem}}
+#lb button{{background:#1e293b;color:#94a3b8}}
 </style></head><body>
 <h1>{title} <small>OpenDia room</small></h1>
 {msg}{table}{form}
 <footer>Files live in this room until it is closed.</footer>
+<div id="lb">
+  <img id="lb-img" alt="">
+  <div class="bar"><span class="name" id="lb-name"></span>
+    <a class="dl" id="lb-dl" download>Download</a>
+    <button onclick="lbClose()">Close</button></div>
+</div>
+<script>
+var lb=document.getElementById('lb');
+function lbOpen(name){{
+  document.getElementById('lb-img').src=encodeURIComponent(name);
+  document.getElementById('lb-name').textContent=name;
+  document.getElementById('lb-dl').href=encodeURIComponent(name);
+  lb.classList.add('open');
+}}
+function lbClose(){{lb.classList.remove('open');document.getElementById('lb-img').src='';}}
+lb.addEventListener('click',function(e){{if(e.target===lb)lbClose();}});
+document.addEventListener('keydown',function(e){{if(e.key==='Escape')lbClose();}});
+</script>
 </body></html>"""
 
 
 def render_room(room: dict, msg: str = "") -> str:
     files = list_files(Path(room["dir"]))
     if files:
-        rows = "".join(
-            f'<tr><td><a href="{quote(f["name"])}" download>{escape(f["name"])}</a></td>'
-            f'<td class="num">{human_size(f["size"])}</td>'
-            f'<td class="num">{f["mtime"]}</td></tr>'
-            for f in files)
-        table = (f'<table><tr><th>File</th><th style="text-align:right">Size</th>'
-                 f'<th style="text-align:right">Modified (UTC)</th></tr>{rows}</table>')
+        rows = []
+        for f in files:
+            q = quote(f["name"])
+            if HAVE_PIL and is_image(f["name"]):
+                # data-name + JS keeps filenames out of inline handlers, so a
+                # file named with quotes can't break out of the attribute
+                thumb = (f'<img src="t/{q}" loading="lazy" alt="" '
+                         f'data-name="{escape(f["name"], quote=True)}" '
+                         f'onclick="lbOpen(this.dataset.name)">')
+            else:
+                thumb = ""
+            rows.append(
+                f'<tr><td class="th">{thumb}</td>'
+                f'<td><a href="{q}" download>{escape(f["name"])}</a></td>'
+                f'<td class="num">{human_size(f["size"])}</td>'
+                f'<td class="num">{f["mtime"]}</td></tr>')
+        table = (f'<table><tr><th></th><th>File</th><th style="text-align:right">Size</th>'
+                 f'<th style="text-align:right">Modified (UTC)</th></tr>{"".join(rows)}</table>')
     else:
         table = '<div class="empty">No files here yet.</div>'
     form = ("" if room.get("read_only") else
@@ -318,6 +421,9 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/r/([A-Za-z0-9_-]+)/?", path)
         if m:
             return self.room_page(m.group(1))
+        m = re.fullmatch(r"/r/([A-Za-z0-9_-]+)/t/([^/]+)", path)
+        if m:
+            return self.room_thumb(m.group(1), m.group(2))
         m = re.fullmatch(r"/r/([A-Za-z0-9_-]+)/([^/]+)", path)
         if m:
             return self.room_file(m.group(1), m.group(2))
@@ -377,6 +483,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         with open(target, "rb") as f:
             shutil.copyfileobj(f, self.wfile)
+
+    def room_thumb(self, rid: str, name: str):
+        room = self._room_or_404(rid)
+        if not room:
+            return
+        if name.startswith(".") or "/" in name or "\\" in name or not is_image(name):
+            return self._send(404, b"not found", "text/plain")
+        room_dir = Path(room["dir"]).resolve()
+        target = (room_dir / name).resolve()
+        if not target.is_relative_to(room_dir) or not target.is_file():
+            return self._send(404, b"not found", "text/plain")
+        thumb = thumb_for(target)
+        if not thumb:
+            return self._send(404, b"no thumbnail", "text/plain")
+        body = thumb.read_bytes()
+        # content-keyed cache name means the thumb for this URL never changes
+        # without the file itself changing, so long client caching is safe
+        self._send(200, body, "image/jpeg",
+                   {"Cache-Control": "max-age=86400"})
 
     def room_upload(self, rid: str):
         room = self._room_or_404(rid)
@@ -495,8 +620,11 @@ def serve_on(host: str):
 
 def main():
     load_registry()
+    prune_thumb_cache()
     print(f"loaded {len(_rooms)} room(s) from {REGISTRY_PATH}", flush=True)
     print(f"room URLs use host: {URL_HOST}", flush=True)
+    if not HAVE_PIL:
+        print("NOTE: Pillow not installed — image thumbnails disabled", flush=True)
     hosts = ["127.0.0.1"]
     if TS["ip4"]:
         hosts.append(TS["ip4"])

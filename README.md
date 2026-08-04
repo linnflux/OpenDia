@@ -167,6 +167,7 @@ od-room close <id|all>
 - Binds the **Tailscale interface and loopback only** — never `0.0.0.0`. Room ids are `secrets.token_urlsafe` — unguessable, the intended protection level inside a trusted tailnet.
 - **One directory, one room**: opening a dir that already has a room returns the existing URL, so the registry makes duplicate servers structurally impossible.
 - **No TTL by choice** — rooms live until closed. The hygiene mechanism is visibility, not a reaper: the dashboard's admin-only **Rooms** view lists every open room with a copy-URL button and a Close button.
+- Image rows show server-generated thumbnails (built once, cached by content identity) with a click-to-open lightbox and download button — a room full of phone photos lists in kilobytes, and originals are fetched only on demand.
 - Uploads are spooled to disk (500 MB cap, never held in RAM), filenames sanitized, and collisions renamed `file-2.ext` — an upload can never overwrite an existing file.
 - The daemon refuses rooms on sensitive paths (home root, `~/.ssh`, credential dirs, anything containing a `.env`) — a mistake-catcher, not a security boundary.
 - The management API answers loopback only (it reveals filesystem paths); the dashboard reaches it through an admin-gated proxy, and the CLI talks to it directly.

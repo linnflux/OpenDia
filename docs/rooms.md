@@ -46,6 +46,12 @@ Close button; that view is the hygiene mechanism.
 ## Behaviour details
 
 - Listing shows top-level plain files only — no dotfiles, no subdirectories.
+- Image rows carry a server-generated thumbnail (needs Pillow; degrades to
+  plain rows without it). Thumbs are built once per content identity
+  (path+mtime+size), cached under `~/OpenDia/.rooms-thumbs/`, pruned after
+  30 days at daemon boot, and served with a day of client caching — a 2 MB
+  photo costs ~1 KB per listing. Clicking a thumbnail opens an in-page
+  lightbox with a download button; the original is only fetched then.
 - Uploads: multipart, 500 MB cap, spooled to disk (never held in RAM),
   filename sanitised to a basename, collisions renamed `file-2.ext` — an
   upload can never overwrite an existing file.
