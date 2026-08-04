@@ -1,18 +1,17 @@
 import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import { spawnSync } from "child_process";
-import {
-  readFileSync, writeFileSync, existsSync,
-  mkdirSync, appendFileSync, readdirSync, unlinkSync
-} from "fs";
+import { writeFileSync, existsSync, appendFileSync, unlinkSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getProjectById } from "./db.js";
 import { verifyRequest } from "./auth.js";
+import {
+  etNow, findTimerForSession, startTimerForProject, closeTimerEntry
+} from "./timerfile.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOME = process.env.HOME || "/home/linnflux";
-const TIMER_DIR = `${HOME}/OpenDia/Time`;
 const AUDIT_LOG = resolve(__dirname, "terminal-audit.log");
 
 const SCROLLBACK_MAX = 65536;
@@ -173,118 +172,7 @@ function releaseControl(state, projectId, user = "") {
   broadcastState(state);
 }
 
-// ── Timer helpers ──────────────────────────────────────────────────────────
-
-function etNow() {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false
-  });
-  const parts = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]));
-  const h = parts.hour === "24" ? "00" : parts.hour;
-  return {
-    YYYY: parts.year,
-    MM: parts.month,
-    DD: parts.day,
-    HH: h,
-    mm: parts.minute,
-    iso: `${parts.year}-${parts.month}-${parts.day}T${h}:${parts.minute}`
-  };
-}
-
-function durationStr(startIso, endIso) {
-  const pad = s => s.length === 16 ? s + ":00" : s;
-  const diffMin = Math.max(1, Math.round((new Date(pad(endIso)) - new Date(pad(startIso))) / 60000));
-  if (diffMin < 60) return `${diffMin}m`;
-  const h = Math.floor(diffMin / 60), m = diffMin % 60;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
-}
-
-function findTimerForSession(session) {
-  try {
-    for (const f of readdirSync(TIMER_DIR)) {
-      if (!f.startsWith(".timer-") || !f.endsWith(".json")) continue;
-      try {
-        const data = JSON.parse(readFileSync(`${TIMER_DIR}/${f}`, "utf8"));
-        if (data.tmux_session === session) return { file: `${TIMER_DIR}/${f}`, data };
-      } catch {}
-    }
-  } catch {}
-  return null;
-}
-
-function startTimerForProject(project, taskOverride) {
-  const t = etNow();
-  const task = taskOverride || project.next_step || `${project.name} — dashboard terminal session`;
-  const billable = !["Admin", "Onboarding"].includes(project.division);
-  const marker = t.iso;
-
-  const yearDir = `${TIMER_DIR}/${t.YYYY}/${t.MM}`;
-  mkdirSync(yearDir, { recursive: true });
-  const dailyFile = `${yearDir}/${t.YYYY}-${t.MM}-${t.DD}.md`;
-
-  if (!existsSync(dailyFile)) {
-    writeFileSync(dailyFile, `# Time Entries - ${t.YYYY}-${t.MM}-${t.DD}\n`);
-  }
-
-  appendFileSync(dailyFile, [
-    ``,
-    `---`,
-    `<!-- entry:${marker} -->`,
-    `client: ${project.company_name || project.name}`,
-    `project: ${project.name}`,
-    `division: ${project.division || ""}`,
-    `task: ${task}`,
-    `estimated_minutes: 30`,
-    `start: ${marker}`,
-    `end:`,
-    `duration:`,
-    `billable: ${billable}`,
-    `notes:`,
-    `---`,
-    ``
-  ].join("\n"));
-
-  const stateFile = `${TIMER_DIR}/.timer-${marker.replace(/:/g, "-")}.json`;
-  writeFileSync(stateFile, JSON.stringify({
-    client: project.company_name || project.name,
-    project: project.name,
-    division: project.division || "",
-    task,
-    billable,
-    start: marker,
-    file: dailyFile,
-    marker,
-    tmux_session: project.tmux_session || "",
-    project_id: project.id
-  }, null, 2));
-
-  return { stateFile, marker, dailyFile };
-}
-
-function closeTimerEntry(dailyFile, marker, endIso, notes) {
-  const duration = durationStr(marker, endIso);
-  let content = readFileSync(dailyFile, "utf8");
-  const anchor = `<!-- entry:${marker} -->`;
-  const idx = content.indexOf(anchor);
-  if (idx === -1) return false;
-
-  const sectionEnd = content.indexOf("\n---", idx + anchor.length);
-  let section = content.slice(idx, sectionEnd);
-
-  section = section
-    .replace(/\nend:\n/, `\nend: ${endIso}\n`)
-    .replace(/\nduration:\n/, `\nduration: ${duration}\n`);
-
-  if (notes) {
-    const indented = notes.split("\n").map(l => `  ${l}`).join("\n");
-    section = section.replace(/\nnotes:\n/, `\nnotes: |\n${indented}\n`);
-  }
-
-  writeFileSync(dailyFile, content.slice(0, idx) + section + content.slice(sectionEnd));
-  return true;
-}
+// ── Timer helpers live in timerfile.js (shared with spark.js) ──────────────
 
 function pollForStateFileDeletion(stateFile, timeoutMs = 90_000) {
   return new Promise((resolve, reject) => {
