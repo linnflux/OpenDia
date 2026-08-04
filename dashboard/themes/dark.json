@@ -36,6 +36,7 @@
     "timer-open":             "#22c55e",
     "billable-color":         "#22c55e",
     "billable-bg":            "#14532d",
+    "danger":                 "#f87171",
     "timer-notes-border":     "#1e293b",
     "accent":                 "#3b82f6",
     "accent-hover":           "#2563eb",

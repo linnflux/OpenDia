@@ -12,6 +12,13 @@
      card/body. Mixing toward --text-primary always moves AWAY from the
      surface whichever direction the theme runs, so it stays visible. */
   --bg-recessed: color-mix(in srgb, var(--bg-card) 88%, var(--text-primary));
+  /* Row/button hover lift. Every use site used to carry its own
+     rgba(255,255,255,0.03-0.08) fallback — white tints, so they did nothing at
+     all on the light theme. Mixing toward --text-primary lifts away from the
+     surface whichever direction a theme runs. */
+  --bg-hover: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  /* Quieter than --border, for table rules and group separators. */
+  --border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
   --border: #334155;
   --border-hover: #475569;
   --text-primary: #e2e8f0;
@@ -2326,7 +2333,7 @@ body.has-bg::before {
   line-height: 1;
   border: none;
   border-radius: 6px;
-  background: var(--bg-hover, rgba(255,255,255,0.08));
+  background: var(--bg-hover);
   color: var(--text-faint);
   cursor: pointer;
   opacity: 0.35;
@@ -3147,7 +3154,7 @@ body.has-bg::before {
 }
 
 .analytics-accordion-header:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.04));
+  background: var(--bg-hover);
 }
 
 .analytics-accordion-header.open {
@@ -3235,11 +3242,11 @@ body.has-bg::before {
 }
 
 .analytics-client-row:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.04));
+  background: var(--bg-hover);
 }
 
 .analytics-client-row.open {
-  background: var(--bg-hover, rgba(255,255,255,0.04));
+  background: var(--bg-hover);
 }
 
 .analytics-client-name {
@@ -3253,7 +3260,7 @@ body.has-bg::before {
 }
 
 .analytics-billable {
-  color: var(--color-green, #3fb950);
+  color: var(--billable-color);
   font-weight: 600;
 }
 
@@ -3285,7 +3292,7 @@ body.has-bg::before {
 }
 
 .analytics-entry-row:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.03));
+  background: var(--bg-hover);
 }
 
 .today-toolbar {
@@ -3303,7 +3310,7 @@ body.has-bg::before {
   cursor: pointer;
 }
 .today-toolbar-btn:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.05));
+  background: var(--bg-hover);
 }
 
 .gmail-thread-row {
@@ -3315,7 +3322,7 @@ body.has-bg::before {
   border-top: 1px solid var(--border);
 }
 .gmail-thread-row:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.03));
+  background: var(--bg-hover);
 }
 .gmail-thread-row a {
   display: block;
@@ -3373,7 +3380,7 @@ body.has-bg::before {
   cursor: pointer;
 }
 .sweep-run-btn:hover:not(:disabled) {
-  background: var(--bg-hover, rgba(255,255,255,0.05));
+  background: var(--bg-hover);
 }
 .sweep-run-btn:disabled { opacity: 0.6; cursor: wait; }
 .sweep-error {
@@ -3396,7 +3403,7 @@ body.has-bg::before {
   cursor: pointer;
 }
 .sweep-row + .sweep-row { border-top: 1px solid var(--border); }
-.sweep-row:hover { background: var(--bg-hover, rgba(255,255,255,0.03)); }
+.sweep-row:hover { background: var(--bg-hover); }
 .sweep-row-main {
   display: flex;
   align-items: baseline;
@@ -3499,7 +3506,7 @@ body.has-bg::before {
 
 .analytics-error {
   font-size: 0.8rem;
-  color: var(--color-danger, #ff7b72);
+  color: var(--danger);
 }
 
 .analytics-table {
@@ -3528,7 +3535,7 @@ body.has-bg::before {
 .analytics-table td {
   padding: 0.35rem 0.75rem;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+  border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
 }
 
@@ -3537,7 +3544,7 @@ body.has-bg::before {
 }
 
 .analytics-table tr:hover td {
-  background: var(--bg-hover, rgba(255,255,255,0.03));
+  background: var(--bg-hover);
 }
 
 .analytics-num {
@@ -3546,7 +3553,7 @@ body.has-bg::before {
 }
 
 .analytics-stale-age {
-  color: var(--color-warning, #d29922);
+  color: var(--pill-warn-color);
 }
 
 .deadline-overdue-row td:first-child {
@@ -3684,7 +3691,7 @@ body.has-bg::before {
 
 .billing-error {
   font-size: 0.8rem;
-  color: var(--color-danger, #ff7b72);
+  color: var(--danger);
 }
 
 .billing-summary-bar {
@@ -3705,7 +3712,7 @@ body.has-bg::before {
 }
 
 .billing-summary-billable {
-  color: var(--color-green, #3fb950);
+  color: var(--billable-color);
   font-weight: 600;
 }
 
@@ -3725,7 +3732,7 @@ body.has-bg::before {
 .billing-client-group {
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .billing-client-group:last-child {
@@ -3748,11 +3755,11 @@ body.has-bg::before {
 }
 
 .billing-client-row:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.04));
+  background: var(--bg-hover);
 }
 
 .billing-client-row.open {
-  background: var(--bg-hover, rgba(255,255,255,0.04));
+  background: var(--bg-hover);
 }
 
 .billing-caret {
@@ -3774,7 +3781,7 @@ body.has-bg::before {
 }
 
 .billing-billable {
-  color: var(--color-green, #3fb950);
+  color: var(--billable-color);
   font-weight: 600;
 }
 
@@ -3802,7 +3809,7 @@ body.has-bg::before {
 }
 
 .billing-entry-row:hover {
-  background: var(--bg-hover, rgba(255,255,255,0.03));
+  background: var(--bg-hover);
 }
 
 .billing-entry-date {
@@ -4145,10 +4152,10 @@ body.has-bg::before {
 }
 
 .newsletter-error {
-  color: var(--error, #e57373);
+  color: var(--danger);
   font-size: 0.82rem;
   background: var(--bg-card);
-  border: 1px solid var(--error, #e57373);
+  border: 1px solid var(--danger);
   border-radius: var(--radius-md);
   padding: 0.4rem 0.75rem;
 }
