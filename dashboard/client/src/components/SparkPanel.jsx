@@ -157,16 +157,20 @@ function SparkBody({ md, animate }) {
 
 function SparkActions({ spark, showToast }) {
   const [choices, setChoices] = useState({});
-  useEffect(() => { setChoices({}); }, [spark.actions]);
+  const [note, setNote] = useState("");
+  useEffect(() => { setChoices({}); setNote(""); }, [spark.actions]);
 
   if (!spark.actions?.length) return null;
   const chosen = Object.values(choices).filter((v) => v === "do").length;
   const decided = Object.keys(choices).length;
+  const trimmed = note.trim();
+  // A correction on its own is a reason to run: "none of these, do this".
+  const canRun = decided === spark.actions.length && (chosen > 0 || trimmed);
 
   async function run() {
     const decisions = {};
     for (const a of spark.actions) decisions[a.id] = choices[a.id] || "skip";
-    const res = await spark.decide(decisions);
+    const res = await spark.decide(decisions, trimmed);
     if (res?.error) showToast(res.error);
   }
 
@@ -205,14 +209,34 @@ function SparkActions({ spark, showToast }) {
           </div>
         );
       })}
+      {/* The proposals are usually right but one detail short, and without this
+          there was no way to say so — the run had to be taken or abandoned. */}
+      <label className="spark-note">
+        <span className="spark-note-label">Anything to correct or add? (optional)</span>
+        <textarea
+          className="spark-note-input"
+          rows={2}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="e.g. cc Nell on that reply, and use the shorter form of the address"
+        />
+      </label>
+
       <div className="spark-proposals-run">
         <button className="spark-btn spark-btn-primary" onClick={run}
-                disabled={spark.busy || decided < spark.actions.length}>
-          {chosen ? `Run ${chosen} approved` : "Skip all"}
+                disabled={spark.busy || !canRun}>
+          {chosen
+            ? `Run ${chosen} approved${trimmed ? " with your note" : ""}`
+            : trimmed ? "Send the correction" : "Skip all"}
         </button>
         {decided < spark.actions.length && (
           <span className="spark-proposals-hint">
             Choose for each — {spark.actions.length - decided} left
+          </span>
+        )}
+        {decided === spark.actions.length && !chosen && !trimmed && (
+          <span className="spark-proposals-hint">
+            Skipping everything ends the run — add a note to steer it instead.
           </span>
         )}
       </div>

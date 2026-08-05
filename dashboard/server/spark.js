@@ -965,7 +965,7 @@ async function wrapUp(run) {
   finishRun(run, "done");
 }
 
-async function startRound(run, decisions) {
+async function startRound(run, decisions, note = "") {
   const project = run.project;
   run.roundsUsed += 1;
   run.round = run.roundsUsed;
@@ -982,6 +982,8 @@ async function startRound(run, decisions) {
     if (state === "skipped") pushLedger(run, "skip", `Skipped: ${a.label}`);
   }
 
+  if (note) pushLedger(run, "note", `Clarification: ${note}`);
+
   const roundFile = `${run.runDir}/round-${run.round}.json`;
   const outPath = `${run.runDir}/round-${run.round}-result.json`;
   writeFileSync(roundFile, JSON.stringify({
@@ -990,6 +992,7 @@ async function startRound(run, decisions) {
     out_path: outPath,
     round: run.round,
     decisions,
+    operator_note: note || null,
     actions: run.actions,
     accrued_minutes: run.accruedMinutes,
     rounds_remaining: MAX_ROUNDS - run.roundsUsed,
@@ -1011,6 +1014,16 @@ async function startRound(run, decisions) {
   const proc = spawnPhase(run, {
     prompt:
       `Run /spark-act ${roundFile}\n\n` +
+      // The note goes in the prompt as well as the round file. Buried in JSON
+      // it reads as one more field; up here it reads as an instruction, which
+      // is what it is. Same shape as the inbox dispatcher's operator
+      // correction block.
+      (note
+        ? "## Operator Correction\n\nThe operator reviewed these proposals and "
+          + "provided the following correction. It outranks the plan below — apply "
+          + "it to every approved action, and say in each summary how it was "
+          + `applied:\n\n${note}\n\n`
+        : "") +
       "Invoked headlessly from the OpenDia dashboard Spark tab. There is no interactive user — " +
       "never ask a question and never wait for input. Carry out only the approved actions, " +
       "write the result JSON to the out_path named in the round file, then stop.",
@@ -1229,9 +1242,21 @@ export function mountSpark(app) {
     const unknown = Object.keys(decisions).filter((k) => !known.has(k));
     if (unknown.length) return res.status(400).json({ error: `unknown action(s): ${unknown.join(", ")}` });
 
+    const note = String(req.body?.note || "").trim().slice(0, 2000);
     const approved = run.actions.filter((a) => decisions[a.id] === "do");
+    if (!approved.length && note) {
+      // Nothing approved but a correction supplied: that is not "stop", it is
+      // "none of these, do this instead". Run the round so the note lands.
+      startRound(run, decisions, note).catch(async (err) => {
+        run.error = { message: err.message };
+        emit(run, "error", run.error);
+        await wrapUp(run);
+      });
+      return res.json({ ok: true, started: true, round: run.round, note: true });
+    }
     if (!approved.length) {
-      // Skipping everything is a legitimate answer, and it ends the run.
+      // Skipping everything with nothing to add is a legitimate answer, and it
+      // ends the run.
       for (const a of run.actions) {
         run.actionStates[a.id] = { state: "skipped" };
         emit(run, "action_progress", { id: a.id, state: "skipped", detail: null });
@@ -1244,7 +1269,7 @@ export function mountSpark(app) {
       return res.status(400).json({ error: "tier 3 actions are handed off to a session, not run here" });
     }
 
-    startRound(run, decisions).catch(async (err) => {
+    startRound(run, decisions, note).catch(async (err) => {
       run.error = { message: err.message };
       emit(run, "error", run.error);
       await wrapUp(run);

@@ -5546,3 +5546,35 @@ html.vt-no-target::view-transition-old(card-morph) {
 .spark-last-run.is-interrupted { cursor: default; opacity: 0.75; }
 .spark-last-run.is-interrupted:hover { border-color: var(--border-subtle); }
 .spark-last-run-reason { font-size: 0.7rem; color: var(--text-faint); }
+
+/* Operator clarification on a proposal round — same idea as the inbox
+   dispatcher's operator notes: a place to correct the plan before it runs. */
+.spark-note {
+  display: block;
+  margin: 0.9rem 0 0.2rem;
+}
+.spark-note-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.spark-note-input {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+.spark-note-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.spark-note-input::placeholder { color: var(--text-faint); }

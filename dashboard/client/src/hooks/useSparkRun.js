@@ -244,13 +244,13 @@ export default function useSparkRun(projectId) {
     } catch {} finally { setBusy(false); }
   }, [projectId]);
 
-  const decide = useCallback(async (decisions) => {
+  const decide = useCallback(async (decisions, note = "") => {
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/spark/decide`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisions }),
+        body: JSON.stringify({ decisions, note }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) return { error: body.error || `HTTP ${res.status}` };
