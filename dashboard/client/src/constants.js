@@ -24,18 +24,20 @@ export const DIVISION_LOGOS = {
   AmPen: "/divisions/ampen.png",
   "Bedford AI": "/divisions/bedford-ai-h.png",
   "ADA Web Work": "/divisions/ada-web-work.png",
-  Linnflux: "/divisions/linnflux.png",
+  Linnflux: "/divisions/linnflux-h.png",
   FluxCC: "/divisions/fluxcc.png",
 };
 
 // The subset that reads as a badge on a board card: horizontal wordmarks,
-// ~3:1 or wider. The square marks (Linnflux, FluxCC, AmPen, ADA Web Work)
-// scale to a ~16px blob at card size and say less than the text pill does,
-// so those divisions keep the pill. Paths are reused, not duplicated.
+// ~2.5:1 or wider. The square marks (FluxCC, AmPen, ADA Web Work) scale to a
+// ~16px blob at card size and say less than the text pill does, so those
+// divisions keep the pill — as do divisions with no artwork, like Admin.
+// Paths are reused from above, not duplicated.
 export const DIVISION_WORDMARKS = {
   WordFlux: DIVISION_LOGOS.WordFlux,
   WatchThreat: DIVISION_LOGOS.WatchThreat,
   "Bedford AI": DIVISION_LOGOS["Bedford AI"],
+  Linnflux: DIVISION_LOGOS.Linnflux,
 };
 
 export const STATUS_OPTIONS = [
