@@ -28,6 +28,16 @@ export const DIVISION_LOGOS = {
   FluxCC: "/divisions/fluxcc.png",
 };
 
+// The subset that reads as a badge on a board card: horizontal wordmarks,
+// ~3:1 or wider. The square marks (Linnflux, FluxCC, AmPen, ADA Web Work)
+// scale to a ~16px blob at card size and say less than the text pill does,
+// so those divisions keep the pill. Paths are reused, not duplicated.
+export const DIVISION_WORDMARKS = {
+  WordFlux: DIVISION_LOGOS.WordFlux,
+  WatchThreat: DIVISION_LOGOS.WatchThreat,
+  "Bedford AI": DIVISION_LOGOS["Bedford AI"],
+};
+
 export const STATUS_OPTIONS = [
   { key: "in_progress", label: "In Progress", color: "#3b82f6" },
   { key: "wfhuman",    label: "WFHuman",     color: "#f59e0b" },

@@ -644,6 +644,27 @@ body.has-bg::before {
   margin-bottom: 0.375rem;
 }
 
+/* Board cards show the division as its logo where one exists, falling back to
+   the coloured text pill for divisions without artwork (Admin, Onboarding).
+   Each logo PNG carries its own plate, so the wrapper is only there to round
+   the corners and keep the badge row aligned with the status pill beside it. */
+.card-division-logo-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 0.375rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  line-height: 0;
+}
+
+.card-division-logo {
+  height: 16px;
+  width: auto;
+  max-width: 104px;
+  object-fit: contain;
+  display: block;
+}
+
 .division-logo-badge {
   display: inline-flex;
   align-items: center;

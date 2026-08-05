@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { TAGS, hasTag } from "../tags.js";
-import { DIVISION_COLORS, STATUS_OPTIONS } from "../constants.js";
+import { DIVISION_COLORS, DIVISION_WORDMARKS, STATUS_OPTIONS } from "../constants.js";
 
 const INBOX_PREFIX = "Auto-created from inbox: ";
 
@@ -105,16 +105,27 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
       <div className="card-company">{project.company_name || "No company"}</div>
       <div className="card-badges">
         {project.division && (
-          <span
-            className="card-division"
-            style={{
-              backgroundColor: div.bg,
-              color: div.text,
-              ...(div.uppercase ? { textTransform: "uppercase" } : {}),
-            }}
-          >
-            {project.division}
-          </span>
+          DIVISION_WORDMARKS[project.division] ? (
+            <span className="card-division-logo-wrap" title={project.division}>
+              <img
+                src={DIVISION_WORDMARKS[project.division]}
+                alt={project.division}
+                className="card-division-logo"
+                loading="lazy"
+              />
+            </span>
+          ) : (
+            <span
+              className="card-division"
+              style={{
+                backgroundColor: div.bg,
+                color: div.text,
+                ...(div.uppercase ? { textTransform: "uppercase" } : {}),
+              }}
+            >
+              {project.division}
+            </span>
+          )
         )}
         {project.inbox_count > 0 && (
           <span className="card-inbox-badge" title={`${project.inbox_count} active inbox item(s)`}>
