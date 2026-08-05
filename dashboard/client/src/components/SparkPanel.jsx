@@ -299,15 +299,61 @@ function SparkLedger({ ledger }) {
   );
 }
 
+// Past runs are never pruned — every report stays on disk and can be reopened.
+function SparkHistory({ spark }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { spark.loadHistory(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const items = spark.history || [];
+  if (!items.length) return null;
+  const [newest, ...older] = items;
+
+  return (
+    <div className="spark-history">
+      <button className="spark-last-run" onClick={() => spark.showRun(newest.runId)}>
+        <span className="spark-last-run-meta">
+          Last spark {new Date(newest.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+          {newest.certitude != null ? ` · ${newest.certitude}%` : ""}
+        </span>
+        <span className="spark-last-run-headline">{newest.headline}</span>
+      </button>
+
+      {older.length > 0 && (
+        <>
+          <button className="spark-history-toggle" onClick={() => setOpen((v) => !v)}>
+            {open ? "Hide" : `${older.length} earlier spark${older.length > 1 ? "s" : ""}`}
+          </button>
+          {open && (
+            <ul className="spark-history-list">
+              {older.map((h) => (
+                <li key={h.runId}>
+                  <button onClick={() => spark.showRun(h.runId)}>
+                    <span className="spark-history-when">
+                      {new Date(h.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                    </span>
+                    {h.certitude != null && <span className="spark-history-pct">{h.certitude}%</span>}
+                    <span className="spark-history-headline">{h.headline}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SparkPanel({ spark, project, onUpdate, showToast, onGoToTerminal, isAdmin }) {
   const [now, setNow] = useState(Date.now());
   const running = spark.status === "scanning" || spark.status === "acting";
 
+  const ticking = running || spark.status === "proposing";
   useEffect(() => {
-    if (!running) return;
+    if (!ticking) return;
     const iv = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(iv);
-  }, [running]);
+  }, [ticking]);
 
   const elapsed = running && spark.startedAt
     ? Math.max(0, Math.round((now - spark.startedAt) / 1000))
@@ -346,7 +392,6 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
   }
 
   if (spark.status === "idle") {
-    const last = spark.lastRun;
     return (
       <div className="spark-panel">
         <div className="spark-stage spark-idle">
@@ -359,14 +404,7 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
                   title={isAdmin ? undefined : "Spark runs are admin-only"}>
             {spark.busy ? "Starting…" : "Go"}
           </button>
-          {last?.result && (
-            <button className="spark-last-run" onClick={spark.showLastRun}>
-              <span className="spark-last-run-meta">
-                Last spark {new Date(last.at).toLocaleDateString()} · {last.result.certitude?.pct}%
-              </span>
-              <span className="spark-last-run-headline">{last.result.headline}</span>
-            </button>
-          )}
+          <SparkHistory spark={spark} />
         </div>
       </div>
     );
@@ -390,12 +428,22 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
     );
   }
 
+  // Moving the conversation to a session means Spark is done: write the brief
+  // and let go of the timer, then switch. Leaving it holding a timer while you
+  // work in the terminal is how one gets stranded.
   async function doHandoff() {
     const res = await spark.handoff();
     if (res?.error) { showToast(res.error); return; }
-    showToast("Handoff brief written");
+    showToast("Brief written · Spark timer closed");
     if (project.tmux_session) onGoToTerminal();
   }
+
+  async function closeSpark() {
+    await spark.cancel();
+    showToast("Spark timer closed");
+  }
+
+  const holdingTimer = ["proposing", "acting"].includes(spark.status) && spark.timerStarted;
 
   // ── running (scan only — an act round renders under the result) ──────────
   if (spark.status === "scanning" && !spark.result) {
@@ -429,9 +477,34 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
   const proposed = r.proposed_next_step?.value;
   const canApply = proposed && proposed !== project.next_step;
 
+  const wrapsInMin = spark.idleWrapAt
+    ? Math.max(0, Math.round((spark.idleWrapAt - now) / 60000))
+    : null;
+
   return (
     <div className="spark-panel">
       <div className="spark-stage spark-result">
+        {spark.viewingPast && (
+          <div className="spark-past-banner">
+            <span>Viewing the spark from {new Date(spark.viewingPast).toLocaleString()}</span>
+            <button className="spark-btn" onClick={spark.backToIdle}>Back</button>
+          </div>
+        )}
+
+        {holdingTimer && (
+          <div className="spark-holding">
+            <span>
+              This Spark is holding a <strong>{spark.accruedMinutes}m</strong> timer open on the card
+              {wrapsInMin != null && spark.status === "proposing"
+                ? ` — it closes itself in ${wrapsInMin} min if nothing is decided.`
+                : "."}
+            </span>
+            <button className="spark-btn" onClick={closeSpark} disabled={spark.busy}>
+              Done — close timer
+            </button>
+          </div>
+        )}
+
         <SparkCertitude certitude={r.certitude} />
 
         <h3 className="spark-headline">{r.headline}</h3>
@@ -521,7 +594,14 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
               <button className="spark-btn" onClick={handleGo} disabled={spark.busy || !isAdmin}>Run again</button>
             )}
             {project.tmux_session && (
-              <button className="spark-btn" onClick={onGoToTerminal}>Discuss in Terminal</button>
+              <button
+                className="spark-btn"
+                onClick={holdingTimer ? doHandoff : onGoToTerminal}
+                disabled={spark.busy}
+                title={holdingTimer ? "Writes a brief, closes the Spark timer, and switches tabs" : undefined}
+              >
+                Discuss in Terminal
+              </button>
             )}
           </div>
         </div>

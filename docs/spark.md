@@ -121,17 +121,42 @@ Runs cost roughly $0.90-1.00 each on Opus. Hard limits: 4 rounds, 8 executed
 actions, 20 minutes per invocation, and a 30-minute idle wrap so a walked-away
 decision never leaves a timer open.
 
+## Closing a run, and never being stranded
+
+A Spark holds the card's timer open while it waits for a decision, which is
+correct — the engagement is not over until the proposals are answered. But
+because the state file carries a blank `tmux_session`, **`/od-stop` in a
+terminal can never close it.** Three things make that safe:
+
+- The result pane says plainly that it is holding an *N*-minute timer and
+  counts down to when it lets go, with a **Done — close timer** button beside
+  it. Closing a run that already produced its report bills what it accrued;
+  abandoning a sweep mid-flight is a cancel and rewrites the estimate down to
+  actual.
+- **Discuss in Terminal writes the handoff brief and closes the timer** before
+  switching tabs. Moving the conversation to a session means Spark is finished.
+- If nothing is decided, the run wraps itself up after 30 minutes.
+
+If the dashboard stops while a run is open, the run is **recovered at boot**
+rather than lost: the report is already on disk and the Claude session is
+resumable by id, so the pending proposals come back and can still be approved.
+Only a run that died mid-sweep with nothing to show gets closed out, with a
+note saying so.
+
+## History
+
+Every run is kept forever under `~/OpenDia/spark/<card>/<run>/` — the brief,
+the raw stream, the round files, and `result.json`. The idle pane shows the
+most recent report and lists the earlier ones; any of them can be reopened,
+and a replayed report never re-runs the typewriter.
+
 ## Known limitations
 
-- **"Discuss in Terminal" only switches tabs.** It does not hand anything over:
-  the session on the other side has no knowledge of the run. The findings are
-  written to `~/OpenDia/handoffs/` only by the separate **Hand off to session**
-  action, which also closes the Spark timer. Merging the two — write the brief,
-  ensure a session exists, seed it — is the obvious next improvement.
-- **Typing requires Take Control**, which opens a 30-minute timer. That is a
-  heavy door for a short follow-up question about the recommendation.
+- **Typing in the Terminal tab requires Take Control**, which opens a
+  30-minute timer. That is a heavy door for a short follow-up question about a
+  recommendation.
 - The email draft-and-send path is implemented but has not yet run end to end;
-  no run on an internal card has proposed a draft.
+  no run has proposed a draft on a card used for testing.
 - The non-admin gate is untested from a real non-admin identity — loopback is
   unconditionally admin, so it can only be exercised through Tailscale
   identity headers.

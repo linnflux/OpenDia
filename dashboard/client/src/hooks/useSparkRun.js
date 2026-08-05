@@ -30,18 +30,21 @@ function emptyState() {
     error: null,
     accruedMinutes: 0,
     accrualPaused: false,
+    idleWrapAt: null,
     timerStarted: false,
     timerNote: null,
     costUsd: null,
     model: null,
     startedAt: null,
     elapsedSec: 0,
+    viewingPast: null,   // ISO date when showing a past run rather than a live one
   };
 }
 
 export default function useSparkRun(projectId) {
   const [state, setState] = useState(emptyState);
   const [lastRun, setLastRun] = useState(null);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   // True only for a result that arrived live in this session — a replayed
@@ -71,6 +74,7 @@ export default function useSparkRun(projectId) {
       roundsMax: run.roundsMax ?? s.roundsMax,
       accruedMinutes: run.accruedMinutes ?? s.accruedMinutes,
       accrualPaused: run.accrualPaused ?? s.accrualPaused,
+      idleWrapAt: run.idleWrapAt ?? s.idleWrapAt,
       timerStarted: run.timerStarted ?? s.timerStarted,
       timerNote: run.timerNote ?? s.timerNote,
       costUsd: run.costUsd ?? s.costUsd,
@@ -155,6 +159,7 @@ export default function useSparkRun(projectId) {
     let cancelled = false;
     setState(emptyState());
     setLastRun(null);
+    setHistory([]);
     setLiveResult(false);
     setLoading(true);
     fetch(`/api/projects/${projectId}/spark`)
@@ -245,14 +250,39 @@ export default function useSparkRun(projectId) {
   const showLastRun = useCallback(() => {
     if (!lastRun?.result) return;
     setLiveResult(false);
-    setState((s) => ({ ...s, status: "done", result: lastRun.result }));
+    setState((s) => ({ ...s, status: "done", result: lastRun.result, viewingPast: lastRun.at }));
   }, [lastRun]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/projects/${projectId}/spark/history`);
+      const items = await r.json();
+      setHistory(Array.isArray(items) ? items : []);
+      return items;
+    } catch { return []; }
+  }, [projectId]);
+
+  // Past runs are kept on disk forever, so an old report can always be reopened.
+  const showRun = useCallback(async (runId) => {
+    try {
+      const r = await fetch(`/api/projects/${projectId}/spark/history/${runId}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setLiveResult(false);
+      setState((s) => ({ ...s, status: "done", result: d.result, viewingPast: d.at }));
+    } catch {}
+  }, [projectId]);
+
+  const backToIdle = useCallback(() => {
+    setState((s) => ({ ...s, status: "idle", result: null, viewingPast: null }));
+  }, []);
 
   return {
     ...state,
     fronts: state.fronts,
     frontOrder: FRONT_ORDER,
     lastRun,
+    history,
     loading,
     busy,
     liveResult,
@@ -262,5 +292,8 @@ export default function useSparkRun(projectId) {
     sendDraft,
     handoff,
     showLastRun,
+    loadHistory,
+    showRun,
+    backToIdle,
   };
 }

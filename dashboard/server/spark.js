@@ -135,6 +135,7 @@ function publicRun(run) {
     ballMoved: run.ballMoved,
     accruedMinutes: run.accruedMinutes,
     accrualPaused: run.accrualPaused,
+    idleWrapAt: run.idleWrapAt || null,
     timerStarted: !!run.timer,
     timerNote: run.timerNote,
     costUsd: run.costUsd,
@@ -160,23 +161,91 @@ function pushLedger(run, kind, text) {
 
 // ── run history on disk ────────────────────────────────────────────────────
 
-function latestResultOnDisk(projectId) {
+/** Every run ever done on a card, newest first. Results are never pruned. */
+function runsOnDisk(projectId) {
   const dir = `${SPARK_ROOT}/${projectId}`;
-  if (!existsSync(dir)) return null;
-  let best = null;
+  if (!existsSync(dir)) return [];
+  const out = [];
   for (const name of readdirSync(dir)) {
     const file = `${dir}/${name}/result.json`;
     if (!existsSync(file)) continue;
     try {
-      const mtime = statSync(file).mtimeMs;
-      if (!best || mtime > best.mtime) best = { mtime, file };
+      out.push({ runId: name, at: new Date(statSync(file).mtimeMs).toISOString(), file });
     } catch {}
   }
-  if (!best) return null;
-  try {
-    return { at: new Date(best.mtime).toISOString(), result: JSON.parse(readFileSync(best.file, "utf8")) };
-  } catch {
-    return null;
+  return out.sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+function readRunResult(entry) {
+  try { return JSON.parse(readFileSync(entry.file, "utf8")); } catch { return null; }
+}
+
+function latestResultOnDisk(projectId) {
+  const [newest] = runsOnDisk(projectId);
+  if (!newest) return null;
+  const result = readRunResult(newest);
+  return result ? { runId: newest.runId, at: newest.at, result } : null;
+}
+
+/**
+ * Deal with Spark timers left behind when the dashboard stopped.
+ *
+ * A Spark state file carries a blank tmux_session on purpose, so nothing in a
+ * terminal can find it — `/od-stop` looks up timers by session and will never
+ * match one. That is the right trade (take-control can't mistake a Spark for a
+ * work timer) but it means a restart would otherwise strand the entry in the
+ * ledger with no way to close it from any surface. At boot there are no
+ * in-memory runs, so every Spark timer on disk belongs to a dead process.
+ *
+ * A run that already produced its report is *recovered* rather than closed:
+ * the report is on disk and the Claude session is resumable by id, so the
+ * pending proposals survive the restart and can still be approved. Only a run
+ * that died mid-sweep, with nothing to show, gets closed out.
+ */
+function recoverOrphanRuns() {
+  for (const { file, data } of listRunningTimers()) {
+    if (data.source !== "spark") continue;
+    const runId = data.spark_run_id;
+    const projectId = data.project_id;
+    const runDir = runId && projectId ? `${SPARK_ROOT}/${projectId}/${runId}` : null;
+    const project = projectId ? getProjectById(projectId) : null;
+    const result = runDir && existsSync(`${runDir}/result.json`)
+      ? readResultFile({ runDir }, "result.json")
+      : null;
+
+    if (project && result && !result.__parseError) {
+      const run = newRun(project, runId, runDir, data.started_by || "");
+      run.result = escapeAngles(result);
+      run.timer = { stateFile: file, marker: data.marker, dailyFile: data.file, task: data.task };
+      run.timerChecked = true;
+      run.accruedMinutes = data.estimated_minutes || BASE_ESTIMATE_MIN;
+      for (const f of result.fronts || []) {
+        if (FRONTS.includes(f.front)) {
+          const state = f.state === "checked" ? "done" : f.state;
+          run.fronts[f.front] = { state: FRONT_STATES.includes(state) ? state : "done", detail: f.reason || null };
+        }
+      }
+      runs.set(String(projectId), run);
+      pushLedger(run, "warn", "The dashboard restarted; this run was recovered from disk.");
+      offerActions(run, result.actions || []);
+      console.log(`spark: recovered run ${runId} for card ${projectId}`);
+      continue;
+    }
+
+    const endIso = etNow().iso;
+    const actual = minutesBetween(data.marker, endIso);
+    try {
+      closeTimerEntry(
+        data.file, data.marker, endIso,
+        "Spark run interrupted — the dashboard stopped before the sweep finished. " +
+        `Closed automatically after ${actual}m; no recommendation was produced.`,
+        Math.max(5, Math.min(actual, BASE_ESTIMATE_MIN)),
+      );
+      unlinkSync(file);
+      console.log(`spark: closed orphaned timer ${data.marker} (card ${projectId})`);
+    } catch (err) {
+      console.error("spark: could not close orphaned timer:", err.message);
+    }
   }
 }
 
@@ -795,6 +864,7 @@ function offerActions(run, actions) {
   run.idleWarnTimer = setTimeout(() => {
     pushLedger(run, "warn", "Waiting on a decision — this Spark wraps up in 10 minutes.");
   }, IDLE_WARN_MS);
+  run.idleWrapAt = Date.now() + IDLE_WRAP_MS;
   run.idleWrapTimer = setTimeout(() => {
     pushLedger(run, "warn", "No decision after 30 minutes — wrapping up so the timer does not sit open.");
     wrapUp(run);
@@ -1024,6 +1094,8 @@ function loadProject(req, res) {
 }
 
 export function mountSpark(app) {
+  recoverOrphanRuns();
+
   app.get("/api/projects/:id/spark", (req, res) => {
     const project = loadProject(req, res);
     if (!project) return;
@@ -1141,18 +1213,62 @@ export function mountSpark(app) {
     res.json({ ok: true, brief, session: project.tmux_session || null });
   });
 
+  // Stop. What that means depends on where the run is: abandoning a sweep
+  // mid-flight is a cancel (the estimate is rewritten down to actual), but
+  // closing a finished run that is merely waiting on a decision is an ordinary
+  // finish and bills what it accrued.
   app.delete("/api/projects/:id/spark", requireAdmin, async (req, res) => {
     const project = loadProject(req, res);
     if (!project) return;
     const run = runs.get(String(project.id));
     if (!run || run.finishedAt) return res.status(404).json({ error: "no active Spark run" });
 
+    if (run.status === "proposing" && run.result) {
+      for (const a of run.actions) {
+        if (run.actionStates[a.id]?.state === "pending") {
+          run.actionStates[a.id] = { state: "skipped" };
+          emit(run, "action_progress", { id: a.id, state: "skipped", detail: null });
+        }
+      }
+      pushLedger(run, "skip", "Closed without running the remaining proposals.");
+      await wrapUp(run);
+      return res.json({ ok: true, closed: "finished" });
+    }
+
     run.status = "cancelled";
     stopProc(run);
     pushLedger(run, "warn", "Run cancelled.");
     await closeSparkTimer(run, project, { failed: true, reason: "cancelled" });
     finishRun(run, "cancelled");
-    res.json({ ok: true });
+    res.json({ ok: true, closed: "cancelled" });
+  });
+
+  // Past runs are never pruned — every result.json stays on disk.
+  app.get("/api/projects/:id/spark/history", (req, res) => {
+    const project = loadProject(req, res);
+    if (!project) return;
+    const items = runsOnDisk(project.id).map((entry) => {
+      const r = readRunResult(entry);
+      return r && {
+        runId: entry.runId,
+        at: entry.at,
+        headline: r.headline,
+        certitude: r.certitude?.pct ?? null,
+        ball: r.ball || null,
+      };
+    }).filter(Boolean);
+    res.json(items);
+  });
+
+  app.get("/api/projects/:id/spark/history/:runId", (req, res) => {
+    const project = loadProject(req, res);
+    if (!project) return;
+    if (!/^[\w-]+$/.test(req.params.runId)) return res.status(400).json({ error: "bad run id" });
+    const entry = runsOnDisk(project.id).find((e) => e.runId === req.params.runId);
+    if (!entry) return res.status(404).json({ error: "run not found" });
+    const result = readRunResult(entry);
+    if (!result) return res.status(500).json({ error: "result unreadable" });
+    res.json({ runId: entry.runId, at: entry.at, result });
   });
 
   app.get("/api/projects/:id/spark/stream", (req, res) => {
