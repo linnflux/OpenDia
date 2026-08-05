@@ -109,14 +109,17 @@ body.has-bg::before {
      --glass-scrim   how much of the theme's full-screen scrim survives
      --glass-sidebar sidebar opacity (lower = more wallpaper)
      --glass-card    card opacity
-     --glass-modal   modal opacity (denser: a page of copy, not three lines)
+     --glass-modal   modal opacity — same as a card, so the modal a card grew
+                     into reads as the same surface. Measured legible well
+                     below this (body copy holds ~5.2:1 against the surface
+                     down to 55%), so there is room to go thinner.
      --glass-blur    blur radius; cards use 70% of it
    ────────────────────────────────────────────────────────────── */
 :root {
   --glass-scrim: 50%;
   --glass-sidebar: 28%;
   --glass-card: 62%;
-  --glass-modal: 80%;
+  --glass-modal: 62%;
   --glass-blur: 18px;
 }
 
