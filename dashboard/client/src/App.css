@@ -835,9 +835,8 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 
 .modal {
-  /* One indirection so the glass block can retint the modal in ONE place:
-     .modal-timer-active repaints this surface as a padding-box layer and
-     would otherwise override any glass background whenever a timer runs. */
+  /* One indirection so the glass block and the reduced-transparency escape
+     hatch can each retint the modal by setting a single variable. */
   --modal-fill: var(--bg-surface);
   background: var(--modal-fill);
   border: 1px solid var(--border);
@@ -852,45 +851,15 @@ html.vt-no-target::view-transition-old(card-morph) {
   scrollbar-color: var(--bg-card) var(--bg-body);
 }
 
-@property --timer-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
+/* A running timer is signalled the same way the card signals it: a static
+   green ring outside the normal border. This used to be a conic gradient
+   spinning behind a transparent border — which worked only while the modal
+   fill was opaque and masked it. Once the fill went translucent for the glass
+   treatment, that gradient bled through the whole modal body and washed it
+   green, animating the entire surface. A ring costs one paint; the gradient
+   repainted every frame for as long as the modal was open. */
 .modal-timer-active {
-  --timer-angle: 0deg;
-  border: 2px solid transparent;
-  background:
-    linear-gradient(var(--modal-fill), var(--modal-fill)) padding-box,
-    conic-gradient(
-      from var(--timer-angle),
-      #2e7a28 0%,
-      #54af4d 20%,
-      #8fd689 35%,
-      #54af4d 50%,
-      #2e7a28 65%,
-      #54af4d 80%,
-      #2e7a28 100%
-    ) border-box;
-  animation: timer-border-spin 6s linear infinite;
-}
-
-@keyframes timer-border-spin {
-  from {
-    --timer-angle: 0deg;
-  }
-  to {
-    --timer-angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .modal-timer-active {
-    animation: none;
-    border: 2px solid #54af4d;
-    background: var(--modal-fill);
-  }
+  box-shadow: 0 0 0 2px #54af4d, 0 25px 50px var(--shadow-modal);
 }
 
 .modal::-webkit-scrollbar {
