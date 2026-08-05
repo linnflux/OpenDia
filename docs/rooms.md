@@ -71,6 +71,14 @@ Close button; that view is the hygiene mechanism.
   `~/.ssh`, `~/.claude`, `~/.config`, `~/.aws`, `~/.gnupg`, `~/OpenDia` root)
   or any directory containing a `.env` file. This is a mistake-catcher, not a
   security boundary — the tailnet is trusted.
+- It also refuses **ephemeral storage** — `/tmp`, `/var/tmp`, `/dev/shm`.
+  A room on a scratchpad fails in the worst way available: the directory is
+  cleaned up and the page then serves nothing at all, with no error, until
+  whoever holds the link says it looks blank. The check runs on the *resolved*
+  path, so a symlink from a scratchpad into a durable directory is fine.
+- A room's directory can be changed without changing its URL: stop the daemon,
+  edit that id's `dir` in `rooms.json`, start it again. Stopping first matters —
+  a running daemon rewrites the registry from memory and would discard the edit.
 
 ## HTTPS
 

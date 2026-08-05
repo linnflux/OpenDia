@@ -117,6 +117,20 @@ def deny_reason(path: Path) -> str | None:
                    HOME / ".config", HOME / ".aws"):
         if resolved.is_relative_to(parent.resolve()):
             return f"refusing to open a room under {parent}"
+    # Ephemeral storage fails in the worst possible way: the directory is
+    # cleaned up, and the room then serves an empty page with no error at all.
+    # Nobody notices until the person on the other end says the link is blank.
+    for name in ("/tmp", "/var/tmp", "/dev/shm"):
+        try:
+            tmp_root = Path(name).resolve()
+        except OSError:
+            continue
+        # `resolved` has already followed symlinks, so a symlink under /tmp
+        # that points somewhere durable is correctly allowed through.
+        if resolved == tmp_root or resolved.is_relative_to(tmp_root):
+            return (f"refusing to open a room under {tmp_root} — it is cleaned up "
+                    f"and the room would silently serve nothing. Copy the files "
+                    f"somewhere durable (~/OpenDia/clients/<client>/…) first")
     try:
         for entry in resolved.iterdir():
             if entry.name == ".env" or entry.name.endswith(".env"):
