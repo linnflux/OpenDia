@@ -446,20 +446,20 @@ const MARKER_RE = /@@SPARK\s+front=(\w+)\s+state=(\w+)(?:\s+(?:detail|reason)=\\
 const ACTION_RE = /@@SPARK\s+action=([\w-]+)\s+state=(\w+)(?:\s+(?:detail|reason)=\\?"([^"\\]*)\\?")?/g;
 
 const FRONT_VERB = {
-  timers: "Reviewing recent work sessions…",
-  notion: "Reading the Notion task…",
-  email: "Scanning email…",
-  voice: "Checking Google Voice relays…",
-  chat: "Reading Google Chat…",
-  artifacts: "Checking what actually moved on disk…",
+  timers: "Reviewing recent work sessions",
+  notion: "Reading the Notion task",
+  email: "Scanning email",
+  voice: "Checking Google Voice relays",
+  chat: "Reading Google Chat",
+  artifacts: "Checking what actually moved on disk",
 };
 
 const VERB_FOR_TOOL = [
-  [/oracle_gmail\.py|gmail_search|gmail_list/i, "Scanning email…"],
-  [/txt\.voice\.google\.com/i, "Checking Google Voice relays…"],
-  [/chat_helper\.py|mcp__google-workspace__chat_/i, "Reading Google Chat…"],
-  [/mcp__notion__/i, "Reading the Notion task…"],
-  [/OpenDia\/Time/i, "Reviewing recent work sessions…"],
+  [/oracle_gmail\.py|gmail_search|gmail_list/i, "Scanning email"],
+  [/txt\.voice\.google\.com/i, "Checking Google Voice relays"],
+  [/chat_helper\.py|mcp__google-workspace__chat_/i, "Reading Google Chat"],
+  [/mcp__notion__/i, "Reading the Notion task"],
+  [/OpenDia\/Time/i, "Reviewing recent work sessions"],
 ];
 
 function applyMarker(run, front, state, detail) {
@@ -482,7 +482,7 @@ function applyActionMarker(run, id, state, detail) {
   emit(run, "action_progress", { id, state, detail: detail || null });
   if (state === "running") {
     const label = run.actions.find((x) => x.id === id)?.label;
-    if (label) setVerb(run, `Working on: ${label}…`);
+    if (label) setVerb(run, `Working on: ${label}`);
   }
 }
 
@@ -525,7 +525,7 @@ function handleStreamLine(run, line) {
       const probe = `${block.name || ""} ${payload}`;
       const hit = VERB_FOR_TOOL.find(([re]) => re.test(probe));
       if (hit) setVerb(run, hit[1]);
-      else if (block.name === "Write") setVerb(run, "Writing up the recommendation…");
+      else if (block.name === "Write") setVerb(run, "Writing up the recommendation");
     }
   }
 
@@ -722,7 +722,7 @@ function newRun(project, runId, runDir, startedBy) {
     seq: 0,
     subs: new Set(),
     fronts: freshFronts(),
-    verb: "Reading the card…",
+    verb: "Reading the card",
     ledger: [],
     actions: [],
     actionStates: {},
@@ -778,7 +778,7 @@ async function startScan(project, startedBy) {
   });
 
   run.overrunTimer = setTimeout(() => {
-    setVerb(run, "Taking longer than the 15-minute estimate…");
+    setVerb(run, "Taking longer than the 15-minute estimate");
   }, OVERRUN_MS);
 
   proc.on("error", async (err) => {
@@ -921,7 +921,7 @@ async function startRound(run, decisions) {
     result: run.result,
   }, null, 2));
 
-  setVerb(run, approved.length ? `Working on: ${approved[0].label}…` : "Wrapping up…");
+  setVerb(run, approved.length ? `Working on: ${approved[0].label}` : "Wrapping up");
 
   const proc = spawnPhase(run, {
     prompt:

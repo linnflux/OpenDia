@@ -4877,19 +4877,26 @@ html.vt-no-target::view-transition-old(card-morph) {
   line-height: 1.6;
 }
 
+/* Outlined, not filled. --launch-color is designed to sit on --launch-bg,
+   not on --accent: pairing them gives monokai green text on a purple fill.
+   Accent-on-surface is legible in all ten themes. */
 .spark-go {
   padding: 0.6rem 2.4rem;
   font-size: 0.95rem;
   font-weight: 600;
   font-family: var(--font-sans);
-  color: var(--launch-color, #fff);
-  background: var(--accent);
-  border: none;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
   border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
 }
-.spark-go:hover:not(:disabled) { background: var(--accent-hover); }
+.spark-go:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent-hover);
+  color: var(--accent-hover);
+}
 .spark-go:active:not(:disabled) { transform: translateY(1px); }
 .spark-go:disabled { opacity: 0.45; cursor: not-allowed; }
 

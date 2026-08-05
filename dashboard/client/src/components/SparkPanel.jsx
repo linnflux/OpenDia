@@ -15,15 +15,17 @@ const FRONT_LABELS = {
   artifacts: "Artifacts",
 };
 
+// No trailing ellipsis anywhere: the animated dots beside the line are the
+// ellipsis, and a typed one next to them reads as six dots.
 const IDLE_VERBS = [
-  "Reading the card…",
-  "Scanning email…",
-  "Checking Google Voice relays…",
-  "Reading Google Chat…",
-  "Reading the Notion task…",
-  "Reviewing recent work sessions…",
-  "Weighing the evidence…",
-  "Drafting the recommendation…",
+  "Reading the card",
+  "Scanning email",
+  "Checking Google Voice relays",
+  "Reading Google Chat",
+  "Reading the Notion task",
+  "Reviewing recent work sessions",
+  "Weighing the evidence",
+  "Drafting the recommendation",
 ];
 
 function certitudeColor(pct) {
@@ -82,7 +84,7 @@ function SparkThinking({ verb }) {
   }, []);
   // The server's verb wins when it has one; otherwise the line keeps moving so
   // the pane never looks stalled.
-  const text = verb || IDLE_VERBS[tick % IDLE_VERBS.length];
+  const text = (verb || IDLE_VERBS[tick % IDLE_VERBS.length]).replace(/[.…]+$/, "");
   return (
     <div className="spark-thinking">
       <span key={text} className="spark-thinking-verb">{text}</span>
