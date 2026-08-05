@@ -308,16 +308,26 @@ function SparkHistory({ spark }) {
 
   const items = spark.history || [];
   if (!items.length) return null;
-  const [newest, ...older] = items;
+  // The headline card is the last run that actually produced a report; an
+  // interrupted run still appears, but down in the list where it belongs.
+  const newest = items.find((h) => h.status !== "interrupted") || items[0];
+  const older = items.filter((h) => h !== newest);
 
   return (
     <div className="spark-history">
-      <button className="spark-last-run" onClick={() => spark.showRun(newest.runId)}>
+      <button
+        className={`spark-last-run${newest.status === "interrupted" ? " is-interrupted" : ""}`}
+        onClick={() => newest.status !== "interrupted" && spark.showRun(newest.runId)}
+        title={newest.status === "interrupted" ? (newest.reason || "No report was produced") : "Open this report"}
+      >
         <span className="spark-last-run-meta">
           Last spark {new Date(newest.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
           {newest.certitude != null ? ` · ${newest.certitude}%` : ""}
         </span>
         <span className="spark-last-run-headline">{newest.headline}</span>
+        {newest.status === "interrupted" && newest.reason && (
+          <span className="spark-last-run-reason">{newest.reason}</span>
+        )}
       </button>
 
       {older.length > 0 && (
@@ -329,7 +339,11 @@ function SparkHistory({ spark }) {
             <ul className="spark-history-list">
               {older.map((h) => (
                 <li key={h.runId}>
-                  <button onClick={() => spark.showRun(h.runId)}>
+                  <button
+                    onClick={() => h.status !== "interrupted" && spark.showRun(h.runId)}
+                    className={h.status === "interrupted" ? "is-interrupted" : ""}
+                    title={h.status === "interrupted" ? (h.reason || "No report was produced") : undefined}
+                  >
                     <span className="spark-history-when">
                       {new Date(h.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                     </span>
@@ -407,6 +421,33 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
             {spark.busy ? "Starting…" : "Go"}
           </button>
           <SparkHistory spark={spark} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── interrupted ─────────────────────────────────────────────────────────
+  // The stream died mid-run. Say so plainly with how far it got — the failure
+  // this replaces was a frozen checklist that looked like a hang forever.
+  if (spark.status === "interrupted") {
+    const reached = Object.entries(spark.fronts || {})
+      .filter(([, f]) => f.state === "done" || f.state === "skipped");
+    return (
+      <div className="spark-panel">
+        <div className="spark-stage spark-error">
+          <p className="spark-error-msg">
+            {spark.error?.message || "The run was interrupted before it finished."}
+          </p>
+          {reached.length > 0 && (
+            <p className="spark-interrupted-note">
+              It got through {reached.length} of {spark.frontOrder.length} fronts.
+              Nothing was billed for the unfinished work.
+            </p>
+          )}
+          <SparkFronts fronts={spark.fronts} order={spark.frontOrder} />
+          <button className="spark-go" onClick={handleGo} disabled={spark.busy || !isAdmin}>
+            Run it again
+          </button>
         </div>
       </div>
     );

@@ -167,13 +167,69 @@ function runsOnDisk(projectId) {
   if (!existsSync(dir)) return [];
   const out = [];
   for (const name of readdirSync(dir)) {
-    const file = `${dir}/${name}/result.json`;
-    if (!existsSync(file)) continue;
+    // A completed run has result.json; one that died mid-sweep has
+    // interrupted.json instead. Both belong in history — a run that vanished
+    // without trace is exactly what made a killed run look like a hang.
+    const done = `${dir}/${name}/result.json`;
+    const dead = `${dir}/${name}/interrupted.json`;
+    const file = existsSync(done) ? done : existsSync(dead) ? dead : null;
+    if (!file) continue;
     try {
-      out.push({ runId: name, at: new Date(statSync(file).mtimeMs).toISOString(), file });
+      out.push({
+        runId: name,
+        at: new Date(statSync(file).mtimeMs).toISOString(),
+        file,
+        status: file === done ? "done" : "interrupted",
+      });
     } catch {}
   }
   return out.sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+/**
+ * How far a run got, read back from its raw stream log.
+ *
+ * A run killed mid-sweep has no in-memory state left to ask, but every front
+ * it finished printed a marker that is still sitting in raw.log.
+ */
+function frontsFromLog(runDir) {
+  const out = {};
+  let raw = "";
+  try { raw = readFileSync(`${runDir}/raw.log`, "utf8"); } catch { return out; }
+  MARKER_RE.lastIndex = 0;
+  let m;
+  while ((m = MARKER_RE.exec(raw)) !== null) {
+    if (!FRONTS.includes(m[1])) continue;
+    const state = m[2] === "checked" ? "done" : m[2];
+    if (FRONT_STATES.includes(state)) out[m[1]] = { state, detail: m[3] || null };
+  }
+  return out;
+}
+
+/**
+ * Leave a record of a run that produced no recommendation.
+ *
+ * Without this a killed run is invisible in the tab — history lists results,
+ * and there is no result — so the run looks like it never happened even though
+ * its brief, log and ledger entry are all on disk.
+ */
+function writeInterrupted(runDir, reason) {
+  try {
+    const fronts = frontsFromLog(runDir);
+    const reached = Object.entries(fronts)
+      .filter(([, f]) => f.state === "done")
+      .map(([name]) => name);
+    writeFileSync(`${runDir}/interrupted.json`, JSON.stringify({
+      schema: 1,
+      status: "interrupted",
+      at: new Date().toISOString(),
+      reason,
+      fronts,
+      fronts_reached: reached,
+    }, null, 2));
+  } catch (err) {
+    console.error("spark: could not record the interrupted run:", err.message);
+  }
 }
 
 function readRunResult(entry) {
@@ -181,7 +237,7 @@ function readRunResult(entry) {
 }
 
 function latestResultOnDisk(projectId) {
-  const [newest] = runsOnDisk(projectId);
+  const [newest] = runsOnDisk(projectId).filter((r) => r.status === "done");
   if (!newest) return null;
   const result = readRunResult(newest);
   return result ? { runId: newest.runId, at: newest.at, result } : null;
@@ -202,6 +258,30 @@ function latestResultOnDisk(projectId) {
  * pending proposals survive the restart and can still be approved. Only a run
  * that died mid-sweep, with nothing to show, gets closed out.
  */
+/**
+ * Any run directory with a brief but no outcome belongs to a dead process.
+ *
+ * This is deliberately NOT driven by timer files: a run that started while the
+ * card already had a timer never opens one of its own (it accrues to the
+ * existing entry), so a timer-driven sweep would leave exactly those runs
+ * invisible — the bug this whole record exists to prevent. Idempotent.
+ */
+function recordAbandonedRuns() {
+  if (!existsSync(SPARK_ROOT)) return;
+  for (const projectDir of readdirSync(SPARK_ROOT)) {
+    const base = `${SPARK_ROOT}/${projectDir}`;
+    let runIds = [];
+    try { runIds = readdirSync(base); } catch { continue; }
+    for (const runId of runIds) {
+      const dir = `${base}/${runId}`;
+      if (!existsSync(`${dir}/brief.json`)) continue;
+      if (existsSync(`${dir}/result.json`) || existsSync(`${dir}/interrupted.json`)) continue;
+      writeInterrupted(dir, "The dashboard stopped before the sweep finished.");
+      console.log(`spark: recorded abandoned run ${runId} (card ${projectDir})`);
+    }
+  }
+}
+
 function recoverOrphanRuns() {
   for (const { file, data } of listRunningTimers()) {
     if (data.source !== "spark") continue;
@@ -234,12 +314,14 @@ function recoverOrphanRuns() {
 
     const endIso = etNow().iso;
     const actual = minutesBetween(data.marker, endIso);
+    if (runDir) writeInterrupted(runDir, "The dashboard stopped before the sweep finished.");
     try {
       closeTimerEntry(
         data.file, data.marker, endIso,
         "Spark run interrupted — the dashboard stopped before the sweep finished. " +
-        `Closed automatically after ${actual}m; no recommendation was produced.`,
-        Math.max(5, Math.min(actual, BASE_ESTIMATE_MIN)),
+        `Closed automatically after ${actual}m; no recommendation was produced, ` +
+        "so nothing is billed for it.",
+        0,
       );
       unlinkSync(file);
       console.log(`spark: closed orphaned timer ${data.marker} (card ${projectId})`);
@@ -382,10 +464,12 @@ async function closeSparkTimer(run, project, { failed = false, reason = "" } = {
   let estimate = run.accruedMinutes || BASE_ESTIMATE_MIN;
 
   if (failed) {
-    // Rewriting the estimate down to what actually elapsed is the honest move:
-    // better a five-minute entry to delete than a phantom fifteen.
-    estimate = Math.max(5, Math.min(actual, estimate));
-    notes = `Spark run ${reason || "did not complete"} after ${actual}m — no recommendation produced.`;
+    // A run that produced no recommendation delivered nothing, so it bills
+    // nothing. The entry stays as a record of what happened — this used to
+    // bill a five-minute minimum, which then had to be hand-zeroed every time.
+    estimate = 0;
+    notes = `Spark run ${reason || "did not complete"} after ${actual}m — `
+          + "no recommendation produced, so nothing is billed for it.";
   } else {
     const bullets = Array.isArray(run.result?.timer_notes)
       ? run.result.timer_notes.filter((b) => typeof b === "string" && b.trim())
@@ -793,6 +877,7 @@ async function startScan(project, startedBy) {
     const verdict = validateResult(readResultFile(run, "result.json"));
 
     if (!verdict.ok) {
+      writeInterrupted(runDir, `The run ended without a usable result (${verdict.problems[0]}).`);
       run.error = { message: verdict.problems.join("; "), raw_tail: rawTail(run) };
       emit(run, "error", run.error);
       await closeSparkTimer(run, project, {
@@ -1095,6 +1180,7 @@ function loadProject(req, res) {
 
 export function mountSpark(app) {
   recoverOrphanRuns();
+  recordAbandonedRuns();
 
   app.get("/api/projects/:id/spark", (req, res) => {
     const project = loadProject(req, res);
@@ -1249,9 +1335,25 @@ export function mountSpark(app) {
     if (!project) return;
     const items = runsOnDisk(project.id).map((entry) => {
       const r = readRunResult(entry);
-      return r && {
+      if (!r) return null;
+      if (entry.status === "interrupted") {
+        const n = (r.fronts_reached || []).length;
+        return {
+          runId: entry.runId,
+          at: entry.at,
+          status: "interrupted",
+          headline: n
+            ? `Interrupted after ${n} of ${FRONTS.length} fronts — no recommendation`
+            : "Interrupted before it got anywhere — no recommendation",
+          reason: r.reason || null,
+          certitude: null,
+          ball: null,
+        };
+      }
+      return {
         runId: entry.runId,
         at: entry.at,
+        status: "done",
         headline: r.headline,
         certitude: r.certitude?.pct ?? null,
         ball: r.ball || null,
@@ -1268,6 +1370,9 @@ export function mountSpark(app) {
     if (!entry) return res.status(404).json({ error: "run not found" });
     const result = readRunResult(entry);
     if (!result) return res.status(500).json({ error: "result unreadable" });
+    if (entry.status === "interrupted") {
+      return res.status(409).json({ error: "that run was interrupted and produced no report", reason: result.reason || null });
+    }
     res.json({ runId: entry.runId, at: entry.at, result });
   });
 
@@ -1295,7 +1400,12 @@ export function mountSpark(app) {
     if (run.finishedAt) { res.end(); return; }
 
     run.subs.add(res);
-    const ka = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, KEEPALIVE_MS);
+    // A named event, not a bare `: comment`: comments keep the socket warm but
+    // fire nothing in EventSource, so the client could not tell a live-but-quiet
+    // stream from a dead one. This is the client's liveness signal.
+    const ka = setInterval(() => {
+      try { res.write(`event: ping\ndata: {"t":${Date.now()}}\n\n`); } catch {}
+    }, KEEPALIVE_MS);
     req.on("close", () => {
       clearInterval(ka);
       run.subs.delete(res);   // a client leaving never cancels the run

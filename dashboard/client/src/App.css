@@ -5523,3 +5523,26 @@ html.vt-no-target::view-transition-old(card-morph) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.spark-interrupted-note {
+  margin: 0;
+  max-width: 56ch;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* A run with no report is listed but not openable — dimmed, default cursor. */
+.spark-history-list button.is-interrupted {
+  opacity: 0.6;
+  cursor: default;
+}
+.spark-history-list button.is-interrupted:hover {
+  background: none;
+  border-color: transparent;
+}
+
+/* Nothing to open, so it must not invite a click. */
+.spark-last-run.is-interrupted { cursor: default; opacity: 0.75; }
+.spark-last-run.is-interrupted:hover { border-color: var(--border-subtle); }
+.spark-last-run-reason { font-size: 0.7rem; color: var(--text-faint); }

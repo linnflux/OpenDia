@@ -9,6 +9,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const FRONT_ORDER = ["timers", "notion", "email", "voice", "chat", "artifacts"];
 
+// States where the pane is claiming work is happening — the only ones where a
+// dead stream is a lie worth correcting.
+const RUNNING = new Set(["scanning", "acting", "proposing", "wrapping"]);
+// The server pings every 20s; give it two beats plus slack before calling it.
+const STALE_MS = 50_000;
+
 function emptyState() {
   return {
     // idle | scanning | proposing | acting | wrapping | done | error | cancelled
@@ -51,6 +57,7 @@ export default function useSparkRun(projectId) {
   // result must not re-run the typewriter.
   const [liveResult, setLiveResult] = useState(false);
   const esRef = useRef(null);
+  const staleRef = useRef(null);
 
   const applyRun = useCallback((run) => {
     if (!run) return;
@@ -85,6 +92,7 @@ export default function useSparkRun(projectId) {
   }, []);
 
   const closeStream = useCallback(() => {
+    clearTimeout(staleRef.current);
     if (esRef.current) {
       esRef.current.close();
       esRef.current = null;
@@ -96,14 +104,40 @@ export default function useSparkRun(projectId) {
     const es = new EventSource(`/api/projects/${projectId}/spark/stream`);
     esRef.current = es;
 
+    // Any frame at all proves the stream is alive. The server pings every 20s,
+    // so silence past that window means the connection is gone — which is the
+    // state that used to be indistinguishable from "still thinking".
+    const beat = () => {
+      clearTimeout(staleRef.current);
+      staleRef.current = setTimeout(() => {
+        setState((s) => (RUNNING.has(s.status)
+          ? { ...s, status: "interrupted",
+              error: { message: "Lost the connection to the dashboard mid-run. "
+                              + "The run may have been stopped by a restart." } }
+          : s));
+      }, STALE_MS);
+    };
+
     const on = (name, fn) => es.addEventListener(name, (e) => {
+      beat();
       let data = null;
       try { data = JSON.parse(e.data); } catch { return; }
       fn(data);
     });
+    on("ping", () => {});
 
     on("snapshot", (d) => {
-      if (d.status === "idle") { closeStream(); return; }
+      if (d.status === "idle") {
+        // Reconnected, and the server has no run. If we were showing one, it
+        // did not survive — say so rather than leaving a frozen checklist up.
+        closeStream();
+        setState((s) => (RUNNING.has(s.status)
+          ? { ...s, status: "interrupted",
+              error: { message: "The run was interrupted before it finished — "
+                              + "most likely the dashboard restarted. Nothing was recorded." } }
+          : s));
+        return;
+      }
       applyRun(d);
     });
     on("phase", (d) => setState((s) => ({
@@ -151,7 +185,15 @@ export default function useSparkRun(projectId) {
 
     // The browser reconnects EventSource automatically; the server always
     // answers with a full snapshot, so a reconnect self-heals.
-    es.onerror = () => { if (es.readyState === EventSource.CLOSED) esRef.current = null; };
+    es.onerror = () => {
+      // EventSource retries on its own; only a CLOSED socket is terminal.
+      if (es.readyState !== EventSource.CLOSED) return;
+      esRef.current = null;
+      setState((s) => (RUNNING.has(s.status)
+        ? { ...s, status: "interrupted",
+            error: { message: "Lost the connection to the dashboard mid-run." } }
+        : s));
+    };
   }, [projectId, applyRun, closeStream]);
 
   // Initial snapshot — cheap, and tells us whether to attach to a live run.

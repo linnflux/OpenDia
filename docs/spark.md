@@ -140,8 +140,25 @@ terminal can never close it.** Three things make that safe:
 If the dashboard stops while a run is open, the run is **recovered at boot**
 rather than lost: the report is already on disk and the Claude session is
 resumable by id, so the pending proposals come back and can still be approved.
-Only a run that died mid-sweep with nothing to show gets closed out, with a
-note saying so.
+
+A run that died mid-sweep cannot be recovered — there is no report — so it is
+recorded instead. At boot, every run directory holding a brief but no outcome
+gets an `interrupted.json` reconstructed from the `@@SPARK` markers still in
+its own log, which is how history can say *"interrupted after 2 of 6 fronts"*.
+That sweep is deliberately **not** driven by timer files: a run that starts
+while the card already has a timer never opens one of its own, so a
+timer-driven sweep would leave exactly those runs invisible.
+
+An interrupted run **bills nothing**. It produced no recommendation, so the
+entry stays in the ledger at zero as a record of what happened.
+
+The pane notices too. The SSE keepalive is a named `ping` event rather than a
+bare comment — comments keep the socket warm but fire nothing in
+`EventSource`, so a dead stream used to be indistinguishable from a quiet one
+and the checklist would sit frozen looking like a hang. Any frame resets a
+50-second watchdog; a reconnect that finds no run, a terminal socket close, or
+watchdog expiry all flip the pane to an explicit *interrupted* state showing
+how far it got.
 
 ## History
 
