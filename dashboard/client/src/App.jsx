@@ -18,6 +18,7 @@ import Rooms from "./components/Rooms.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
 import { hasTag, toggleTag } from "./tags.js";
+import { morph, modalElement, cardElement, statusPillElement, visibleRatio } from "./motion.js";
 import { DIVISION_COLORS, STATUS_OPTIONS } from "./constants.js";
 
 function getInitialTheme() {
@@ -135,7 +136,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const pid = parseInt(params.get("project"), 10);
     if (!pid) return;
-    if (projects.some((p) => p.id === pid)) setSelectedProjectId(pid);
+    if (projects.some((p) => p.id === pid)) openCardById(pid);
     params.delete("project");
     const qs = params.toString();
     window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
@@ -222,8 +223,54 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  function handleCardClick(project) {
-    setSelectedProjectId(project.id);
+  // ── Opening and closing a card ──────────────────────────────────────────
+  // Every entry point routes through these so the morph has exactly one
+  // implementation. Without an originating card element (⌘K, a deep link, a
+  // Clients row) the modal still animates — it pops up from 94% instead of
+  // growing out of a card.
+
+  function openCard(project, originEl) {
+    morph({
+      from: originEl && visibleRatio(originEl) >= 0.6 ? originEl : null,
+      flag: originEl ? undefined : "vt-no-origin",
+      update: () => setSelectedProjectId(project.id),
+      to: modalElement,
+    });
+  }
+
+  function openCardById(projectId) {
+    morph({
+      from: cardElement(projectId),
+      flag: cardElement(projectId) ? undefined : "vt-no-origin",
+      update: () => setSelectedProjectId(projectId),
+      to: modalElement,
+    });
+  }
+
+  function closeCard() {
+    const project = selectedProject;
+    morph({
+      from: modalElement(),
+      update: () => setSelectedProjectId(null),
+      to: () => {
+        // Still on the board: morph back down into it.
+        const card = project && cardElement(project.id);
+        if (card) return card;
+        // Its status changed while the modal was open, so the card is already
+        // gone from this filtered view. Fly into the pill it moved to, whose
+        // count ticks up at the same moment — legible rather than a dissolve.
+        const pill = project && project.status !== activeStatus
+          ? statusPillElement(project.status)
+          : null;
+        if (pill) return pill;
+        document.documentElement.classList.add("vt-no-target");
+        return null;
+      },
+    });
+  }
+
+  function handleCardClick(project, originEl) {
+    openCard(project, originEl);
   }
 
   // Shared toast. Lives at the app shell rather than inside the board branch,
@@ -294,10 +341,17 @@ export default function App() {
     // updateProject does an optimistic setProjects; selectedProject is derived
     // from that list, so the modal re-renders automatically.
     updateProject(id, fields);
+    // Same disappearance the card pill causes, so say the same thing: the
+    // board is filtered to one status, and this card just left it.
+    if (fields.status && fields.status !== activeStatus) {
+      const label = STATUS_OPTIONS.find((o) => o.key === fields.status)?.label || fields.status;
+      const project = projects.find((p) => p.id === id);
+      showToast(`${project?.name || "Card"} → ${label}`);
+    }
   }
 
   function handleModalClose() {
-    setSelectedProjectId(null);
+    closeCard();
   }
 
   const pendingInbox = inboxItems.filter((i) => !["done", "dismissed"].includes(i.status)).length;
@@ -322,8 +376,8 @@ export default function App() {
 
   function handleProjectClick(projectId) {
     // From InboxModal: open CardModal for the linked project
-    setSelectedProjectId(projectId);
     setSelectedInboxItem(null);
+    openCardById(projectId);
   }
 
   return (
@@ -567,7 +621,7 @@ export default function App() {
         onRefresh={refresh}
         projects={projects}
         companies={companies}
-        onSelectProject={(p) => setSelectedProjectId(p.id)}
+        onSelectProject={(p) => openCardById(p.id)}
         onSelectCompany={(key) => { setPaletteOpen(false); openClientPanel(key); }}
         onOpenThemeModal={() => { setPaletteOpen(false); setThemeModalOpen(true); }}
         onNavigate={(key) => { setPaletteOpen(false); setView(key); }}

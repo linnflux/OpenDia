@@ -358,7 +358,9 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdropClick}>
-      <div className={`modal${hasActiveTimer ? " modal-timer-active" : ""}`}>
+      {/* data-card-modal is the morph target — .modal alone would also match
+          InboxModal, which shares the class. */}
+      <div className={`modal${hasActiveTimer ? " modal-timer-active" : ""}`} data-card-modal>
         <div className="modal-top-actions">
           {TAGS.map((tag) => {
             const on = hasTag(project, tag.key);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { prefersReducedMotion } from "../motion.js";
 
 // An accelerating reveal for already-rendered markdown.
 //
@@ -13,11 +14,6 @@ const START_CPS = 18;
 const END_CPS = 420;
 const RAMP_MS = 3500;
 const MAX_MS = 9000;
-
-function prefersReducedMotion() {
-  return typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-}
 
 /**
  * @param {object} opts

@@ -34,7 +34,8 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
   const currentStatus = STATUS_OPTIONS.find((s) => s.key === project.status);
 
   function handleCardClick(e) {
-    if (onClick) onClick(project);
+    // currentTarget is the card root — the element the modal morphs out of.
+    if (onClick) onClick(project, e.currentTarget);
   }
 
   // Enter opens the card; Space is handed to dnd-kit's keyboard sensor to
@@ -70,6 +71,7 @@ export default function Card({ project, onClick, hasActiveTimer, onStatusChange,
         ...(isDragging ? { opacity: 0.35 } : {}),
       }}
       className={`card${hasActiveTimer ? " card-timer-active" : ""}${isDragging ? " card-dragging" : ""}${sortable ? " card-sortable" : ""}`}
+      data-project-id={project.id}
       {...attributes}
       {...listeners}
       role="button"

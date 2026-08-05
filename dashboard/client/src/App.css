@@ -109,12 +109,14 @@ body.has-bg::before {
      --glass-scrim   how much of the theme's full-screen scrim survives
      --glass-sidebar sidebar opacity (lower = more wallpaper)
      --glass-card    card opacity
+     --glass-modal   modal opacity (denser: a page of copy, not three lines)
      --glass-blur    blur radius; cards use 70% of it
    ────────────────────────────────────────────────────────────── */
 :root {
   --glass-scrim: 50%;
   --glass-sidebar: 28%;
   --glass-card: 62%;
+  --glass-modal: 80%;
   --glass-blur: 18px;
 }
 
@@ -166,6 +168,28 @@ body.has-bg::before {
     background: color-mix(in srgb, var(--bg-card) 78%, transparent);
     border-color: var(--border-hover);
   }
+
+  /* The modal is the card grown up, so it gets the same recipe — but tinted
+     from --bg-surface, NOT --bg-card. Everything nested inside it derives
+     from --bg-card (--bg-input is literally the same colour on 9 of the 10
+     themes, --bg-recessed is mixed from it): tint the modal from --bg-card
+     and every input inside it disappears. */
+  body.has-bg .modal {
+    --modal-fill: color-mix(in srgb, var(--bg-surface) var(--glass-modal), transparent);
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  }
+
+  /* The blur lives on the backdrop, not on .modal. An element with a
+     backdrop-filter is a backdrop root for its descendants, so a second
+     filter on .modal would sample the flat scrim and blur nothing —
+     measured: a 13px blur gives a 32px edge ramp under a plain ancestor and
+     6px under a filtered one, i.e. no blur at all. The scrim also has to
+     lighten, or there is nothing left to see through. */
+  body.has-bg .modal-backdrop {
+    background: color-mix(in srgb, var(--bg-backdrop) 65%, transparent);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.15);
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.15);
+  }
 }
 
 /* Accessibility + weak-GPU escape hatch: drop the blur entirely and go
@@ -183,6 +207,13 @@ body.has-bg::before {
   body.has-bg .nav-sidebar,
   body.has-bg .status-filter-pill { background: var(--bg-surface); }
   body.has-bg .card { background: var(--bg-card); }
+
+  body.has-bg .modal-backdrop {
+    background: var(--bg-backdrop);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  body.has-bg .modal { --modal-fill: var(--bg-surface); }
 }
 
 /* No horizontal padding: the header and .app-main each carry their own, so
@@ -731,6 +762,66 @@ body.has-bg::before {
   text-align: right;
 }
 
+/* ── Card ⇄ modal morph ──────────────────────────────────────────
+   The card and the modal take turns holding view-transition-name:
+   card-morph (handed over in src/motion.js), so the browser morphs the
+   box and cross-fades the two very different contents for us.
+
+   Timing, not geometry, is what makes a 140px card growing into a 92vh
+   modal look right: the card image leaves early so it is not seen
+   stretched six times over, and the modal image arrives while it is still
+   going. The two MUST overlap — fading one fully out before starting the
+   other leaves the morphing box visibly hollow for a frame or two.
+   0.2, 0, 0, 1 is the same curve the drag overlay drops on, so the board
+   has one motion signature. */
+
+::view-transition-group(card-morph) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+::view-transition-old(card-morph) {
+  animation: vt-morph-out 150ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+::view-transition-new(card-morph) {
+  animation: vt-morph-in 270ms cubic-bezier(0.2, 0, 0, 1) 50ms both;
+}
+
+@keyframes vt-morph-out { to { opacity: 0; } }
+@keyframes vt-morph-in { from { opacity: 0; } }
+
+/* Opened with no card to grow from (⌘K, a deep link, a Clients row) or
+   closed with nothing left to shrink into (card scrolled away, or its
+   status changed and no pill matched): pop instead of morph, so every
+   entry point still reads as deliberate. */
+html.vt-no-origin::view-transition-new(card-morph) {
+  animation: vt-pop-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+html.vt-no-target::view-transition-old(card-morph) {
+  animation: vt-pop-out 180ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes vt-pop-in {
+  from { opacity: 0; transform: scale(0.94); }
+}
+
+@keyframes vt-pop-out {
+  to { opacity: 0; transform: scale(0.94); }
+}
+
+/* motion.js skips the transition entirely under reduced motion — running
+   the capture just to animate nothing can still flash. This is the safety
+   net for the setting changing mid-flight. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
 /* Modal */
 .modal-backdrop {
   position: fixed;
@@ -744,7 +835,11 @@ body.has-bg::before {
 }
 
 .modal {
-  background: var(--bg-surface);
+  /* One indirection so the glass block can retint the modal in ONE place:
+     .modal-timer-active repaints this surface as a padding-box layer and
+     would otherwise override any glass background whenever a timer runs. */
+  --modal-fill: var(--bg-surface);
+  background: var(--modal-fill);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   width: 95%;
@@ -767,7 +862,7 @@ body.has-bg::before {
   --timer-angle: 0deg;
   border: 2px solid transparent;
   background:
-    linear-gradient(var(--bg-surface), var(--bg-surface)) padding-box,
+    linear-gradient(var(--modal-fill), var(--modal-fill)) padding-box,
     conic-gradient(
       from var(--timer-angle),
       #2e7a28 0%,
@@ -794,7 +889,7 @@ body.has-bg::before {
   .modal-timer-active {
     animation: none;
     border: 2px solid #54af4d;
-    background: var(--bg-surface);
+    background: var(--modal-fill);
   }
 }
 

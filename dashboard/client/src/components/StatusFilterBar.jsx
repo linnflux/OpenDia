@@ -39,6 +39,9 @@ export default function StatusFilterBar({ active, counts, onChange }) {
           role="tab"
           aria-selected={active === key}
           className={`status-filter-pill${active === key ? " active" : ""}`}
+          // A card whose status changed inside the modal is already gone from
+          // the board, so the modal shrinks into this pill instead.
+          data-status-key={key}
           style={active === key ? { borderColor: color, color } : {}}
           onClick={() => onChange(key)}
         >
