@@ -862,7 +862,7 @@ async function startScan(project, startedBy) {
   });
 
   run.overrunTimer = setTimeout(() => {
-    setVerb(run, "Taking longer than the 15-minute estimate");
+    setVerb(run, "Taking longer than usual");
   }, OVERRUN_MS);
 
   proc.on("error", async (err) => {

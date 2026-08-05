@@ -496,12 +496,12 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
           <SparkThinking verb={spark.verb} />
           <SparkFronts fronts={spark.fronts} order={spark.frontOrder} />
           <div className="spark-runfoot">
-            <span className={`spark-elapsed${elapsed > 900 ? " over" : ""}`}>
-              {fmtElapsed(elapsed)} <span className="spark-elapsed-of">of ~15 min</span>
+            {/* ~5 min is how long a sweep actually takes (observed 2-3), not the
+                15-minute estimate it bills — this counter answers "how long am
+                I waiting", which is a different question from what it costs. */}
+            <span className={`spark-elapsed${elapsed > 600 ? " over" : ""}`}>
+              {fmtElapsed(elapsed)} <span className="spark-elapsed-of">of ~5 min</span>
             </span>
-            {spark.timerStarted && (
-              <span className="spark-accrual">Timer {spark.accruedMinutes}m</span>
-            )}
             {spark.timerNote === "existing_timer" && (
               <span className="spark-accrual">Accruing to the running timer</span>
             )}
