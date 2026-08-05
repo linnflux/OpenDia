@@ -1,0 +1,27 @@
+[Unit]
+Description=Square MCP Server (Streamable HTTP, 127.0.0.1:7803)
+After=network.target
+# StartLimit* belong in [Unit], not [Service] — modern systemd ignores them there.
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.claude/mcp-servers/square
+ExecStart=/usr/bin/node %h/.claude/mcp-servers/square/dist/index.js
+Environment=MCP_TRANSPORT=http
+Environment=MCP_PORT=7803
+Environment=NODE_ENV=production
+EnvironmentFile=%h/.mcp/square.env
+Restart=always
+RestartSec=3
+MemoryHigh=192M
+MemoryMax=256M
+# Must be 0, not negative: a systemd *user* unit has no CAP_SYS_RESOURCE and would
+# fail to start. Real protection against earlyoom comes from `node` being in its
+# --avoid regex — which is also why this process must NOT be renamed away from `node`.
+OOMScoreAdjust=0
+SyslogIdentifier=mcp-square
+
+[Install]
+WantedBy=default.target

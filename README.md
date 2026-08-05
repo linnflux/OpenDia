@@ -78,6 +78,14 @@ OpenDia connects to external services through three patterns, chosen based on sc
 
 Services Claude interacts with frequently get a dedicated [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server — a lightweight API bridge that exposes typed tool functions Claude can call directly. This covers things like task management, time tracking, email, and invoicing. Humans keep using their normal UIs; Claude participates in those same systems via MCP without replacing them.
 
+**These run as shared daemons, one per service, rather than as a subprocess per session.** That distinction matters more than it sounds. The default MCP transport is stdio, and a stdio server is a child process of the client — so every Claude Code session spawns its own private copy of every server it's configured for. The cost is N sessions × M servers. On a machine running many long-lived sessions, that was measured here at 99 processes and 4.3 GB, against 4 processes and 329 MB once collapsed. The servers are near-idle the entire time; the memory is paid for duplication, not work.
+
+The failure mode is the sharper problem. Under memory pressure a userspace OOM killer starts reclaiming, and one matching on process name will take the MCP servers by name — they're just `node`. **A dead stdio server is not restarted**: the client owns the pipe, the process is gone, and the tools stay missing for the rest of that session. So the observable symptom is "Claude randomly lost half its tools," and the actual cause is memory pressure somewhere else entirely, killing bystanders.
+
+Running each server as a `systemd --user` unit on a loopback HTTP port fixes both halves at once. One process serves every session, and `Restart=always` means a killed server comes back on its own — the tools heal instead of vanishing. The servers are held **stateless** so a restart is invisible to clients rather than invalidating their sessions, which is what makes the self-healing worth anything.
+
+Two constraints fall out of that and are easy to get wrong. Stateless is only valid because these servers never push to the client — the moment one gains a server-initiated notification or a progress-reporting tool, it needs real sessions and an idle reaper. And the processes must keep the name the OOM killer's exclusion list expects; renaming them for nicer `ps` output silently removes the protection. Full architecture, cutover, and rollback: [`docs/mcp-daemons.md`](docs/mcp-daemons.md).
+
 #### CLI Tools (scoped commands)
 
 Services with narrow, infrequent use run through their native CLI — things like cloud snapshots and DNS management. Credentials are managed by the CLI's own auth mechanism or scoped IAM policies, not stored in OpenDia.
@@ -109,7 +117,7 @@ OpenDia runs on Claude Code, which means an outage at a single AI provider stops
 
 The fallback is **the same Claude models on AWS Bedrock** — separate infrastructure with its own SLA. Three things shaped that choice, and the first two generalize beyond this particular provider:
 
-1. **MCP servers and slash commands are client-side.** They're files and subprocesses the CLI owns, so they survive any backend swap. "Keep working during an outage" therefore never required staying on the first-party API. Only the model endpoint changes.
+1. **MCP servers and slash commands are client-side.** They're files and local processes, not anything the model provider hosts, so they survive any backend swap. "Keep working during an outage" therefore never required staying on the first-party API. Only the model endpoint changes.
 2. **Fall back to the same model on different infrastructure, not to a different model family.** A different vendor's model means different tool-calling behavior on exactly the multi-step agentic work the system depends on. Swapping infrastructure while holding the model constant means no capability regression to reason about, which is what makes the fallback trustworthy enough to actually use.
 3. **Never route a subscription OAuth token through a proxy.** Anthropic's consumer terms prohibit using Free/Pro/Max OAuth tokens in other products or services, and enforcement has suspended accounts. That trades a three-hour outage for a permanent one. Bedrock is reached through Claude Code's own native support (`CLAUDE_CODE_USE_BEDROCK=1`), not a proxy, so no token is ever re-presented to a third party.
 
@@ -447,6 +455,7 @@ Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk)
 | [`docs/calendar-sync.md`](docs/calendar-sync.md) | Notion task due dates → Google Calendar, dedupe and locking |
 | [`docs/outage-fallback.md`](docs/outage-fallback.md) | AI provider outage runbook, what degrades, Bedrock setup |
 | [`docs/session-reaper.md`](docs/session-reaper.md) | Idle session reclamation, protections, disaster recovery |
+| [`docs/mcp-daemons.md`](docs/mcp-daemons.md) | Shared MCP daemons: why stateless, the transport patch, OAuth without a TTY, cutover and rollback |
 | [`docs/rooms.md`](docs/rooms.md) | Standing file-exchange daemon, room lifecycle, security posture |
 | [`docs/spark.md`](docs/spark.md) | Next-step tab: front sweep, certitude rubric, action tiers and how they're enforced |
 
@@ -540,6 +549,22 @@ Create a project-level `CLAUDE.md` at `~/.claude/projects/-home-$USER-OpenDia/CL
 ### 5. MCP servers (optional)
 
 Connect external services by configuring MCP servers in `~/.claude.json`. OpenDia is designed to work with any combination of project management, time tracking, email, and invoicing services that have MCP server implementations. Each is optional. The core system (database, time tracking, scripts) works without any MCP servers.
+
+Register them with the CLI rather than editing `~/.claude.json` by hand — running sessions write to that file, so a manual edit can be silently overwritten:
+
+```bash
+claude mcp add --transport http <name> http://127.0.0.1:<port>/mcp -s user
+```
+
+If you run more than a couple of concurrent sessions, run the servers as shared daemons instead of per-session stdio subprocesses. Unit files are in [`systemd/`](systemd/):
+
+```bash
+cp systemd/mcp-*.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mcp-notion    # and any others you use
+```
+
+The units expect server source at `~/.claude/mcp-servers/<name>/` and secrets in `~/.mcp/<name>.env` (mode 0600), keeping tokens out of `~/.claude.json` entirely. See [`docs/mcp-daemons.md`](docs/mcp-daemons.md) for the transport patch each server needs, and why it's written so stdio remains the default.
 
 ### 6. Backups (optional)
 

@@ -1,9 +1,11 @@
 # Claude Session Reaper — Operations
 
 Kills interactive Claude Code TUI sessions untouched for 72h to reclaim
-memory (~450MB per TUI + ~350MB of stdio MCP children each). Nothing is
-lost: transcripts are written incrementally, so any reaped session comes
-back in full with:
+memory (~450MB per TUI). Sessions predating the move to [shared MCP
+daemons](mcp-daemons.md) also carry ~350MB of stdio MCP children; sessions
+started after it carry none, so reaping them frees correspondingly less.
+Nothing is lost: transcripts are written incrementally, so any reaped
+session comes back in full with:
 
 ```bash
 claude --resume SESSION_NAME
@@ -42,7 +44,8 @@ and `~/.claude/projects/<cwd-slug>/<sessionId>.jsonl` (transcript).
 
 ## Kill behavior
 
-SIGTERM (15s grace) → SIGKILL. MCP children exit with the parent. The tmux
+SIGTERM (15s grace) → SIGKILL. Any stdio MCP children exit with the parent;
+shared MCP daemons are separate services and are untouched. The tmux
 session is kept (a bare shell is ~5MB) and gets an echoed breadcrumb:
 `# claude session reaped after Nh idle — resume: claude --resume NAME`.
 `--kill-tmux` kills the tmux session too; default leaves tmux pruning to
