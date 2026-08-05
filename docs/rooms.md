@@ -57,6 +57,15 @@ Close button; that view is the hygiene mechanism.
   Clicking a thumbnail opens an in-page lightbox with a download button;
   video thumbnails (marked with a play badge) open an HTML5 player instead.
   The originals are only fetched on open.
+- Text files (`.txt`, `.md`, `.log`, `.json`, `.sh`, `.conf`, and friends) open
+  **in the page** rather than forcing a download: a monospace, selectable panel
+  with a Copy-all button. Reading a runbook or lifting one command out of it
+  should not require a round trip through the filesystem. Plain click reads;
+  ctrl/cmd-click and Save-as still download. Files over 512 KB stay
+  download-only rather than pulling megabytes into a tab. Content is inserted
+  as `textContent`, never HTML — a file in a room is untrusted input. Copy
+  falls back to `execCommand` on the plain-http port, where the clipboard API
+  is unavailable outside a secure context.
 - File serving honors single-byte-range requests (RFC 9110, 206/416) —
   required for the video seek bar to work. Playable set: mp4/webm/mov/m4v;
   other containers stay download-only.

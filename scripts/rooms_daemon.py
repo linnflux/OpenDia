@@ -51,6 +51,14 @@ THUMB_EDGE = 160
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"}
 # Only containers browsers actually play; anything else stays download-only.
 VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
+# Text files open in the page instead of forcing a download — reading a
+# runbook or copying one command out of it should not mean a round trip
+# through the filesystem. Above the cap the row stays download-only rather
+# than pulling megabytes into a browser tab.
+TEXT_EXTS = {".txt", ".md", ".log", ".csv", ".tsv", ".json", ".yml", ".yaml",
+             ".sh", ".bash", ".zsh", ".py", ".js", ".css", ".sql", ".xml",
+             ".ini", ".cfg", ".conf", ".toml", ".rst"}
+TEXT_MAX_BYTES = 512 * 1024
 try:
     from PIL import Image  # noqa: F401
     HAVE_PIL = True
@@ -257,6 +265,10 @@ def is_video(name: str) -> bool:
     return Path(name).suffix.lower() in VIDEO_EXTS
 
 
+def is_text(name: str, size: int) -> bool:
+    return Path(name).suffix.lower() in TEXT_EXTS and size <= TEXT_MAX_BYTES
+
+
 def has_thumb(name: str) -> bool:
     return (HAVE_PIL and is_image(name)) or (FFMPEG is not None and is_video(name))
 
@@ -424,6 +436,8 @@ td.th{{width:52px}} .thumb{{position:relative;display:block;width:48px;height:36
 .thumb.noimg{{background:#1e293b;border-radius:4px;border:1px solid #334155}}
 .thumb.vid::after{{content:"▶";position:absolute;inset:0;display:flex;align-items:center;
  justify-content:center;color:#fff;font-size:.8rem;text-shadow:0 0 4px rgba(0,0,0,.9)}}
+.thumb.doc::after{{content:"TXT";position:absolute;inset:0;display:flex;align-items:center;
+ justify-content:center;color:#64748b;font-size:.6rem;letter-spacing:.06em}}
 a{{color:#7dd3fc;text-decoration:none}} a:hover{{text-decoration:underline}}
 form{{margin:1.25rem 0;padding:1rem;border:1px dashed #334155;border-radius:8px}}
 input[type=file]{{color:#94a3b8}}
@@ -435,7 +449,12 @@ footer{{color:#475569;font-size:.72rem;margin-top:2rem}}
  flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:1.5rem}}
 #lb.open{{display:flex}}
 #lb img,#lb video{{max-width:92vw;max-height:80vh;border-radius:6px}}
-#lb .bar{{display:flex;gap:.75rem;align-items:center}}
+#lb-txt{{display:none;width:min(92vw,880px);max-height:78vh;overflow:auto;margin:0;
+ background:#0b1220;border:1px solid #1e293b;border-radius:6px;padding:1rem;
+ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;
+ line-height:1.55;color:#cbd5e1;white-space:pre-wrap;overflow-wrap:anywhere;
+ text-align:left;-webkit-user-select:text;user-select:text}}
+#lb .bar{{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;justify-content:center}}
 #lb .name{{color:#94a3b8;font-size:.85rem}}
 #lb a.dl{{background:#164e63;color:#22d3ee;border-radius:6px;padding:.45rem .9rem}}
 #lb button{{background:#1e293b;color:#94a3b8}}
@@ -447,26 +466,65 @@ footer{{color:#475569;font-size:.72rem;margin-top:2rem}}
 <div id="lb">
   <img id="lb-img" alt="" style="display:none">
   <video id="lb-vid" controls playsinline style="display:none"></video>
+  <pre id="lb-txt"></pre>
   <div class="bar"><span class="name" id="lb-name"></span>
+    <button id="lb-copy" style="display:none" onclick="lbCopy()">Copy all</button>
     <a class="dl" id="lb-dl" download>Download</a>
     <button onclick="lbClose()">Close</button></div>
 </div>
 <script>
 var lb=document.getElementById('lb'),
     lbImg=document.getElementById('lb-img'),
-    lbVid=document.getElementById('lb-vid');
+    lbVid=document.getElementById('lb-vid'),
+    lbTxt=document.getElementById('lb-txt'),
+    lbCopyBtn=document.getElementById('lb-copy');
 function lbOpen(name,kind){{
   var url=encodeURIComponent(name);
-  if(kind==='vid'){{lbVid.src=url;lbVid.style.display='block';lbImg.style.display='none';
+  lbImg.style.display='none';lbVid.style.display='none';
+  lbTxt.style.display='none';lbCopyBtn.style.display='none';
+  if(kind==='vid'){{lbVid.src=url;lbVid.style.display='block';
     lbVid.play().catch(function(){{}});}}
-  else{{lbImg.src=url;lbImg.style.display='block';lbVid.style.display='none';}}
+  else if(kind==='txt'){{
+    lbTxt.style.display='block';lbTxt.textContent='Loading…';
+    lbCopyBtn.style.display='inline-block';lbCopyBtn.textContent='Copy all';
+    // textContent, never innerHTML — a file in a room is untrusted content.
+    fetch(url).then(function(r){{return r.text();}})
+      .then(function(t){{lbTxt.textContent=t;lbTxt.scrollTop=0;}})
+      .catch(function(){{lbTxt.textContent='Could not load this file.';}});
+  }}
+  else{{lbImg.src=url;lbImg.style.display='block';}}
   document.getElementById('lb-name').textContent=name;
   document.getElementById('lb-dl').href=url;
   lb.classList.add('open');
 }}
+// Plain click reads the file; ctrl/cmd/middle-click and Save-as still download.
+function lbText(e,name){{
+  if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0) return true;
+  e.preventDefault();lbOpen(name,'txt');return false;
+}}
+function lbCopy(){{
+  var text=lbTxt.textContent, done=function(){{
+    lbCopyBtn.textContent='Copied';
+    setTimeout(function(){{lbCopyBtn.textContent='Copy all';}},1500);
+  }};
+  // navigator.clipboard needs a secure context, which the plain-http port on
+  // 9099 is not — fall back so Copy works there too.
+  if(navigator.clipboard&&window.isSecureContext){{
+    navigator.clipboard.writeText(text).then(done,legacy);
+  }} else {{legacy();}}
+  function legacy(){{
+    var ta=document.createElement('textarea');
+    ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    try{{document.execCommand('copy');done();}}
+    catch(err){{lbCopyBtn.textContent='Press Ctrl+C';}}
+    document.body.removeChild(ta);
+  }}
+}}
 function lbClose(){{
   lb.classList.remove('open');
   lbVid.pause();lbVid.removeAttribute('src');lbVid.load();lbImg.src='';
+  lbTxt.textContent='';
 }}
 lb.addEventListener('click',function(e){{if(e.target===lb)lbClose();}});
 document.addEventListener('keydown',function(e){{if(e.key==='Escape')lbClose();}});
@@ -493,11 +551,24 @@ def render_room(room: dict, msg: str = "") -> str:
                 thumb = (f'<span class="{cls}" '
                          f'data-name="{escape(f["name"], quote=True)}" data-kind="{kind}" '
                          f'onclick="lbOpen(this.dataset.name,this.dataset.kind)">{img}</span>')
+            elif is_text(f["name"], f["size"]):
+                thumb = (f'<span class="thumb noimg doc" '
+                         f'data-name="{escape(f["name"], quote=True)}" data-kind="txt" '
+                         f'onclick="lbOpen(this.dataset.name,this.dataset.kind)"></span>')
             else:
                 thumb = ""
+            if is_text(f["name"], f["size"]):
+                # Plain click reads it in the page; ctrl/cmd-click and the
+                # context menu still reach the real download, so nothing is
+                # taken away.
+                link = (f'<a href="{q}" data-name="{escape(f["name"], quote=True)}" '
+                        f'onclick="return lbText(event,this.dataset.name)">'
+                        f'{escape(f["name"])}</a>')
+            else:
+                link = f'<a href="{q}" download>{escape(f["name"])}</a>'
             rows.append(
                 f'<tr><td class="th">{thumb}</td>'
-                f'<td><a href="{q}" download>{escape(f["name"])}</a></td>'
+                f'<td>{link}</td>'
                 f'<td class="num">{human_size(f["size"])}</td>'
                 f'<td class="num">{f["mtime"]}</td></tr>')
         table = (f'<table><tr><th></th><th>File</th><th style="text-align:right">Size</th>'
