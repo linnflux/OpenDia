@@ -638,6 +638,28 @@ function readResultFile(run, name = "result.json") {
 
 const PRONOUNS = /\b(I|we|you|he|she|they|us|our|your|their|my|me|him|her|them)\b/i;
 
+// Tiers are named rather than numbered. The model has to emit this field from a
+// routine it read once, and "handoff" is self-describing where 3 was a mapping
+// it had to recall — which is why the defaulting branch below exists at all.
+// Names also survive adding a tier later; numbers would shift underneath us.
+const TIER_PERFORMED = "performed";  // done on approval
+const TIER_HANDOFF = "handoff";      // never done here; becomes a brief + session
+const TIERS = [TIER_PERFORMED, TIER_HANDOFF];
+
+// Legacy runs on disk carry integers, and a model that has cached the old
+// routine may still emit one. 2 was the dashboard-sends-an-email tier and no
+// longer exists, so it lands on handoff with everything else unrecognised.
+const LEGACY_TIERS = { 1: TIER_PERFORMED, 2: TIER_HANDOFF, 3: TIER_HANDOFF };
+
+/** Coerce any tier — named, legacy integer, or junk — to a known name.
+ *  Unknown always resolves to handoff: guessing toward "performed" would be
+ *  the dangerous direction, so the safe default is written into the fallback
+ *  rather than left to depend on which value happens to sort last. */
+function normaliseTier(tier) {
+  if (TIERS.includes(tier)) return tier;
+  return LEGACY_TIERS[tier] || TIER_HANDOFF;
+}
+
 function validateResult(raw) {
   const problems = [];
   if (!raw || typeof raw !== "object") return { ok: false, problems: ["no result JSON was produced"] };
@@ -671,9 +693,7 @@ function validateResult(raw) {
     label: String(a.label || "Action").slice(0, 24),
     what: a.what || "",
     why: a.why || "",
-    // Tier 2 was the dashboard-sends-an-email tier and no longer exists, so a
-    // model that still asks for one falls through to 3 and becomes a handoff.
-    tier: [1, 3].includes(a.tier) ? a.tier : 3,
+    tier: normaliseTier(a.tier),
     estimated_minutes: Number.isFinite(a.estimated_minutes) ? Math.max(0, Math.round(a.estimated_minutes)) : 5,
     reversible: a.reversible !== false,
     preview: a.preview || null,
@@ -688,10 +708,7 @@ function normaliseActions(list, offset = 0) {
     label: String(a.label || "Action").slice(0, 24),
     what: a.what || "",
     why: a.why || "",
-    // An action whose tier the model got wrong defaults to 3 — the tier that
-    // is never performed. Guessing low would be the dangerous direction. Tier 2
-    // (the old dashboard-send) is gone, so it lands here too.
-    tier: [1, 3].includes(a.tier) ? a.tier : 3,
+    tier: normaliseTier(a.tier),
     estimated_minutes: Number.isFinite(a.estimated_minutes) ? Math.max(0, Math.round(a.estimated_minutes)) : 5,
     reversible: a.reversible !== false,
     preview: a.preview || null,
@@ -923,10 +940,15 @@ function offerActions(run, actions) {
   clearTimeout(run.overrunTimer);
 
   const roomLeft = MAX_ACTIONS_TOTAL - run.actionsRun;
-  const usable = (actions || [])
-    .filter((a) => a.tier !== 3)          // Tier 3 is a handoff, never a button
+  // Normalise here rather than trusting the caller: the recovery path feeds
+  // this straight from a result.json on disk, and an archived run carries
+  // integer tiers that never went through a validator. Coercion is idempotent,
+  // so the two already-validated callers are unaffected.
+  const tiered = (actions || []).map((a) => ({ ...a, tier: normaliseTier(a.tier) }));
+  const usable = tiered
+    .filter((a) => a.tier === TIER_PERFORMED)   // a handoff is a brief, never a button
     .slice(0, Math.max(0, Math.min(3, roomLeft)));
-  const handoffs = (actions || []).filter((a) => a.tier === 3);
+  const handoffs = tiered.filter((a) => a.tier === TIER_HANDOFF);
 
   run.actions = usable;
   run.handoffs = handoffs;
@@ -1248,8 +1270,10 @@ export function mountSpark(app) {
       await wrapUp(run);
       return res.json({ ok: true, started: false });
     }
-    if (approved.some((a) => a.tier === 3)) {
-      return res.status(400).json({ error: "tier 3 actions are handed off to a session, not run here" });
+    // Belt and braces: offerActions already keeps handoffs off the buttons, so
+    // this only fires if one is approved by a hand-made request.
+    if (approved.some((a) => normaliseTier(a.tier) === TIER_HANDOFF)) {
+      return res.status(400).json({ error: "handoff actions go to a working session, not run here" });
     }
 
     startRound(run, decisions, note).catch(async (err) => {

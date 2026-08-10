@@ -67,8 +67,8 @@ def denied_reason(tool_name: str, tool_input: dict, run_dir: Path) -> str | None
                 return (
                     f"Spark may not run a command that {label}. "
                     "Propose it as an action for a human to approve instead — "
-                    "Tier 3 for anything on a server or in git. Sending mail is "
-                    "not proposable at all: leave a Gmail draft instead."
+                    'tier "handoff" for anything on a server or in git. Sending '
+                    "mail is not proposable at all: leave a Gmail draft instead."
                 )
         return None
 

@@ -51,17 +51,28 @@ everything.
 Each round proposes at most three actions. Each is approved or skipped
 individually, and only the approved ones run.
 
-- **Tier 1 — performed on approval.** Card updates, Notion updates, creating a
-  Gmail **draft**, writing a handoff brief, opening a Room, read-only
+There are two tiers, and they are **named rather than numbered** — the model
+has to emit the field from a routine it read once, and `"handoff"` is
+self-describing where `3` was a mapping it had to recall. An unrecognised value
+resolves to `"handoff"`, since guessing toward "performed" would be the
+dangerous direction.
+
+- **`"performed"` — done on approval.** Card updates, Notion updates, creating
+  a Gmail **draft**, writing a handoff brief, opening a Room, read-only
   diagnostics, appending to the daily log.
-- **There is no Tier 2.** It briefly meant "the dashboard sends the drafted
-  email after a second click." That capability was removed: Spark's outbound
-  responsibility ends at the Gmail draft. The pane still renders the
-  recipient, subject and full body, but only as a read-back — the draft is
-  already in Gmail, and it is sent from Gmail by a human.
-- **Tier 3 — never performed.** Anything over SSH or on a server, any write to
-  a live client system, calendar events, anything financial or AR-related, and
-  git commits or pushes. These become a **handoff** to a working session.
+- **`"handoff"` — never performed.** Anything over SSH or on a server, any
+  write to a live client system, calendar events, anything financial or
+  AR-related, and git commits or pushes. These become a **handoff** to a
+  working session.
+
+Sending email is not a tier. Spark's outbound responsibility ends at the Gmail
+draft; the pane renders recipient, subject and body only as a read-back, and a
+human sends from Gmail. An earlier version had a middle tier for exactly that
+and it was removed rather than kept.
+
+Runs archived before the rename carry integer tiers (`1`, `2`, `3`). They are
+coerced on read — `1` to performed, `2` and `3` to handoff — so old reports
+still render correctly.
 
 Handoff is always the last thing a run does: it writes a brief to
 `~/OpenDia/handoffs/`, then closes the Spark timer so `/od-go` in that session
