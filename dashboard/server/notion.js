@@ -6,7 +6,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let notionToken = process.env.NOTION_TOKEN;
 
-// Try to read from Claude's MCP config if not in env
+// 2026-08-05 MCP daemon migration moved secrets out of ~/.claude.json into
+// ~/.mcp/<name>.env (KEY=VALUE lines, 0600) — read that first.
+if (!notionToken) {
+  try {
+    const envFile = readFileSync(resolve(process.env.HOME, ".mcp", "notion.env"), "utf-8");
+    for (const line of envFile.split("\n")) {
+      const [k, ...rest] = line.trim().split("=");
+      if (k === "NOTION_TOKEN" && rest.length) {
+        notionToken = rest.join("=");
+        break;
+      }
+    }
+  } catch {
+    // silently ignore
+  }
+}
+
+// Legacy fallback: pre-migration stdio MCP config
 if (!notionToken) {
   try {
     const claudeConfig = JSON.parse(
