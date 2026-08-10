@@ -198,10 +198,13 @@ When you have completed the work above, do these steps IN ORDER:
         -H 'Content-Type: application/json' \\
         -d '{{"start": "{marker}", "task": "{short_slug}", "duration": "<duration>", "notes": "<your justified notes>"}}'
 
-   b) Update the next step:
+   b) Update the next step. It must ALWAYS lead with a date — "YYYY-MM-DD: action"
+      (or "YYYY-MM-DD HH:MM: action", 24h ET, when a real clock time is known);
+      undated next_steps never reach the calendar. Waiting on someone -> today + 7
+      days; scheduled event -> that date; work continuation -> next business day.
       curl -s -X PATCH http://localhost:8038/api/projects/{project_id} \\
         -H 'Content-Type: application/json' \\
-        -d '{{"next_step": "<your NEXT: line>"}}'
+        -d '{{"next_step": "<YYYY-MM-DD: your NEXT: line>"}}'
 
 3. If you pushed a dev branch with a preview URL (FluxCC sessions), report it
    to the dashboard. Skip this step for all other task types.

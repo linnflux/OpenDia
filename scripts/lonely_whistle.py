@@ -265,6 +265,26 @@ def calendar_sync_warnings() -> list[str]:
     except (OSError, ValueError):
         pass
 
+    # 2026-08-05: next_step calendar contract — every active card's next_step
+    # must lead with "YYYY-MM-DD: " (undated = invisible to the calendar).
+    try:
+        import re as _re
+        import sqlite3 as _sq
+        _ns_re = _re.compile(r"^\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?:")
+        conn = _sq.connect(f"file:{home / 'OpenDia' / 'opendia.db'}?mode=ro", uri=True)
+        rows = conn.execute(
+            "SELECT next_step FROM projects WHERE status IN ('in_progress','wfhuman')"
+            " AND next_step IS NOT NULL AND next_step != ''"
+        ).fetchall()
+        conn.close()
+        undated = sum(1 for (ns,) in rows if not _ns_re.match(ns))
+        if undated:
+            warns.append(
+                f"WARNING: {undated} active card(s) have an undated next_step -- invisible to the calendar (fix via /od-next-steps)"
+            )
+    except Exception:
+        pass
+
     return warns
 
 

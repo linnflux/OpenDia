@@ -51,7 +51,11 @@ DB_PATH = os.path.join(HOME, "OpenDia", "opendia.db")
 DASHBOARD_LOCAL = "http://localhost:8038"
 GCAL = "https://www.googleapis.com/calendar/v3"
 
-NEXT_STEP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}):\s*(.*)$", re.S)
+# next_step contract: "YYYY-MM-DD: action" or "YYYY-MM-DD HH:MM: action"
+# (24h ET). Groups: 1=date, 2=hour, 3=minute (2+3 optional), 4=action.
+NEXT_STEP_RE = re.compile(
+    r"^\s*(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2}))?:\s*(.*)$", re.S
+)
 
 # ── Time-blocking rules ──────────────────────────────────────────────────
 # Day-granular items (date-only Notion dues, next_step dates) ALWAYS become
@@ -61,6 +65,7 @@ NEXT_STEP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}):\s*(.*)$", re.S)
 # items placed back-to-back so a client's work lands in one run. When a day
 # has no room left, we deliberately double-book rather than fall back to a
 # banner; tightening those days up is a manual pass.
+# A next_step with an explicit HH:MM is placed at exactly that time.
 # All-day survives only for genuine multi-day date ranges.
 WORK_START_H = 8
 WORK_END_H = 20
@@ -70,10 +75,9 @@ FREEBUSY_HORIZON_DAYS = 42  # freeBusy API limit; bounds the query, NOT placemen
 TZ = ZoneInfo(CAL_TZ)
 
 def duration_minutes(text):
-    # 2026-08-10: a flat 30 min per Nick. The old keyword heuristic (30 for
-    # quick actions, 60 for everything else) could not fit the 30-minute gaps
-    # a normal day leaves between meetings, so a busy day spilled every item
-    # into an all-day banner instead of placing it.
+    # 2026-08-10: back to a flat 30 min per Nick. Flat 60 (set 2026-08-05)
+    # could not fit the 30-minute gaps a normal day leaves between meetings,
+    # so busy days spilled every item into an all-day banner instead.
     # User-resized events keep their duration via the stickiness rule.
     return SHORT_MIN
 
@@ -83,6 +87,19 @@ def duration_minutes(text):
 def notion_token():
     token = os.environ.get("NOTION_API_KEY") or os.environ.get("NOTION_TOKEN")
     if not token:
+        # 2026-08-05: MCP daemon migration moved secrets out of ~/.claude.json
+        # into ~/.mcp/<name>.env (KEY=VALUE lines, 0600).
+        try:
+            with open(os.path.join(HOME, ".mcp", "notion.env")) as f:
+                for line in f:
+                    k, _, v = line.strip().partition("=")
+                    if k == "NOTION_TOKEN" and v:
+                        token = v
+                        break
+        except Exception:
+            pass
+    if not token:
+        # Legacy fallback: pre-migration stdio MCP config.
         try:
             with open(os.path.join(HOME, ".claude.json")) as f:
                 token = json.load(f)["mcpServers"]["notion"]["env"]["NOTION_TOKEN"]
@@ -341,7 +358,8 @@ def load_db_maps():
             continue
         m = NEXT_STEP_RE.match(r["next_step"] or "")
         if m:
-            next_steps.append((r, m.group(1), m.group(2).strip()))
+            hhmm = f"{m.group(2)}:{m.group(3)}" if m.group(2) else None
+            next_steps.append((r, m.group(1), hhmm, m.group(4).strip()))
     return by_notion, next_steps
 
 
@@ -439,7 +457,7 @@ def build_desired(token, cfg, today_iso):
             "body": event_body(summary, start, end, "\n".join(lines), "task"),
         }
 
-    for row, ds, action in next_steps:
+    for row, ds, tm, action in next_steps:
         if ds < today_iso:
             continue
         summary = f"→ {row['company']} — {action}" if row["company"] else f"→ {action}"
@@ -451,17 +469,26 @@ def build_desired(token, cfg, today_iso):
         if row["notion_id"]:
             lines.append(f"Notion: https://www.notion.so/{row['notion_id'].replace('-', '')}")
         eid = f"odns{row['id']}"
+        if tm:
+            # Explicit HH:MM (ET) in the next_step prefix -> exact event at
+            # that time; end=None lets event_body add the +1h display end,
+            # which notion_shape collapses back to None (same as Notion tasks).
+            start = datetime.fromisoformat(f"{ds}T{tm}").replace(tzinfo=TZ).isoformat()
+            gran = "exact"
+        else:
+            start = ds
+            gran = "day"
         desired[eid] = {
             "kind": "next_step",
-            "granularity": "day",
-            "duration": duration_minutes(action),
+            "granularity": gran,
+            "duration": duration_minutes(action) if gran == "day" else None,
             "company": row["company"] or "",  # slot-assignment sort key
             "card_id": row["id"],
             "action": action,
-            "start": ds,
+            "start": start,
             "end": None,
             "last_edited": None,  # sqlite updated_at is touched by unrelated field edits; don't trust for tie-breaks
-            "body": event_body(summary, ds, None, "\n".join(lines), "next_step", color="6"),
+            "body": event_body(summary, start, None, "\n".join(lines), "next_step", color="6"),
         }
     return desired
 
@@ -617,15 +644,23 @@ def push_back_task(token, item, start, end):
 
 
 def push_back_next_step(item, g_start):
-    """Rewrite the card's next_step date prefix via the dashboard API."""
-    new_date = g_start[:10]
+    """Rewrite the card's next_step date prefix via the dashboard API.
+    Exact-granularity items keep their (possibly dragged) time in the prefix;
+    day-granular items stay date-only — their time lives on the calendar."""
+    if item.get("granularity") == "exact" and g_start and len(g_start) > 10:
+        dt = datetime.fromisoformat(g_start.replace("Z", "+00:00")).astimezone(TZ)
+        prefix = f"{dt.date().isoformat()} {dt:%H:%M}"
+        new_start = dt.isoformat()
+    else:
+        prefix = g_start[:10]
+        new_start = prefix
     r = requests.patch(
         f"{DASHBOARD_LOCAL}/api/projects/{item['card_id']}",
-        json={"next_step": f"{new_date}: {item['action']}"},
+        json={"next_step": f"{prefix}: {item['action']}"},
         timeout=10,
     )
     r.raise_for_status()
-    return new_date, None
+    return new_start, None
 
 
 # ---------------------------------------------------------------------------
