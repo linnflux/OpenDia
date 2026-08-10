@@ -261,22 +261,6 @@ export default function useSparkRun(projectId) {
     } finally { setBusy(false); }
   }, [projectId]);
 
-  const sendDraft = useCallback(async (draftId) => {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/spark/send-draft`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: body.error || `HTTP ${res.status}` };
-      return { ok: true };
-    } catch (err) {
-      return { error: err.message };
-    } finally { setBusy(false); }
-  }, [projectId]);
-
   const handoff = useCallback(async () => {
     setBusy(true);
     try {
@@ -331,7 +315,6 @@ export default function useSparkRun(projectId) {
     start,
     cancel,
     decide,
-    sendDraft,
     handoff,
     showLastRun,
     loadHistory,

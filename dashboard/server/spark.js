@@ -671,7 +671,9 @@ function validateResult(raw) {
     label: String(a.label || "Action").slice(0, 24),
     what: a.what || "",
     why: a.why || "",
-    tier: [1, 2, 3].includes(a.tier) ? a.tier : 3,
+    // Tier 2 was the dashboard-sends-an-email tier and no longer exists, so a
+    // model that still asks for one falls through to 3 and becomes a handoff.
+    tier: [1, 3].includes(a.tier) ? a.tier : 3,
     estimated_minutes: Number.isFinite(a.estimated_minutes) ? Math.max(0, Math.round(a.estimated_minutes)) : 5,
     reversible: a.reversible !== false,
     preview: a.preview || null,
@@ -687,8 +689,9 @@ function normaliseActions(list, offset = 0) {
     what: a.what || "",
     why: a.why || "",
     // An action whose tier the model got wrong defaults to 3 — the tier that
-    // is never performed. Guessing low would be the dangerous direction.
-    tier: [1, 2, 3].includes(a.tier) ? a.tier : 3,
+    // is never performed. Guessing low would be the dangerous direction. Tier 2
+    // (the old dashboard-send) is gone, so it lands here too.
+    tier: [1, 3].includes(a.tier) ? a.tier : 3,
     estimated_minutes: Number.isFinite(a.estimated_minutes) ? Math.max(0, Math.round(a.estimated_minutes)) : 5,
     reversible: a.reversible !== false,
     preview: a.preview || null,
@@ -1087,7 +1090,7 @@ function applyRoundResult(run, data) {
 
   for (const d of data.drafts || []) {
     if (!d?.to || !d?.body) continue;
-    const draft = { id: d.id || `d${run.drafts.length + 1}`, to: d.to, subject: d.subject || "", body: d.body, sent: false };
+    const draft = { id: d.id || `d${run.drafts.length + 1}`, to: d.to, subject: d.subject || "", body: d.body };
     run.drafts.push(draft);
     emit(run, "draft", draft);
   }
@@ -1115,30 +1118,10 @@ function stopProc(run) {
   setTimeout(() => { try { run.proc.kill("SIGKILL"); } catch {} }, 5000).unref?.();
 }
 
-// ── outbound (server-side only) ────────────────────────────────────────────
-
-/** Send a reviewed draft through the same helper the rest of OpenDia uses. */
-function sendDraft(draft) {
-  return new Promise((res, rej) => {
-    const py = `
-import json, sys
-sys.path.insert(0, "${HOME}/OpenDia/scripts")
-from gmail_helper import _load_service, send_email
-d = json.load(sys.stdin)
-send_email(_load_service(), d["to"], d["subject"], d["body"])
-print("sent")
-`;
-    const proc = spawn("python3", ["-c", py], { stdio: ["pipe", "pipe", "pipe"] });
-    let out = "", err = "";
-    proc.stdout.on("data", (d) => (out += d));
-    proc.stderr.on("data", (d) => (err += d));
-    proc.on("close", (code) => {
-      if (code === 0 && out.includes("sent")) res(true);
-      else rej(new Error((err || out || `exit ${code}`).trim().split("\n").pop()));
-    });
-    proc.stdin.end(JSON.stringify({ to: draft.to, subject: draft.subject, body: draft.body }));
-  });
-}
+// Nothing here sends. Spark's outbound responsibility ends at a Gmail draft:
+// the act phase creates one, the panel reads it back for review, and the human
+// sends it from Gmail. There is deliberately no send path on the server — a
+// dormant one behind requireAdmin is just a thing that gets re-wired later.
 
 /** Write a session brief so a handoff lands with the Spark findings intact. */
 function writeHandoff(project, run) {
@@ -1279,31 +1262,9 @@ export function mountSpark(app) {
     res.json({ ok: true, started: true, round: run.round });
   });
 
-  // Sending is the one irreversible outbound step, so the model never holds
-  // the capability: it drafts, a human reads the exact text, and the server
-  // sends. gmail_send is denied in every phase and the guard hook blocks the
-  // shell equivalents.
-  app.post("/api/projects/:id/spark/send-draft", requireAdmin, async (req, res) => {
-    const project = loadProject(req, res);
-    if (!project) return;
-    const run = runs.get(String(project.id));
-    if (!run) return res.status(404).json({ error: "no Spark run" });
-
-    const draft = run.drafts.find((d) => d.id === req.body?.draftId);
-    if (!draft) return res.status(404).json({ error: "draft not found" });
-    if (draft.sent) return res.status(409).json({ error: "already sent" });
-
-    try {
-      await sendDraft(draft);
-    } catch (err) {
-      return res.status(500).json({ error: `send failed: ${err.message}` });
-    }
-    draft.sent = true;
-    draft.sentAt = new Date().toISOString();
-    emit(run, "draft", draft);
-    pushLedger(run, "sent", `Email sent to ${draft.to} — "${draft.subject}"`);
-    res.json({ ok: true });
-  });
+  // There is no send-draft route on purpose. Sending is the one irreversible
+  // outbound step and it stays outside OpenDia entirely: the act phase leaves
+  // a Gmail draft, and the human sends it from Gmail.
 
   // Hand the card to a working session: write a brief, point the card at a
   // tmux session, and close the Spark timer so /od-go starts clean.

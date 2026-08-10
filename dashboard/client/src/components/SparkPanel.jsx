@@ -186,7 +186,6 @@ function SparkActions({ spark, showToast }) {
           <div key={a.id} className={`spark-action${pick ? ` picked-${pick}` : ""}`}>
             <div className="spark-action-head">
               <span className="spark-action-label">{a.label}</span>
-              {a.tier === 2 && <span className="spark-tier-badge">needs a second confirm</span>}
               <span className="spark-action-mins">+{a.estimated_minutes}m</span>
             </div>
             <p className="spark-action-what">{a.what}</p>
@@ -259,49 +258,19 @@ function SparkHandoffs({ handoffs }) {
   );
 }
 
-function SparkDraft({ draft, spark, showToast }) {
-  const [armed, setArmed] = useState(false);
-  const [count, setCount] = useState(3);
-
-  useEffect(() => {
-    if (!armed) return;
-    if (count <= 0) {
-      spark.sendDraft(draft.id).then((r) => {
-        if (r?.error) showToast(r.error);
-        setArmed(false);
-        setCount(3);
-      });
-      return;
-    }
-    const t = setTimeout(() => setCount((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [armed, count, draft.id, spark, showToast]);
-
+// Spark's outbound responsibility ends at the draft. The draft is already
+// sitting in Gmail — this panel is a read-back so the text can be reviewed
+// without leaving the card, and sending stays a thing Nick does in Gmail.
+function SparkDraft({ draft }) {
   return (
     <div className="spark-draft">
       <div className="spark-draft-head">
         <span className="spark-draft-title">Drafted reply</span>
-        {draft.sent
-          ? <span className="spark-draft-sent">sent {new Date(draft.sentAt).toLocaleTimeString()}</span>
-          : <span className="spark-draft-unsent">nothing has been sent</span>}
+        <span className="spark-draft-unsent">draft is in Gmail — nothing has been sent</span>
       </div>
       <div className="spark-draft-field"><span>To</span>{draft.to}</div>
       <div className="spark-draft-field"><span>Subject</span>{draft.subject}</div>
       <pre className="spark-draft-body">{draft.body}</pre>
-      {!draft.sent && (
-        <div className="spark-draft-actions">
-          {armed ? (
-            <>
-              <span className="spark-draft-arming">Sending in {count}…</span>
-              <button className="spark-btn" onClick={() => { setArmed(false); setCount(3); }}>Cancel</button>
-            </>
-          ) : (
-            <button className="spark-btn spark-btn-primary" onClick={() => setArmed(true)} disabled={spark.busy}>
-              Send this email
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -620,7 +589,7 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
         )}
 
         {spark.drafts.map((d) => (
-          <SparkDraft key={d.id} draft={d} spark={spark} showToast={showToast} />
+          <SparkDraft key={d.id} draft={d} />
         ))}
 
         {spark.status === "proposing" && <SparkActions spark={spark} showToast={showToast} />}

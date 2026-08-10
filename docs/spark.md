@@ -54,9 +54,11 @@ individually, and only the approved ones run.
 - **Tier 1 — performed on approval.** Card updates, Notion updates, creating a
   Gmail **draft**, writing a handoff brief, opening a Room, read-only
   diagnostics, appending to the daily log.
-- **Tier 2 — the dashboard performs it after a second, explicit click.** Only
-  sending a drafted email. The pane renders the recipient, subject and full
-  body; the Send button arms for three seconds before firing.
+- **There is no Tier 2.** It briefly meant "the dashboard sends the drafted
+  email after a second click." That capability was removed: Spark's outbound
+  responsibility ends at the Gmail draft. The pane still renders the
+  recipient, subject and full body, but only as a read-back — the draft is
+  already in Gmail, and it is sent from Gmail by a human.
 - **Tier 3 — never performed.** Anything over SSH or on a server, any write to
   a live client system, calendar events, anything financial or AR-related, and
   git commits or pushes. These become a **handoff** to a working session.
@@ -81,8 +83,10 @@ the CLI on this machine:
    writes, destructive local commands, and any file write outside the run
    directory. Every refusal is logged to the run's `guard.log`.
 
-The model therefore never holds the ability to send email. It drafts; a human
-reads the exact text; the server sends.
+The model therefore never holds the ability to send email — and neither does
+the dashboard. `gmail_send` is denied in both phases, the guard hook blocks the
+shell equivalents, and there is no send route on the server. The only outbound
+artifact Spark produces is a Gmail draft.
 
 Report text is derived from client email and chat and is rendered as markdown,
 so every string is `<`-escaped server-side before it leaves the API — markdown
@@ -172,8 +176,10 @@ and a replayed report never re-runs the typewriter.
 - **Typing in the Terminal tab requires Take Control**, which opens a
   30-minute timer. That is a heavy door for a short follow-up question about a
   recommendation.
-- The email draft-and-send path is implemented but has not yet run end to end;
-  no run has proposed a draft on a card used for testing.
+- The email **draft** path has not yet run end to end; no run has proposed a
+  draft on a card used for testing, so `gmail_create_draft` firing from the act
+  phase is unproven. (The send half of this is no longer a limitation — it was
+  removed rather than tested.)
 - The non-admin gate is untested from a real non-admin identity — loopback is
   unconditionally admin, so it can only be exercised through Tailscale
   identity headers.
