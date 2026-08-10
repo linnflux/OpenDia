@@ -179,6 +179,11 @@ app.get("/api/projects", (req, res) => {
     let projects = getAllProjects({ includeCompleted });
     // Operator command-deck card is admin-only
     if (!req.user?.is_admin) projects = projects.filter((p) => p.tmux_session !== "operator");
+    // ?tmux_session=NAME — exact-match filter so CLI commands (/od-go, /hello,
+    // /dispatch) can resolve a session to its card without pulling the full list.
+    if (req.query.tmux_session) {
+      projects = projects.filter((p) => p.tmux_session === req.query.tmux_session);
+    }
     res.json(projects);
   } catch (err) {
     console.error("GET /api/projects error:", err.message);
