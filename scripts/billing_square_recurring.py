@@ -19,6 +19,10 @@ import sys
 import requests
 
 SQUARE_TOKEN_ENV = "SQUARE_ACCESS_TOKEN"
+# Since the 2026-08-05 MCP migration the servers are HTTP daemons and ~/.claude.json
+# no longer carries an "env" block, so credentials live in their own files. The old
+# path is still tried second for any host that hasn't migrated.
+SQUARE_ENV_FILE = os.path.expanduser("~/.claude/mcp-credentials/square.env")
 SQUARE_TOKEN_FILE = os.path.expanduser("~/.claude.json")
 LOCATION_ID = "6RGNNJJXK66KR"
 SQUARE_API_BASE = "https://connect.squareup.com/v2"
@@ -40,12 +44,34 @@ def get_square_token():
     token = os.environ.get(SQUARE_TOKEN_ENV)
     if token:
         return token
+
+    # Current location: a KEY=VALUE env file per MCP server.
+    try:
+        with open(SQUARE_ENV_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                if key.strip() == SQUARE_TOKEN_ENV:
+                    return val.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"  !! Could not read {SQUARE_ENV_FILE}: {e}", file=sys.stderr)
+
+    # Pre-migration location: inline env block in ~/.claude.json.
     try:
         with open(SQUARE_TOKEN_FILE) as f:
             cfg = json.load(f)
         return cfg["mcpServers"]["square"]["env"][SQUARE_TOKEN_ENV]
-    except Exception as e:
-        sys.exit(f"Could not load Square token: {e}")
+    except Exception:
+        pass
+
+    sys.exit(
+        f"Could not load Square token. Set ${SQUARE_TOKEN_ENV}, or put "
+        f"{SQUARE_TOKEN_ENV}=<token> in {SQUARE_ENV_FILE}."
+    )
 
 
 def fetch_invoices_for_month(token, year_month):

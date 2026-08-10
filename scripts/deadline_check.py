@@ -34,7 +34,21 @@ SKIP_STATUSES = {"Completed", "Reference"}
 def get_token():
     token = os.environ.get("NOTION_API_KEY") or os.environ.get("NOTION_TOKEN")
     if not token:
-        # Fall back to reading from claude.json
+        # Current location since the 2026-08-05 MCP migration: one env file per server.
+        try:
+            with open(os.path.expanduser("~/.claude/mcp-credentials/notion.env")) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    if key.strip() in ("NOTION_TOKEN", "NOTION_API_KEY"):
+                        token = val.strip().strip('"').strip("'")
+                        break
+        except Exception:
+            pass
+    if not token:
+        # Legacy fallback: pre-migration stdio MCP config.
         try:
             import json as _json
             claude_cfg = os.path.expanduser("~/.claude.json")

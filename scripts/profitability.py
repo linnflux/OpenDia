@@ -67,6 +67,19 @@ def square_token():
     tok = os.environ.get("SQUARE_ACCESS_TOKEN")
     if tok:
         return tok
+    # Current location since the 2026-08-05 MCP migration: one env file per server.
+    try:
+        with open(os.path.expanduser("~/.claude/mcp-credentials/square.env")) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                if key.strip() == "SQUARE_ACCESS_TOKEN":
+                    return val.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    # Legacy fallback: pre-migration stdio MCP config.
     cfg = json.load(open(os.path.expanduser("~/.claude.json")))
     return cfg["mcpServers"]["square"]["env"]["SQUARE_ACCESS_TOKEN"]
 
