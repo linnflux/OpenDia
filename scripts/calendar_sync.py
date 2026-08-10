@@ -54,26 +54,28 @@ GCAL = "https://www.googleapis.com/calendar/v3"
 NEXT_STEP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}):\s*(.*)$", re.S)
 
 # ── Time-blocking rules ──────────────────────────────────────────────────
-# Day-granular items (date-only Notion dues, next_step dates) become real
-# timed blocks instead of all-day banners: quick actions get 30 minutes,
-# substantive work gets 60, placed into the first open slot after 8 AM ET
-# (respecting the primary calendar via freeBusy). All-day survives only for
-# genuine multi-day date ranges.
+# Day-granular items (date-only Notion dues, next_step dates) ALWAYS become
+# real timed blocks, never all-day banners — the point is that work shows up
+# IN the grid, not stacked above it. Placement is the first open slot after
+# 8 AM ET (respecting the primary calendar via freeBusy), with same-company
+# items placed back-to-back so a client's work lands in one run. When a day
+# has no room left, we deliberately double-book rather than fall back to a
+# banner; tightening those days up is a manual pass.
+# All-day survives only for genuine multi-day date ranges.
 WORK_START_H = 8
 WORK_END_H = 20
 SHORT_MIN = 30
 LONG_MIN = 60
-FREEBUSY_HORIZON_DAYS = 42  # freeBusy API limit
+FREEBUSY_HORIZON_DAYS = 42  # freeBusy API limit; bounds the query, NOT placement
 TZ = ZoneInfo(CAL_TZ)
 
-QUICK_RE = re.compile(
-    r"\b(follow[- ]?up|call|confirm|check|email|reply|send|ask|ping|remind|verify|schedule|invoice|review)\b",
-    re.I,
-)
-
-
 def duration_minutes(text):
-    return SHORT_MIN if QUICK_RE.search(text or "") else LONG_MIN
+    # 2026-08-10: a flat 30 min per Nick. The old keyword heuristic (30 for
+    # quick actions, 60 for everything else) could not fit the 30-minute gaps
+    # a normal day leaves between meetings, so a busy day spilled every item
+    # into an all-day banner instead of placing it.
+    # User-resized events keep their duration via the stickiness rule.
+    return SHORT_MIN
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -429,6 +431,7 @@ def build_desired(token, cfg, today_iso):
             "kind": "task",
             "granularity": gran,
             "duration": duration_minutes(name) if gran == "day" else None,
+            "company": company or "",  # slot-assignment sort key: group a client together
             "notion_id": pid,
             "start": start,
             "end": end,
@@ -452,6 +455,7 @@ def build_desired(token, cfg, today_iso):
             "kind": "next_step",
             "granularity": "day",
             "duration": duration_minutes(action),
+            "company": row["company"] or "",  # slot-assignment sort key
             "card_id": row["id"],
             "action": action,
             "start": ds,
@@ -466,13 +470,20 @@ def build_desired(token, cfg, today_iso):
 # Slot assignment (time-blocking)
 # ---------------------------------------------------------------------------
 def assign_slots(cal, cal_id, desired, google):
-    """Give every day-granular item a concrete 30/60-min block.
+    """Give every day-granular item a concrete timed block. Nothing stays a banner.
 
     Stickiness rule: if the Google event already has a time on the correct
     day (whether we placed it or the user dragged it), adopt those exact
     times so reconciliation is a no-op. Only missing/all-day events get a
     fresh slot: first free gap after 8 AM ET (after "now" for today),
     respecting primary-calendar busyness and slots claimed earlier this run.
+
+    Items are placed in (day, company, id) order, so several actions for the
+    same client take consecutive slots instead of being scattered.
+
+    Items dated beyond the freeBusy horizon are still placed — we just have
+    no primary-calendar busy data that far out, so only our own events are
+    avoided. The user can drag if that collides with something.
     """
     day_items = [(eid, it) for eid, it in desired.items() if it.get("granularity") == "day"]
     if not day_items:
@@ -484,7 +495,7 @@ def assign_slots(cal, cal_id, desired, google):
 
     # Adopt existing times first; collect items that still need placement
     need = []
-    for eid, item in sorted(day_items, key=lambda x: (x[1]["start"], x[0])):
+    for eid, item in sorted(day_items, key=lambda x: (x[1]["start"][:10], x[1].get("company") or "", x[0])):
         ev = google.get(eid)
         if ev and ev.get("start", {}).get("dateTime"):
             ev_day = datetime.fromisoformat(ev["start"]["dateTime"]).astimezone(TZ).date().isoformat()
@@ -492,10 +503,7 @@ def assign_slots(cal, cal_id, desired, google):
                 item["body"]["start"] = dict(ev["start"])
                 item["body"]["end"] = dict(ev["end"])
                 continue
-        d = date.fromisoformat(item["start"][:10])
-        if d <= horizon_end:
-            need.append((eid, item, d))
-        # beyond the freeBusy horizon: stays all-day until it rolls into range
+        need.append((eid, item, date.fromisoformat(item["start"][:10])))
 
     if not need:
         return
@@ -506,12 +514,16 @@ def assign_slots(cal, cal_id, desired, google):
     # whole day busy and block the very slots we're trying to assign.
     # Banner-length busy intervals (>=20h, e.g. multi-day OOO/context events)
     # are ignored — they're day markers, not meetings.
+    # The freeBusy query is capped at FREEBUSY_HORIZON_DAYS by the API, so days
+    # past it simply carry no primary-calendar busy data (placement still runs).
+    fb_lo = min(n[2] for n in need)
+    fb_hi = min(max(n[2] for n in need), horizon_end)
     busy = [
-        (s, e) for s, e in cal.freebusy(
+        (s, e) for s, e in (cal.freebusy(
             ["primary"],
-            datetime.combine(min(n[2] for n in need), datetime.min.time(), TZ),
-            datetime.combine(max(n[2] for n in need) + timedelta(days=1), datetime.min.time(), TZ),
-        )
+            datetime.combine(fb_lo, datetime.min.time(), TZ),
+            datetime.combine(fb_hi + timedelta(days=1), datetime.min.time(), TZ),
+        ) if fb_lo <= fb_hi else [])
         if e - s < timedelta(hours=20)
     ]
     for ev in google.values():
@@ -523,8 +535,8 @@ def assign_slots(cal, cal_id, desired, google):
                 pass
     busy.sort()
 
-    def first_gap(day, minutes):
-        dur = timedelta(minutes=minutes)
+    def day_open(day):
+        """Earliest placeable moment on `day` (never in the past for today)."""
         cursor = datetime.combine(day, datetime.min.time(), TZ).replace(hour=WORK_START_H)
         if day == today and now > cursor:
             # round now up to the next :00/:30
@@ -532,7 +544,15 @@ def assign_slots(cal, cal_id, desired, google):
             cursor = now.replace(minute=minute, second=0, microsecond=0)
             if minute == 0:
                 cursor += timedelta(hours=1)
-        day_end = datetime.combine(day, datetime.min.time(), TZ).replace(hour=WORK_END_H)
+        return cursor
+
+    def day_close(day):
+        return datetime.combine(day, datetime.min.time(), TZ).replace(hour=WORK_END_H)
+
+    def first_gap(day, minutes):
+        dur = timedelta(minutes=minutes)
+        cursor = day_open(day)
+        day_end = day_close(day)
         while cursor + dur <= day_end:
             clash = None
             for b_start, b_end in busy:
@@ -549,15 +569,35 @@ def assign_slots(cal, cal_id, desired, google):
                     cursor += timedelta(hours=1)
         return None
 
+    # Overflow: the day has no free gap left. Double-book rather than drop back
+    # to an all-day banner — everything has to be visible in the grid. Each
+    # overflow item walks a per-day cursor from the top of the window, wrapping
+    # to a fresh layer at the bottom, so they stack spread out instead of all
+    # landing on 8:00.
+    overflow_cursor = {}
+
+    def overflow_slot(day, minutes):
+        dur = timedelta(minutes=minutes)
+        start, day_end = day_open(day), day_close(day)
+        cursor = overflow_cursor.get(day, start)
+        if cursor + dur > day_end and start + dur <= day_end:
+            cursor = start  # wrap to a new layer
+        overflow_cursor[day] = cursor + dur
+        return cursor
+
     for eid, item, d in need:
         slot = first_gap(d, item["duration"])
         if slot is None:
-            continue  # day is full — stays all-day rather than double-booking
-        slot_end = slot + timedelta(minutes=item["duration"])
+            slot = overflow_slot(d, item["duration"])
+            slot_end = slot + timedelta(minutes=item["duration"])
+        else:
+            # Only genuinely free slots claim space; double-books must not
+            # push the next item around.
+            slot_end = slot + timedelta(minutes=item["duration"])
+            busy.append((slot, slot_end))
+            busy.sort()
         item["body"]["start"] = {"dateTime": slot.isoformat(), "timeZone": CAL_TZ}
         item["body"]["end"] = {"dateTime": slot_end.isoformat(), "timeZone": CAL_TZ}
-        busy.append((slot, slot_end))
-        busy.sort()
 
 
 # ---------------------------------------------------------------------------
