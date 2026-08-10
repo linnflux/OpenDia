@@ -536,6 +536,23 @@ Verify it works:
 python3 ~/OpenDia/scripts/db_helper.py list-divisions
 ```
 
+On an **existing** database, pick up any columns added since it was created —
+idempotent, and unlike `--force` it will not re-initialize anything:
+
+```bash
+python3 ~/OpenDia/scripts/init_db.py --migrate
+```
+
+Companies carry two mutually exclusive billing flags that change what a client
+is charged. Set them through the helper, never by hand — see
+[`docs/billing.md`](docs/billing.md):
+
+```bash
+python3 ~/OpenDia/scripts/db_helper.py list-companies       # shows [NP]/[FP]
+python3 ~/OpenDia/scripts/db_helper.py set-nonprofit <id> <0|1>
+python3 ~/OpenDia/scripts/db_helper.py set-full-rate <id> <0|1>
+```
+
 ### 4. Configure Claude Code
 
 Launch Claude Code and authenticate:

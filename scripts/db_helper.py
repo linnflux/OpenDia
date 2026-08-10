@@ -83,7 +83,8 @@ def add_company(name, short_name=None, website=None, notes=None):
 def list_companies():
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, name, short_name, website FROM companies ORDER BY name"
+        "SELECT id, name, short_name, website, nonprofit, full_rate "
+        "FROM companies ORDER BY name"
     ).fetchall()
     conn.close()
     if not rows:
@@ -92,7 +93,10 @@ def list_companies():
     for r in rows:
         short = f" ({r['short_name']})" if r["short_name"] else ""
         web = f" - {r['website']}" if r["website"] else ""
-        print(f"  {r['id']}: {r['name']}{short}{web}")
+        # Same markers billing_month.py writes on the tab, so the flag reads
+        # the same here as it does on the invoice it changes.
+        flag = " [NP]" if r["nonprofit"] else (" [FP]" if r["full_rate"] else "")
+        print(f"  {r['id']}: {r['name']}{short}{web}{flag}")
 
 
 def get_company(company_id):
@@ -106,22 +110,51 @@ def get_company(company_id):
         print(f"  Company {company_id} not found.")
 
 
-def set_nonprofit(company_id, value):
+# The two billing flags are mutually exclusive: nonprofit means OpenDia hours
+# are not billed at all, full_rate means they bill in full with no overlap
+# deduction. A company carrying both is a contradiction the billing script
+# cannot resolve, so the helper refuses to create one rather than picking a
+# winner quietly.
+_BILLING_FLAGS = {"nonprofit": "full_rate", "full_rate": "nonprofit"}
+
+
+def _set_billing_flag(company_id, column, value):
+    other = _BILLING_FLAGS[column]
     conn = get_conn()
-    row = conn.execute("SELECT name FROM companies WHERE id = ?", (company_id,)).fetchone()
+    row = conn.execute(
+        f"SELECT name, {column}, {other} FROM companies WHERE id = ?", (company_id,)
+    ).fetchone()
     if not row:
         conn.close()
         print(f"  Company {company_id} not found.")
         return
+    if value and row[other]:
+        conn.close()
+        print(f"  Refusing: '{row['name']}' (id={company_id}) is already flagged {other}.")
+        print(f"  These are mutually exclusive — clear it first:")
+        print(f"    python3 db_helper.py set-{other.replace('_', '-')} {company_id} 0")
+        return
     conn.execute(
-        "UPDATE companies SET nonprofit = ?, updated_at = datetime('now') WHERE id = ?",
+        f"UPDATE companies SET {column} = ?, updated_at = datetime('now') WHERE id = ?",
         (1 if value else 0, company_id),
     )
     conn.commit()
     conn.close()
-    print(f"Set nonprofit={1 if value else 0} for '{row['name']}' (id={company_id})")
-    if value:
+    print(f"Set {column}={1 if value else 0} for '{row['name']}' (id={company_id})")
+    return True
+
+
+def set_nonprofit(company_id, value):
+    if _set_billing_flag(company_id, "nonprofit", value) and value:
         print("Reminder: tick the Nonprofit checkbox on the company's Notion page too.")
+
+
+def set_full_rate(company_id, value):
+    """[FP] — bills Toggl AND OpenDia hours in full, with no overlap deduction.
+
+    SQLite is the only source of truth for this one; there is no Notion mirror.
+    """
+    _set_billing_flag(company_id, "full_rate", value)
 
 
 def update_company(company_id, **kwargs):
@@ -336,7 +369,8 @@ def print_usage():
     print("  add-company <name> [short_name]     Add a company")
     print("  list-companies                       List all companies")
     print("  get-company <id>                     Show company details")
-    print("  set-nonprofit <id> <0|1>             Set company nonprofit flag")
+    print("  set-nonprofit <id> <0|1>             Set nonprofit flag [NP] (OD hours not billed)")
+    print("  set-full-rate <id> <0|1>             Set full-rate flag [FP] (no overlap deduction)")
     print("  add-person <name> [company_id]       Add a person")
     print("  list-people [company_id]             List people")
     print("  add-project <name> [company_id] [division]  Add a project")
@@ -375,6 +409,12 @@ if __name__ == "__main__":
             print("Error: usage: set-nonprofit <company_id> <0|1>")
             sys.exit(1)
         set_nonprofit(int(args[0]), args[1] == "1")
+
+    elif cmd == "set-full-rate":
+        if len(args) < 2 or args[1] not in ("0", "1"):
+            print("Error: usage: set-full-rate <company_id> <0|1>")
+            sys.exit(1)
+        set_full_rate(int(args[0]), args[1] == "1")
 
     elif cmd == "add-person":
         if not args:

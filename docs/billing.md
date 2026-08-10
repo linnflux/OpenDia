@@ -86,21 +86,62 @@ idempotent — they clear and rewrite their target tab).
 
 1. Preview: `python3 scripts/billing_month.py --month YYYY-MM`
    — flags unmatched client names (need an alias added to the `Clients` tab
-   before writing) and nonprofit rows (`companies.nonprofit` in SQLite,
-   never derived from Square at runtime)
+   before writing) and both billing flags (see below)
 2. Confirm, then write: `python3 scripts/billing_month.py --month YYYY-MM --write-sheet`
 3. Pull Square recurring revenue onto the Home tab:
    `python3 scripts/billing_square_recurring.py --month YYYY-MM --write`
    (all paid invoices with `-R-` in the invoice number, paid during the month)
 4. AI generates customer-facing Notes (col L) from the OD timer detail table
    — strips internal jargon, merges duplicate tasks, excludes non-billable
-   work, prepends `[NP]` for nonprofit rows
+   work, prepends `[NP]` or `[FP]` per the flags below
 5. Operator fills in manually: Additional charges (col F), Build hours (cols
    G–J), reviews AI notes (col L), marks Sent (col M)
 
 Re-running either script clears and rewrites its target tab/tab-set —
 `/billing-month` re-runs also wipe the manual columns (F–J, L–M), so redo
 Step 4's notes and warn the Operator about lost manual fills.
+
+## Billing flags — `[NP]` and `[FP]`
+
+Two mutually exclusive flags on `companies` in SQLite decide how a client's
+OpenDia platform hours are treated. Both move real money, and SQLite is the
+only source of truth for either — never derived from Square at runtime.
+
+| Flag | Column | Effect |
+|---|---|---|
+| `[NP]` | `companies.nonprofit` | OpenDia hours are not billed at all. Mirrored by a Notion checkbox for visibility. |
+| `[FP]` | `companies.full_rate` | Toggl **and** OpenDia hours bill in full, with **no overlap deduction**. SQLite only; no Notion mirror. |
+| *(neither)* | — | Default. Overlap between Toggl and OpenDia is measured and deducted. |
+
+`[FP]` is the mirror of `[NP]`: nonprofits get OD hours free, full-rate clients
+get no overlap relief, and that spread is what funds the nonprofit subsidy.
+
+Set them through the helper, never by hand — it refuses to put both on one
+company, which is a contradiction the billing script cannot resolve:
+
+```bash
+python3 ~/OpenDia/scripts/db_helper.py set-nonprofit <id> <0|1>
+python3 ~/OpenDia/scripts/db_helper.py set-full-rate <id> <0|1>
+python3 ~/OpenDia/scripts/db_helper.py list-companies   # shows [NP]/[FP]
+```
+
+If either flag cannot be read, `billing_month.py` prints a `!!` warning and
+treats every client as un-flagged. Do not write a tab through that warning —
+an unread `nonprofit` bills hours that should be free, and an unread
+`full_rate` deducts an overlap that should not be deducted.
+
+## Overlap deduction
+
+Toggl hours and OpenDia platform hours can record the same work twice. The
+preview measures the genuine overlap (same person, same client, same day, in
+both systems), matching a Toggl display name to a timer's `started_by` email,
+and subtracts it from the union.
+
+The subtrahend is deliberately un-rounded while totals round to 15 minutes, so
+any error lands on the under-subtracting side — the union may bill slightly
+high, never low. Timer entries with no `started_by` cannot be attributed and
+are reported separately: that time makes the overlap figure a **floor, not a
+measurement**. `[NP]` and `[FP]` rows are exempt from the deduction entirely.
 
 ## In-dashboard billing (Ctrl+K → Billing, admin only)
 

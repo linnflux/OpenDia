@@ -313,22 +313,29 @@ def load_sqlite_index():
     return name_idx, short_idx
 
 
-def load_nonprofit_set():
-    """Lowercased names + short_names of companies flagged nonprofit in the OpenDia DB.
+def load_flag_set(column):
+    """Lowercased names + short_names of companies whose `column` flag is set.
 
-    The SQLite `companies.nonprofit` flag is the source of truth for nonprofit
-    billing (OD hours are not billed) — mirrored by a Notion checkbox for
-    visibility, never read from Square at runtime.
+    SQLite is the source of truth for both billing flags. Set them with
+    `db_helper.py set-nonprofit` / `set-full-rate`, never by hand.
+
+    A failure here is never silent. Reading no flags is indistinguishable from
+    "no client is flagged", and the two mis-bill in opposite directions: an
+    unread nonprofit flag bills OD hours that should be free, an unread
+    full_rate flag deducts an overlap that should not be deducted. An absent
+    database file stays quiet — that is "not configured", not a failure.
     """
     if not os.path.exists(DB_PATH):
         return set()
     try:
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute(
-            "SELECT name, short_name FROM companies WHERE nonprofit = 1"
+            f"SELECT name, short_name FROM companies WHERE {column} = 1"
         ).fetchall()
         conn.close()
-    except Exception:
+    except Exception as e:
+        print(f"  !! Could not read companies.{column} ({e}) — every client will be "
+              f"treated as un-flagged, which mis-bills anyone who is.", file=sys.stderr)
         return set()
     out = set()
     for name, short_name in rows:
@@ -337,35 +344,24 @@ def load_nonprofit_set():
         if short_name and short_name.strip().lower() not in _BOGUS_SHORT_NAMES:
             out.add(short_name.strip().lower())
     return out
+
+
+def load_nonprofit_set():
+    """[NP] — OpenDia platform hours are not billed. Mirrored by a Notion
+    checkbox for visibility, never read from Square at runtime."""
+    return load_flag_set("nonprofit")
 
 
 def load_full_rate_set():
-    """Lowercased names + short_names of companies flagged `companies.full_rate`.
-
-    [FP] = for-profit, full rate. These clients pay Toggl hours AND OpenDia
+    """[FP] — for-profit, full rate. These clients pay Toggl hours AND OpenDia
     platform hours with NO overlap deduction: the human operator and the OpenDia
     session are separately chargeable inputs (rent the machine, pay the driver).
 
-    This is the mirror of [NP]: nonprofits get OD hours free, [FP] clients get no
-    overlap relief, and that spread is what funds the nonprofit subsidy.
+    The mirror of [NP]: nonprofits get OD hours free, [FP] clients get no
+    overlap relief, and that spread is what funds the nonprofit subsidy. SQLite
+    only — unlike nonprofit, there is no Notion checkbox.
     """
-    if not os.path.exists(DB_PATH):
-        return set()
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            "SELECT name, short_name FROM companies WHERE full_rate = 1"
-        ).fetchall()
-        conn.close()
-    except Exception:
-        return set()
-    out = set()
-    for name, short_name in rows:
-        if name:
-            out.add(name.strip().lower())
-        if short_name and short_name.strip().lower() not in _BOGUS_SHORT_NAMES:
-            out.add(short_name.strip().lower())
-    return out
+    return load_flag_set("full_rate")
 
 
 def is_full_rate(canonical_name, cfg, full_rate_set):
