@@ -144,7 +144,8 @@ def get_toggl_monthly_hours(token, workspace_id, year, month):
         warn = toggl_hours.coverage_warning(tokens)
         if warn:
             print(f"  !! {warn}", file=sys.stderr)
-        return toggl_hours.monthly_hours(tokens, year, month)
+        # Degraded: v9 is per-token, so any user without a token on file vanishes.
+        return toggl_hours.monthly_hours(tokens, year, month), True
 
     data = summary.get("data", [])
     print(f"{len(data)} client groups.")
@@ -165,7 +166,73 @@ def get_toggl_monthly_hours(token, workspace_id, year, month):
         hrs = round(no_client_ms / 1000 / 3600, 2)
         print(f"  Note: {hrs}h tracked with no Toggl client assigned — not included.", file=sys.stderr)
 
-    return result  # {toggl_client_name: hours_float}
+    return result, False  # ({toggl_client_name: hours}, degraded?)
+
+
+def get_workspace_user_emails(token, workspace_id):
+    """Return {email: toggl_display_name} for the workspace.
+
+    Needed to line a Toggl entry (which carries a display name) up against an
+    OpenDia timer entry (which carries started_by, an email). Returns {} if the
+    endpoint is unavailable — overlap detection then degrades to nothing rather
+    than guessing at identities.
+    """
+    url = f"{TOGGL_API_BASE}/workspaces/{workspace_id}/users"
+    try:
+        req = urllib.request.Request(url, headers=_toggl_auth_header(token))
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            users = json.loads(resp.read().decode())
+    except Exception as e:
+        print(f"  !! Could not fetch workspace users ({e}) — overlap detection off.",
+              file=sys.stderr)
+        return {}
+    return {
+        (u.get("email") or "").strip().lower(): (u.get("fullname") or "").strip()
+        for u in users
+        if u.get("email") and u.get("fullname")
+    }
+
+
+def get_toggl_detail_by_person_day(token, workspace_id, year, month):
+    """Return {(toggl_client, toggl_user, 'YYYY-MM-DD'): hours}, or None.
+
+    Used only to measure Toggl/OpenDia double-logging. None means the detail
+    endpoint was unavailable (402 or error), in which case overlap must be
+    treated as unknown — NOT as zero-with-confidence.
+    """
+    last_day = calendar.monthrange(year, month)[1]
+    start_date = f"{year:04d}-{month:02d}-01"
+    end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
+
+    detail = defaultdict(float)
+    page = 1
+    while True:
+        try:
+            d = toggl_v2_get(token, "details", {
+                "workspace_id": workspace_id,
+                "since": start_date,
+                "until": end_date,
+                "user_agent": "billing@linnflux.com",
+                "page": page,
+            })
+        except RuntimeError as e:
+            print(f"  !! Toggl detail fetch failed ({e}) — overlap detection off.",
+                  file=sys.stderr)
+            return None
+        rows = d.get("data", [])
+        if not rows:
+            break
+        for r in rows:
+            client = (r.get("client") or "").strip()
+            user = (r.get("user") or "").strip()
+            if not client or not user:
+                continue
+            day = str(r.get("start") or "")[:10]
+            detail[(client, user, day)] += r.get("dur", 0) / 3600000.0
+        if len(rows) < d.get("per_page", 50):
+            break
+        page += 1
+    return dict(detail)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +259,33 @@ def get_od_hours(entries):
         if e["billable"]:
             by_client[e["client"]] += math.ceil(e["estimated_minutes"] / 15) * 0.25
     return dict(by_client)
+
+
+def get_od_detail_by_person_day(entries, email_to_toggl_name):
+    """Return {(od_client, toggl_display_name, 'YYYY-MM-DD'): hours}.
+
+    Raw hours, deliberately NOT 15-minute-rounded like get_od_hours(). Overlap is
+    subtracted from rounded totals, so keeping the subtrahend un-rounded means any
+    error lands on the under-subtracting side — we may bill slightly more than the
+    true union, never less.
+
+    Entries with no started_by cannot be attributed to a person and so can never
+    be matched. They are counted and reported: unattributed time is a blind spot
+    in the overlap number, not an absence of overlap.
+    """
+    detail = defaultdict(float)
+    unattributed = defaultdict(float)
+    for e in entries:
+        if not e["billable"]:
+            continue
+        hrs = e["estimated_minutes"] / 60.0
+        email = (e.get("started_by") or "").strip().lower()
+        name = email_to_toggl_name.get(email)
+        if not name:
+            unattributed[e["client"]] += hrs
+            continue
+        detail[(e["client"], name, str(e.get("date") or "")[:10])] += hrs
+    return dict(detail), dict(unattributed)
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +339,45 @@ def load_nonprofit_set():
     return out
 
 
+def load_full_rate_set():
+    """Lowercased names + short_names of companies flagged `companies.full_rate`.
+
+    [FP] = for-profit, full rate. These clients pay Toggl hours AND OpenDia
+    platform hours with NO overlap deduction: the human operator and the OpenDia
+    session are separately chargeable inputs (rent the machine, pay the driver).
+
+    This is the mirror of [NP]: nonprofits get OD hours free, [FP] clients get no
+    overlap relief, and that spread is what funds the nonprofit subsidy.
+    """
+    if not os.path.exists(DB_PATH):
+        return set()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT name, short_name FROM companies WHERE full_rate = 1"
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return set()
+    out = set()
+    for name, short_name in rows:
+        if name:
+            out.add(name.strip().lower())
+        if short_name and short_name.strip().lower() not in _BOGUS_SHORT_NAMES:
+            out.add(short_name.strip().lower())
+    return out
+
+
+def is_full_rate(canonical_name, cfg, full_rate_set):
+    if not full_rate_set:
+        return False
+    candidates = {canonical_name.strip().lower()}
+    short = (cfg or {}).get("short_name")
+    if short:
+        candidates.add(short.strip().lower())
+    return bool(candidates & full_rate_set)
+
+
 def is_nonprofit(canonical_name, cfg, nonprofit_set):
     """Match a Clients-tab canonical name (or its aliases) against the nonprofit set.
 
@@ -263,6 +396,17 @@ def is_nonprofit(canonical_name, cfg, nonprofit_set):
     return False
 
 
+def _flatten_client_key(s):
+    """Lowercase and collapse punctuation to single spaces.
+
+    Timer entries are sometimes opened with a slug-form client name
+    ('acme-center-for-widgets'), which never matches the canonical
+    'Acme Center for Widgets' on an exact or substring test — the hyphens block
+    both. That split one client into two rows on the July 2026 tab.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
 def canonicalize_od(raw, name_idx, short_idx):
     if not raw:
         return raw
@@ -271,6 +415,15 @@ def canonicalize_od(raw, name_idx, short_idx):
         return name_idx[key]
     if key in short_idx:
         return short_idx[key]
+
+    # Separator-insensitive exact match before falling back to substrings.
+    flat = _flatten_client_key(raw)
+    if flat:
+        for idx in (name_idx, short_idx):
+            for k, v in idx.items():
+                if _flatten_client_key(k) == flat:
+                    return v
+
     all_names = list(name_idx.values())
     matches = {n for n in all_names if key in n.lower() or n.lower() in key}
     return matches.pop() if len(matches) == 1 else raw
@@ -384,7 +537,79 @@ def resolve_name(raw, lookup, clients_config):
 # Merge and output
 # ---------------------------------------------------------------------------
 
-def merge_billing_data(toggl_hours, od_hours, clients_config):
+OVERLAP_CACHE_PATH = os.path.expanduser("~/OpenDia/.billing-overlap-cache.json")
+
+
+def load_overlap_cache(year, month):
+    """Return cached {client: overlap_hours} for a month, or None."""
+    try:
+        with open(OVERLAP_CACHE_PATH) as f:
+            return json.load(f).get(f"{year:04d}-{month:02d}")
+    except Exception:
+        return None
+
+
+def save_overlap_cache(year, month, overlap_by_client):
+    """Persist a measured overlap. Past months don't change, and the Toggl
+    Reports API 402s unpredictably on this plan — without a cache, one 402 turns
+    a correct month into a silently double-counted one."""
+    try:
+        cache = {}
+        if os.path.exists(OVERLAP_CACHE_PATH):
+            with open(OVERLAP_CACHE_PATH) as f:
+                cache = json.load(f)
+        cache[f"{year:04d}-{month:02d}"] = {k: round(v, 2) for k, v in overlap_by_client.items()}
+        with open(OVERLAP_CACHE_PATH, "w") as f:
+            json.dump(cache, f, indent=1, sort_keys=True)
+    except Exception as e:
+        print(f"  !! Could not write overlap cache: {e}", file=sys.stderr)
+
+
+def compute_overlap(toggl_detail, od_detail, name_lookup, clients_config, name_idx, short_idx):
+    """Return {canonical_client: overlap_hours}.
+
+    Overlap = the same person logging the same client on the same day in BOTH
+    Toggl and the OpenDia timer. Confirmed 2026-08-05 to be genuine
+    double-logging of one body of work, not two separate stretches.
+
+    min() of the two is used, which assumes same-day means same work. Where a
+    person genuinely worked two distinct blocks that day and logged one in each
+    system, this over-subtracts. The column is written to the sheet as a plain
+    editable number precisely so those rows can be corrected by hand.
+    """
+    if not toggl_detail or not od_detail:
+        return {}
+
+    def canon_toggl(raw):
+        c = resolve_name(raw, name_lookup, clients_config)
+        if c:
+            return c
+        sq = canonicalize_od(raw, name_idx, short_idx)
+        return resolve_name(sq, name_lookup, clients_config) if sq != raw else None
+
+    def canon_od(raw):
+        return resolve_name(canonicalize_od(raw, name_idx, short_idx), name_lookup, clients_config)
+
+    tog = defaultdict(float)
+    for (client, user, day), hrs in toggl_detail.items():
+        c = canon_toggl(client)
+        if c:
+            tog[(c, user, day)] += hrs
+
+    overlap = defaultdict(float)
+    for (client, user, day), hrs in od_detail.items():
+        c = canon_od(client)
+        if not c:
+            continue
+        key = (c, user, day)
+        if key in tog:
+            overlap[c] += min(hrs, tog[key])
+
+    return dict(overlap)
+
+
+def merge_billing_data(toggl_hours, od_hours, clients_config,
+                       toggl_detail=None, od_detail=None, overlap_override=None):
     """Produce a list of dicts — one per billing-relevant client.
 
     Includes:
@@ -443,18 +668,40 @@ def merge_billing_data(toggl_hours, od_hours, clients_config):
 
     nonprofit_set = load_nonprofit_set()
 
+    if overlap_override is not None:
+        overlap_by_client = overlap_override
+    else:
+        overlap_by_client = compute_overlap(
+            toggl_detail, od_detail, name_lookup, clients_config, name_idx, short_idx
+        )
+
+    full_rate_set = load_full_rate_set()
+
     rows = []
     for name in sorted(billing_clients, key=str.lower):
         cfg = clients_config.get(name, {})
+        nonprofit = is_nonprofit(name, cfg, nonprofit_set)
+        full_rate = is_full_rate(name, cfg, full_rate_set)
+        toggl_hrs = math.ceil(toggl_resolved.get(name, 0) * 4) / 4
+        od_hrs = round(od_resolved.get(name, 0), 2)
+        # Nonprofits bill Toggl hours only, so their OD hours never entered the
+        # total. [FP] clients pay operator AND platform hours in full, so the
+        # overlap deduction does not apply to them either.
+        if nonprofit or full_rate:
+            overlap = 0.0
+        else:
+            overlap = round(min(overlap_by_client.get(name, 0.0), od_hrs), 2)
         rows.append({
             "name": name,
-            "toggl_hrs": math.ceil(toggl_resolved.get(name, 0) * 4) / 4,
-            "od_hrs": round(od_resolved.get(name, 0), 2),
+            "toggl_hrs": toggl_hrs,
+            "od_hrs": od_hrs,
+            "overlap_hrs": overlap,
             "rate": cfg.get("rate", 0.0),
             "retainer": cfg.get("retainer", 0.0),
             "contact": cfg.get("contact", ""),
             "email": cfg.get("email", ""),
-            "nonprofit": is_nonprofit(name, cfg, nonprofit_set),
+            "nonprofit": nonprofit,
+            "full_rate": full_rate,
         })
 
     return rows, toggl_unmatched, od_unmatched
@@ -467,33 +714,45 @@ def print_preview(rows, toggl_unmatched, od_unmatched, year, month):
     print(f"\n{'='*80}")
     print(f"  Billing Preview — {month_name}")
     print(f"{'='*80}")
-    print(f"  {'Client':<38} {'Toggl':>6} {'OD':>5} {'Rate':>7} {'Retainer':>9}  {'Est.Charge':>11}")
-    print(f"  {'-'*78}")
+    print(f"  {'Client':<36} {'Toggl':>6} {'OD':>5} {'Ovlp':>5} {'Rate':>5} {'Retain':>7}  {'Est.Charge':>11}")
+    print(f"  {'-'*84}")
 
     grand_toggl = 0.0
     grand_od = 0.0
+    grand_overlap = 0.0
     grand_charge = 0.0
 
     for row in rows:
-        billed_hrs = row["toggl_hrs"] if row.get("nonprofit") else row["toggl_hrs"] + row["od_hrs"]
+        ovlp = row.get("overlap_hrs", 0.0)
+        billed_hrs = (
+            row["toggl_hrs"] if row.get("nonprofit")
+            else row["toggl_hrs"] + row["od_hrs"] - ovlp
+        )
         est = max(0, billed_hrs * row["rate"] - row["retainer"])
         grand_toggl += row["toggl_hrs"]
         grand_od += row["od_hrs"]
+        grand_overlap += ovlp
         grand_charge += est
         note = ""
         if row["retainer"] > 0 and row["toggl_hrs"] * row["rate"] <= row["retainer"]:
             note = "(retainer)"
         if row.get("nonprofit"):
             note = (note + " " if note else "") + "(nonprofit — OD not billed)"
+        if row.get("full_rate"):
+            note = (note + " " if note else "") + "(full rate — no overlap deduction)"
         charge_str = f"${est:,.2f}" if est else "  $0"
         print(
-            f"  {row['name']:<38} {row['toggl_hrs']:>6.2f} {row['od_hrs']:>5.2f}"
-            f" {row['rate']:>7.0f} {row['retainer']:>9.0f}  {charge_str:>11} {note}"
+            f"  {row['name'][:35]:<36} {row['toggl_hrs']:>6.2f} {row['od_hrs']:>5.2f}"
+            f" {ovlp:>5.2f} {row['rate']:>5.0f} {row['retainer']:>7.0f}  {charge_str:>11} {note}"
         )
 
-    print(f"  {'-'*78}")
-    print(f"  {'TOTAL':<38} {grand_toggl:>6.2f} {grand_od:>5.2f} {'':>7} {'':>9}  ${grand_charge:>10,.2f}")
+    print(f"  {'-'*84}")
+    print(f"  {'TOTAL':<36} {grand_toggl:>6.2f} {grand_od:>5.2f} {grand_overlap:>5.2f}"
+          f" {'':>5} {'':>7}  ${grand_charge:>10,.2f}")
     print(f"  ({len(rows)} clients)")
+    if grand_overlap:
+        print(f"  Overlap removed: {grand_overlap:.2f}h of double-logged time "
+              f"(same person, same client, same day, in both systems).")
 
     if toggl_unmatched:
         print(f"\n  ⚠ Toggl clients not in Clients tab ({len(toggl_unmatched)}):")
@@ -516,17 +775,22 @@ def print_preview(rows, toggl_unmatched, od_unmatched, year, month):
 # ---------------------------------------------------------------------------
 
 MONTHLY_HEADERS = [
-    "Client", "Toggl Hrs", "OD Hrs", "Rate", "Retainer",
+    "Client", "Toggl Hrs", "OD Hrs", "Overlap Hrs", "Rate", "Retainer",
     "Additional", "Build Name", "Build Hrs", "Build Milestone", "Build Billed",
     "Grand Total", "Notes", "Sent", "Contact", "Email",
 ]
 # Col letters for formula references (A=0, B=1, ...)
+# NOTE: "Overlap Hrs" was inserted at D on 2026-08-05; everything from Rate
+# rightward shifted one column. Month tabs written before that date use the old
+# layout and are not backfilled.
 _COL_B = "B"  # Toggl Hrs
-_COL_D = "D"  # Rate
-_COL_E = "E"  # Retainer
-_COL_F = "F"  # Additional Charges
-_COL_J = "J"  # Build Billed
-_COL_K = "K"  # Grand Total
+_COL_C = "C"  # OD Hrs
+_COL_D = "D"  # Overlap Hrs (billed hours = B + C - D)
+_COL_E = "E"  # Rate
+_COL_F = "F"  # Retainer
+_COL_G = "G"  # Additional Charges
+_COL_K = "K"  # Build Billed
+_COL_L = "L"  # Grand Total
 
 
 def ensure_tab(service, spreadsheet_id, tab_name):
@@ -596,10 +860,12 @@ def write_monthly_tab(service, rows_data, od_entries, year, month, total_toggl_h
     totals_row_idx = totals_r - 1  # 0-indexed
 
     s, e = DATA_START_ROW, last_data_r
+    # Billed hours are B + C - D (Toggl + OD - Overlap); rate is E, retainer F.
+    _bh = f"(B{s}:B{e}+C{s}:C{e}-D{s}:D{e})"
     ret_formula = (
-        f"=SUMPRODUCT((E{s}:E{e}>0)*("
-        f"((B{s}:B{e}+C{s}:C{e})*D{s}:D{e}<=E{s}:E{e})*(B{s}:B{e}+C{s}:C{e})*D{s}:D{e}"
-        f"+((B{s}:B{e}+C{s}:C{e})*D{s}:D{e}>E{s}:E{e})*E{s}:E{e}))"
+        f"=SUMPRODUCT((F{s}:F{e}>0)*("
+        f"({_bh}*E{s}:E{e}<=F{s}:F{e})*{_bh}*E{s}:E{e}"
+        f"+({_bh}*E{s}:E{e}>F{s}:F{e})*F{s}:F{e}))"
     )
 
     sheet_rows = [
@@ -616,7 +882,7 @@ def write_monthly_tab(service, rows_data, od_entries, year, month, total_toggl_h
         ["Total Toggl Hours:", total_toggl_hrs if total_toggl_hrs is not None else f"=SUM(B{s}:B{e})"],
         ["Toggl Billable Hours:", f"=SUM(B{s}:B{e})"],
         ["Percentage Billable:", "=IFERROR(B5/B4,0)"],
-        ["Total Being Billed:", f"=SUM(K{s}:K{e})"],
+        ["Total Being Billed:", f"=SUM(L{s}:L{e})"],
         ["Total Retainer Used:", ret_formula],
         ["Avg per Hour:", "=IFERROR(B7/B5,0)"],
         ["Total OD Hours:", f"=SUM(C{s}:C{e})"],
@@ -625,12 +891,14 @@ def write_monthly_tab(service, rows_data, od_entries, year, month, total_toggl_h
 
     for i, row in enumerate(rows_data):
         r = DATA_START_ROW + i  # 1-indexed sheet row for formulas
-        # Nonprofit clients: OD hours (col C) are never billed
-        hours_expr = f"B{r}" if row.get("nonprofit") else f"(B{r}+C{r})"
+        # Nonprofit clients bill Toggl hours only, so OD (col C) never entered the
+        # total and there is no overlap (col D) to remove.
+        hours_expr = f"B{r}" if row.get("nonprofit") else f"(B{r}+C{r}-D{r})"
         sheet_rows.append([
             row["name"],
             row["toggl_hrs"],
             row["od_hrs"],
+            row.get("overlap_hrs", 0.0),
             row["rate"],
             row["retainer"],
             "",  # Additional Charges — manual
@@ -638,8 +906,9 @@ def write_monthly_tab(service, rows_data, od_entries, year, month, total_toggl_h
             "",  # Build Hrs — manual
             "",  # Build Milestone — manual
             "",  # Build Billed — manual
-            f"=MAX(0,{hours_expr}*{_COL_D}{r}-{_COL_E}{r})+IF(ISNUMBER({_COL_F}{r}),{_COL_F}{r},0)+IF(ISNUMBER({_COL_J}{r}),{_COL_J}{r},0)",
-            "[NP]" if row.get("nonprofit") else "",  # Notes — [NP] marker for nonprofits, rest manual
+            f"=MAX(0,{hours_expr}*{_COL_E}{r}-{_COL_F}{r})+IF(ISNUMBER({_COL_G}{r}),{_COL_G}{r},0)+IF(ISNUMBER({_COL_K}{r}),{_COL_K}{r},0)",
+            # Notes — [NP]/[FP] marker written by the script, rest manual
+            "[NP]" if row.get("nonprofit") else ("[FP]" if row.get("full_rate") else ""),
             "",  # Sent — manual
             row["contact"],
             row["email"],
@@ -648,15 +917,16 @@ def write_monthly_tab(service, rows_data, od_entries, year, month, total_toggl_h
     sheet_rows.append([
         "TOTALS",
         f"=SUM({_COL_B}{DATA_START_ROW}:{_COL_B}{last_data_r})",
-        f"=SUM(C{DATA_START_ROW}:C{last_data_r})",
+        f"=SUM({_COL_C}{DATA_START_ROW}:{_COL_C}{last_data_r})",
+        f"=SUM({_COL_D}{DATA_START_ROW}:{_COL_D}{last_data_r})",
         "",
         "",
-        f"=SUM({_COL_F}{DATA_START_ROW}:{_COL_F}{last_data_r})",
+        f"=SUM({_COL_G}{DATA_START_ROW}:{_COL_G}{last_data_r})",
         "",
-        f"=SUM(H{DATA_START_ROW}:H{last_data_r})",
+        f"=SUM(I{DATA_START_ROW}:I{last_data_r})",
         "",
-        f"=SUM({_COL_J}{DATA_START_ROW}:{_COL_J}{last_data_r})",
         f"=SUM({_COL_K}{DATA_START_ROW}:{_COL_K}{last_data_r})",
+        f"=SUM({_COL_L}{DATA_START_ROW}:{_COL_L}{last_data_r})",
     ])
 
     # 3 blank separator rows
@@ -884,7 +1154,9 @@ def write_monthly_tab(service, rows_data, od_entries, year, month, total_toggl_h
     # Update Home tab Build Revenue for this month — live formula so it reflects
     # manual Build Billed entries as they're filled in throughout the month.
     _month_col = "BCDEFGHIJKLM"[month - 1]
-    build_formula = f"=IFERROR(SUM('{tab_name}'!J{DATA_START_ROW}:J{last_data_r}),\"\")"
+    build_formula = (
+        f"=IFERROR(SUM('{tab_name}'!{_COL_K}{DATA_START_ROW}:{_COL_K}{last_data_r}),\"\")"
+    )
     service.spreadsheets().values().update(
         spreadsheetId=NEW_SHEET_ID,
         range=f"'Home'!{_month_col}14",
@@ -916,6 +1188,9 @@ def main():
     parser.add_argument("--month", type=str, default=None, help="YYYY-MM (default: last month)")
     parser.add_argument("--current", action="store_true", help="Use current calendar month")
     parser.add_argument("--write-sheet", action="store_true", help="Write to Google Sheets")
+    parser.add_argument("--allow-double-count", action="store_true",
+                        help="Write even when Toggl/OD overlap is unmeasured and uncached "
+                             "(bills double-logged hours twice — you almost never want this)")
     args = parser.parse_args()
 
     year, month = resolve_month(args)
@@ -925,7 +1200,7 @@ def main():
 
     print("\n[1/4] Toggl billable hours")
     token = get_toggl_token()
-    toggl_hours = get_toggl_monthly_hours(token, TOGGL_WORKSPACE, year, month)
+    toggl_hours, toggl_degraded = get_toggl_monthly_hours(token, TOGGL_WORKSPACE, year, month)
 
     print("\n[2/4] OpenDia timer hours")
     entries = load_month_entries(year, month)
@@ -935,6 +1210,33 @@ def main():
     od_hours = get_od_hours(entries)
     print(f"  {len(entries)} entries across {len(od_hours)} OD clients.")
 
+    print("\n[2.5/4] Overlap (work logged in BOTH Toggl and the OD timer)")
+    email_map = get_workspace_user_emails(token, TOGGL_WORKSPACE)
+    toggl_detail = get_toggl_detail_by_person_day(token, TOGGL_WORKSPACE, year, month)
+    od_detail, od_unattributed = get_od_detail_by_person_day(entries, email_map)
+
+    overlap_override = None
+    overlap_measured = toggl_detail is not None and bool(email_map)
+    if overlap_measured:
+        print(f"  {len(toggl_detail)} Toggl person-days vs {len(od_detail)} OD person-days.")
+        unattr_total = sum(od_unattributed.values())
+        if unattr_total > 0.01:
+            print(f"  !! {unattr_total:.2f}h of OD time has no started_by and cannot be "
+                  f"overlap-checked — the overlap figure is a floor, not a measurement.",
+                  file=sys.stderr)
+            for c, h in sorted(od_unattributed.items(), key=lambda kv: -kv[1])[:5]:
+                print(f"       {c}: {h:.2f}h", file=sys.stderr)
+    else:
+        cached = load_overlap_cache(year, month)
+        if cached:
+            overlap_override = cached
+            print(f"  Toggl detail unavailable (402) — using CACHED overlap for "
+                  f"{year:04d}-{month:02d} ({sum(cached.values()):.2f}h across "
+                  f"{len(cached)} clients).")
+        else:
+            print("  !! Overlap could not be measured and nothing is cached.",
+                  file=sys.stderr)
+
     print("\n[3/4] Clients config")
     service = get_sheets_service()
     clients_config = read_clients_tab(service)
@@ -943,14 +1245,50 @@ def main():
 
     print("\n[4/4] Merging")
     total_toggl_hrs = round(sum(toggl_hours.values()), 2)
-    rows_data, toggl_unmatched, od_unmatched = merge_billing_data(toggl_hours, od_hours, clients_config)
+    rows_data, toggl_unmatched, od_unmatched = merge_billing_data(
+        toggl_hours, od_hours, clients_config,
+        toggl_detail=toggl_detail, od_detail=od_detail,
+        overlap_override=overlap_override,
+    )
     print(f"  {len(rows_data)} billing rows assembled.")
+
+    if overlap_measured:
+        save_overlap_cache(year, month, {
+            r["name"]: r["overlap_hrs"] for r in rows_data if r.get("overlap_hrs")
+        })
 
     print_preview(rows_data, toggl_unmatched, od_unmatched, year, month)
 
     if not args.write_sheet:
         print("Run with --write-sheet to push to Google Sheets.")
         return
+
+    # Two ways a 402 can silently corrupt the tab, both of which look completely
+    # normal on the sheet:
+    #   1. Toggl hours fall back to per-token v9 — every user without a token on
+    #      file disappears, and the month simply looks like a slow month.
+    #   2. Overlap goes unmeasured — every hour logged in both systems bills twice.
+    # Refuse rather than produce either.
+    blockers = []
+    if toggl_degraded:
+        blockers.append(
+            "Toggl hours came from the per-token v9 fallback, so any user without a "
+            "token in ~/.toggl_tokens is MISSING from these numbers."
+        )
+    if not overlap_measured and overlap_override is None:
+        blockers.append(
+            "Overlap is unmeasured and uncached, so hours logged in both Toggl and "
+            "the OD timer would be billed twice."
+        )
+    if blockers:
+        print("\nREFUSING TO WRITE:", file=sys.stderr)
+        for b in blockers:
+            print(f"  - {b}", file=sys.stderr)
+        print("Wait for the Toggl Reports API to recover and re-run, or pass "
+              "--allow-double-count to override.", file=sys.stderr)
+        if not args.allow_double_count:
+            sys.exit(1)
+        print("  --allow-double-count set; writing degraded numbers anyway.", file=sys.stderr)
 
     print(f"Writing {year:04d}-{month:02d} tab to new sheet...")
     write_monthly_tab(service, rows_data, entries, year, month, total_toggl_hrs=total_toggl_hrs)

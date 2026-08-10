@@ -92,6 +92,12 @@ def load_company_index():
     return name_index, short_index, all_names
 
 
+def _flatten_client_key(s):
+    """Lowercase and collapse punctuation to single spaces, so slug-form client
+    names match their canonical company name."""
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
 def canonicalize_client(raw, name_index, short_index, all_names):
     """Map a raw client string to the canonical company name, or None on no match.
 
@@ -105,6 +111,18 @@ def canonicalize_client(raw, name_index, short_index, all_names):
         return name_index[key]
     if key in short_index:
         return short_index[key]
+
+    # Separator-insensitive exact match. A timer opened with a slug-form client
+    # ('acme-center-for-widgets') fails both the exact and substring tests against
+    # 'Acme Center for Widgets' because of the hyphens, and used to land as a
+    # second, duplicate company row.
+    flat = _flatten_client_key(raw)
+    if flat:
+        for index in (name_index, short_index):
+            for k, v in index.items():
+                if _flatten_client_key(k) == flat:
+                    return v
+
     matches = set()
     for db_name in all_names:
         db_lower = db_name.lower()
