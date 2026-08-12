@@ -29,14 +29,21 @@ export const DIVISION_LOGOS = {
 };
 
 // The subset that reads as a badge on a board card: horizontal wordmarks,
-// ~2.5:1 or wider. The square marks (FluxCC, AmPen, ADA Web Work) scale to a
-// ~16px blob at card size and say less than the text pill does, so those
-// divisions keep the pill — as do divisions with no artwork, like Admin.
-// Paths are reused from above, not duplicated.
+// ~2.5:1 or wider. Square marks scale to a ~16px blob at card size and say
+// less than the text pill does, so divisions without a horizontal keep the
+// pill — as do divisions with no artwork, like Admin.
+//
+// ampen-h is AmPen_Lite_Logo from ampen.us (835x293, self-contained navy
+// panel); ada-web-work-h is ADA-Web-Work-Logo-Horizontal from Drive
+// (1135x305). FluxCC has no horizontal ANYWHERE — flux.cc's own header
+// renders the 1981x1374 mark beside plain text, and Drive/templates carry
+// only that same file — so it keeps the pill until one is drawn.
 export const DIVISION_WORDMARKS = {
   WordFlux: DIVISION_LOGOS.WordFlux,
   WatchThreat: DIVISION_LOGOS.WatchThreat,
+  AmPen: "/divisions/ampen-h.png",
   "Bedford AI": DIVISION_LOGOS["Bedford AI"],
+  "ADA Web Work": "/divisions/ada-web-work-h.png",
   Linnflux: DIVISION_LOGOS.Linnflux,
 };
 
