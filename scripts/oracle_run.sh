@@ -115,7 +115,7 @@ reclaim_memory || log "memory reclaim step errored (non-fatal); continuing"
 set +e
 timeout 45m "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" \
     --dangerously-skip-permissions \
-    --model claude-opus-4-8 \
+    --model opus \
     --max-budget-usd 12 \
     --add-dir "$HOME/OpenDia" \
     >> "$LOG_FILE" 2>&1

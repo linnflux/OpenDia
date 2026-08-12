@@ -64,8 +64,12 @@ export function runSweep(projects) {
 
   return new Promise((resolvePromise, reject) => {
     const claudeBin = resolve(process.env.HOME, ".local", "bin", "claude");
+    // Pinned 2026-08-12: bypassPermissions means this never enters plan mode,
+    // so an unpinned run silently inherits whatever the user-level model key
+    // happens to be. Naming it makes the choice greppable and diffable.
     const proc = spawn(claudeBin, [
       "-p", buildPrompt(cards),
+      "--model", "sonnet",
       "--permission-mode", "bypassPermissions",
       "--output-format", "json",
     ], { cwd: resolve(process.env.HOME, "OpenDia") });

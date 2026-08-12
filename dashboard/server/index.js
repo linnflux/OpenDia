@@ -814,8 +814,11 @@ app.post("/api/newsletter/generate", requireAdmin, (req, res) => {
   const prompt = `Run /newsletter ${from} ${to}.\n\nThe user invoked this from the OpenDia dashboard and has already confirmed the date range — skip Step 2 (AskUserQuestion) and proceed directly to Step 3.${notesLine}`;
 
   const claudeBin = resolve(process.env.HOME, ".local", "bin", "claude");
+  // Pinned 2026-08-12: see the same note in sweep.js — bypassPermissions never
+  // reaches plan mode, so an unpinned run inherits the user-level model key.
   const proc = spawn(claudeBin, [
     "-p", prompt,
+    "--model", "sonnet",
     "--permission-mode", "bypassPermissions",
     "--output-format", "json",
   ], { cwd: resolve(process.env.HOME, "OpenDia") });
