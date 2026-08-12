@@ -281,25 +281,66 @@ function Composer({ session, gate }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState(null); // {ok, msg}
+  // {file, url} — a pasted or dropped image waiting to ride with the next
+  // send. Attach-then-send, never send-on-paste: a screenshot almost always
+  // wants a caption, and an attachment made while the gate is closed should
+  // wait patiently, not fail.
+  const [attachment, setAttachment] = useState(null);
   const blocked = !gate?.ok;
+
+  function attach(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    setAttachment((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return { file, url: URL.createObjectURL(file) };
+    });
+  }
+
+  function clearAttachment() {
+    setAttachment((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  function onPaste(e) {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+    if (!item) return; // plain text pastes stay ordinary
+    e.preventDefault();
+    attach(item.getAsFile());
+  }
 
   async function send() {
     const body = text.trim();
-    if (!body || sending) return;
+    if ((!body && !attachment) || sending) return;
     setSending(true);
     setFlash(null);
     try {
-      const r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: body }),
-      });
+      let r;
+      if (attachment) {
+        // Raw image body; the text rides along as the caption. Deliberately
+        // NOT multipart — the server sniffs magic bytes and never needs a
+        // filename or form fields.
+        const q = body ? `?caption=${encodeURIComponent(body)}` : "";
+        r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/image${q}`, {
+          method: "POST",
+          headers: { "Content-Type": attachment.file.type || "image/png" },
+          body: attachment.file,
+        });
+      } else {
+        r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: body }),
+        });
+      }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         setFlash({ ok: false, msg: GATE_REASONS[d?.gate?.reason] || d?.error || `HTTP ${r.status}` });
       } else {
         setText("");
-        setFlash({ ok: true, msg: "sent — the session has it" });
+        clearAttachment();
+        setFlash({ ok: true, msg: attachment ? "image sent — the session will Read it" : "sent — the session has it" });
         setTimeout(() => setFlash(null), 3000);
       }
     } catch (e) {
@@ -310,28 +351,45 @@ function Composer({ session, gate }) {
   }
 
   return (
-    <div className="runroom-composer">
-      <textarea
-        className="runroom-composer-input"
-        rows={2}
-        value={text}
-        disabled={blocked || sending}
-        placeholder={blocked
-          ? `sending paused — ${GATE_REASONS[gate?.reason] || gate?.reason || "unavailable"}`
-          : "message the session… (Enter to send, Shift+Enter for a new line)"}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-        }}
-      />
-      <div className="runroom-composer-side">
-        <button className="runroom-send-btn" onClick={send}
-                disabled={blocked || sending || !text.trim()}>
-          {sending ? "…" : "Send"}
-        </button>
-        {flash && (
-          <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>
-        )}
+    <div className="runroom-composer-wrap"
+         onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) e.preventDefault(); }}
+         onDrop={(e) => {
+           const f = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith("image/"));
+           if (f) { e.preventDefault(); attach(f); }
+         }}>
+      {attachment && (
+        <div className="runroom-attachment">
+          <img src={attachment.url} alt="pasted attachment" className="runroom-attachment-thumb" />
+          <span className="runroom-attachment-meta">
+            {Math.max(1, Math.round(attachment.file.size / 1024))} KB — sends with your message
+          </span>
+          <button className="runroom-attachment-remove" onClick={clearAttachment} title="Remove image">&times;</button>
+        </div>
+      )}
+      <div className="runroom-composer">
+        <textarea
+          className="runroom-composer-input"
+          rows={2}
+          value={text}
+          disabled={blocked || sending}
+          placeholder={blocked
+            ? `sending paused — ${GATE_REASONS[gate?.reason] || gate?.reason || "unavailable"}`
+            : "message the session… (Enter to send · paste or drop an image)"}
+          onChange={(e) => setText(e.target.value)}
+          onPaste={onPaste}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+          }}
+        />
+        <div className="runroom-composer-side">
+          <button className="runroom-send-btn" onClick={send}
+                  disabled={blocked || sending || (!text.trim() && !attachment)}>
+            {sending ? "…" : "Send"}
+          </button>
+          {flash && (
+            <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>
+          )}
+        </div>
       </div>
     </div>
   );

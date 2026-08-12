@@ -1,7 +1,8 @@
-import { readFileSync, readdirSync, existsSync, appendFileSync } from "fs";
+import { readFileSync, readdirSync, existsSync, appendFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
+import express from "express";
 import { terminalHolderFor } from "./terminal.js";
 
 // Runrooms — read-only API over ~/OpenDia/runrooms/<tmux-session>/plan.json.
@@ -271,6 +272,62 @@ export function registerRunroomRoutes(app) {
     const { status, body } = deliver(session, plan, text, req.user, action);
     res.status(status).json(body);
   });
+
+  // A pasted image. The session needs no special channel to receive one —
+  // it needs a file path and a nudge to Read it (the Read tool renders
+  // images). Raw body, not JSON: the global express.json 1MB limit would
+  // choke screenshots, but it only parses application/json, so image/*
+  // bypasses it entirely and lands in this route's own raw parser.
+  const IMAGE_MAGIC = [
+    { ext: "png",  test: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+    { ext: "jpg",  test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+    { ext: "gif",  test: (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38 },
+    { ext: "webp", test: (b) => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+                              && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 },
+  ];
+
+  app.post("/api/runrooms/:session/image",
+    express.raw({ type: "image/*", limit: "15mb" }),
+    (req, res) => {
+      const { session } = req.params;
+      if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
+      const plan = readPlan(session);
+      if (!plan) return res.status(404).json({ error: "no such runroom" });
+      if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+
+      const buf = req.body;
+      if (!Buffer.isBuffer(buf) || buf.length < 16) return res.status(400).json({ error: "no image body" });
+      // Sniff the magic bytes; the client's Content-Type and any filename are
+      // untrusted. The extension comes from what the bytes actually are.
+      const kind = IMAGE_MAGIC.find((m) => m.test(buf));
+      if (!kind) return res.status(400).json({ error: "not a recognized image (png/jpg/gif/webp)" });
+
+      // Fail fast while the gate is closed — the attachment stays pending in
+      // the client rather than orphaning a file here.
+      const pre = gateForSession(plan.tmux_session);
+      if (!pre.ok) return res.status(409).json({ error: "gate closed", gate: pre });
+
+      let caption = typeof req.query.caption === "string" ? req.query.caption : "";
+      caption = caption.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 1000);
+
+      const dir = resolve(RUNROOMS_DIR, session, "uploads");
+      mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+      const path = resolve(dir, `${stamp}.${kind.ext}`);
+      try {
+        writeFileSync(path, buf);
+      } catch (e) {
+        return res.status(500).json({ error: `save failed: ${e.message}` });
+      }
+
+      const name = firstNameOf(req.user);
+      const text = `[runroom] ${name} pasted an image${caption ? ` — "${caption}"` : ""}: ${path} (open it with Read)`;
+      const { status, body } = deliver(session, plan, text, req.user, "image");
+      // deliver() re-gates; if the screen changed between the pre-check and
+      // now, don't leave an orphan the session was never told about.
+      if (status !== 200) { try { unlinkSync(path); } catch {} }
+      res.status(status).json(status === 200 ? { sent: true, path } : body);
+    });
 
   // Answer the dialog the session is currently showing. The one write that is
   // ALLOWED while the gate is closed — it exists precisely because the gate

@@ -5844,3 +5844,23 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .runroom-dialog-util:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-hover); }
 .runroom-dialog-hint { font-size: 0.7rem; color: var(--text-faint); margin-left: auto; }
+
+/* Runroom attachment — a pasted/dropped image waiting to ride with the send. */
+.runroom-composer-wrap { max-width: 640px; }
+.runroom-composer-wrap .runroom-composer { max-width: none; }
+.runroom-attachment {
+  display: flex; align-items: center; gap: 0.7rem;
+  margin-top: 1.1rem; padding: 0.5rem 0.7rem;
+  background: var(--bg-surface); border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.runroom-attachment-thumb {
+  height: 44px; width: auto; max-width: 110px; object-fit: cover;
+  border-radius: var(--radius-xs); border: 1px solid var(--border);
+}
+.runroom-attachment-meta { font-size: 0.75rem; color: var(--text-secondary); flex: 1; }
+.runroom-attachment-remove {
+  background: transparent; border: none; color: var(--text-secondary);
+  font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0.2rem 0.4rem;
+}
+.runroom-attachment-remove:hover { color: var(--danger); }
