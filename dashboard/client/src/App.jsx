@@ -15,6 +15,7 @@ import Analytics from "./components/Analytics.jsx";
 import Billing from "./components/Billing.jsx";
 import Newsletter from "./components/Newsletter.jsx";
 import Rooms from "./components/Rooms.jsx";
+import Runroom from "./components/Runroom.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
 import { hasTag, toggleTag } from "./tags.js";
@@ -654,6 +655,8 @@ export default function App() {
             <Newsletter />
           ) : view === "rooms" && me?.is_admin ? (
             <Rooms />
+          ) : view === "runrooms" ? (
+            <Runroom activeTimerIds={activeTimerIds} />
           ) : (
             <Clients
               projects={projects}

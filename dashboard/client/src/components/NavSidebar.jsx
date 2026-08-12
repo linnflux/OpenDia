@@ -31,6 +31,13 @@ const NAV_ICONS = {
       <path d="M13 12c0-1.7-1.1-3.1-2.5-3.5" />
     </svg>
   ),
+  // A plan being walked: checklist lines with a position marker on the middle one.
+  runrooms: (
+    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5.5 3h7.5M5.5 7h7.5M5.5 11h7.5" opacity="0.55" />
+      <path d="M1 5.2l2.6 1.8L1 8.8z" fill="currentColor" stroke="none" />
+    </svg>
+  ),
   sweep: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
       <path d="M11 1L5.5 8.5M5.5 8.5L2 13.5h6L9 10M5.5 8.5L9 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

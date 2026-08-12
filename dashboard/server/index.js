@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { PORT, BILLING_MASTER_SHEET_ID, confValue } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { mountSpark } from "./spark.js";
+import { registerRunroomRoutes } from "./runrooms.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
 import { spawn, execFile } from "child_process";
@@ -1267,6 +1268,9 @@ mountTerminal(server, app);
 
 // Spark: per-card next-step runs, streamed over SSE (also before the catch-all)
 mountSpark(app);
+
+// Runrooms: read-only view over ~/OpenDia/runrooms/*/plan.json
+registerRunroomRoutes(app);
 
 // Serve static files in production
 const distPath = resolve(__dirname, "..", "client", "dist");

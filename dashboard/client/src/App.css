@@ -5587,3 +5587,143 @@ html.vt-no-target::view-transition-old(card-morph) {
   border-color: var(--accent);
 }
 .spark-note-input::placeholder { color: var(--text-faint); }
+
+/* ── Runrooms ──────────────────────────────────────────────────────────────
+   A plan walked step by step, bound to a live session. Read-only in build
+   step 2; the action row and text box arrive with steps 3-5. */
+
+.runroom-room { max-width: 980px; margin: 0 auto; padding: 0.5rem 1rem 2rem; }
+
+.runroom-back {
+  background: transparent; border: none; color: var(--text-secondary);
+  font-size: 0.8rem; cursor: pointer; padding: 0.25rem 0; font-family: inherit;
+}
+.runroom-back:hover { color: var(--text-primary); }
+
+.runroom-header { padding: 0.75rem 0 1rem; border-bottom: 1px solid var(--border); }
+.runroom-header-brand { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; }
+.runroom-division-mark { height: 22px; width: auto; border-radius: var(--radius-xs); }
+.runroom-division-pill {
+  padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);
+  font-size: 0.7rem; font-weight: 600;
+}
+.runroom-header-meta { color: var(--text-secondary); font-size: 0.8rem; }
+.runroom-title { margin: 0; font-size: 1.35rem; color: var(--text-heading); }
+.runroom-header-status {
+  display: flex; align-items: center; gap: 0.75rem; margin-top: 0.45rem;
+  font-size: 0.78rem; color: var(--text-secondary);
+}
+.runroom-badge {
+  padding: 0.12rem 0.55rem; border-radius: var(--radius-pill); font-weight: 600;
+  background: var(--badge-bg); color: var(--text-primary);
+}
+.runroom-badge.active { background: var(--accent); color: #fff; }
+.runroom-badge.completed { background: #22c55e; color: #fff; }
+.runroom-badge.abandoned { background: var(--danger); color: #fff; }
+.runroom-timer-dot { color: #22c55e; font-weight: 600; }
+
+.runroom-body { display: flex; gap: 1.25rem; margin-top: 1rem; align-items: flex-start; }
+
+.runroom-rail {
+  flex: 0 0 250px; display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-surface); padding: 0.4rem; position: sticky; top: 0.5rem;
+}
+.runroom-rail.collapsed { flex-basis: auto; }
+.runroom-rail-toggle {
+  background: transparent; border: none; color: var(--text-secondary);
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; cursor: pointer;
+  text-align: left; padding: 0.25rem 0.4rem; font-family: inherit;
+}
+.runroom-rail-step {
+  display: flex; align-items: flex-start; gap: 0.45rem; width: 100%;
+  padding: 0.4rem 0.45rem; background: transparent; border: none; cursor: pointer;
+  border-radius: var(--radius-xs); color: var(--text-secondary);
+  font-size: 0.78rem; font-family: inherit; text-align: left; line-height: 1.3;
+}
+.runroom-rail-step:hover { background: var(--bg-hover); }
+.runroom-rail-step.viewing { background: var(--badge-bg); color: var(--text-primary); }
+.runroom-rail-step.is-current .runroom-rail-title { font-weight: 600; color: var(--text-primary); }
+
+.runroom-glyph { width: 1em; display: inline-block; flex: 0 0 auto; font-weight: 700; }
+.runroom-glyph.done    { color: #22c55e; }
+.runroom-glyph.current { color: var(--accent); }
+.runroom-glyph.pending { color: var(--text-faint); }
+.runroom-glyph.failed  { color: var(--danger); }
+.runroom-glyph.skipped { color: var(--text-faint); }
+.runroom-glyph.changed { color: #f59e0b; }
+
+.runroom-main { flex: 1; min-width: 0; }
+.runroom-pane {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-card); padding: 1rem 1.25rem;
+}
+.runroom-pane-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+.runroom-step-title { margin: 0; font-size: 1.02rem; color: var(--text-heading); flex: 1; }
+.runroom-actor {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 0.12rem 0.5rem; border-radius: var(--radius-pill); background: var(--badge-bg);
+  color: var(--text-secondary); text-transform: uppercase; flex: 0 0 auto;
+}
+.runroom-actor.actor-opendia { color: var(--accent); }
+
+.runroom-step-detail { font-size: 0.88rem; line-height: 1.55; color: var(--text-primary); }
+.runroom-step-detail p { margin: 0.5rem 0; }
+.runroom-step-detail pre {
+  position: relative; background: var(--bg-recessed); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.7rem 0.85rem; overflow-x: auto;
+  font-family: var(--font-mono); font-size: 0.8rem;
+}
+.runroom-step-detail code { font-family: var(--font-mono); }
+.runroom-step-detail pre.runroom-danger { border-color: var(--danger); }
+.runroom-danger-note {
+  margin: 0.6rem 0 0.3rem; padding: 0.3rem 0.6rem; border-left: 3px solid var(--danger);
+  color: var(--danger); font-size: 0.8rem; background: var(--bg-recessed);
+}
+.runroom-danger-note p { margin: 0; }
+
+.runroom-copy-btn {
+  position: absolute; top: 0.4rem; right: 0.4rem;
+  background: var(--badge-bg); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius-xs);
+  font-size: 0.66rem; padding: 0.1rem 0.45rem; cursor: pointer; font-family: inherit;
+}
+.runroom-copy-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
+.runroom-copy-btn.copied { color: #22c55e; border-color: #22c55e; }
+
+.runroom-step-note {
+  margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px dashed var(--border);
+  font-size: 0.8rem; color: var(--text-notes);
+}
+.runroom-step-note-label {
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-faint); margin-right: 0.4rem;
+}
+
+.runroom-summary-list { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.runroom-summary-list li {
+  display: flex; gap: 0.5rem; align-items: baseline; padding: 0.3rem 0;
+  font-size: 0.85rem;
+}
+.runroom-summary-note { color: var(--text-notes); font-size: 0.78rem; }
+
+.runroom-list { max-width: 640px; margin: 1rem auto; display: flex; flex-direction: column; gap: 0.5rem; }
+.runroom-list-item {
+  display: flex; align-items: center; gap: 0.7rem; width: 100%;
+  padding: 0.7rem 0.9rem; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; font-family: inherit; text-align: left;
+}
+.runroom-list-item:hover { border-color: var(--border-hover); background: var(--bg-hover); }
+.runroom-list-title { color: var(--text-primary); font-size: 0.9rem; flex: 1; }
+.runroom-list-meta { color: var(--text-secondary); font-size: 0.75rem; flex: 0 0 auto; }
+
+.runroom-empty { text-align: center; color: var(--text-secondary); margin-top: 3rem; }
+.runroom-empty code { background: var(--badge-bg); padding: 0.1rem 0.35rem; border-radius: var(--radius-xs); }
+.runroom-error { color: var(--danger); margin: 2rem auto; text-align: center; }
+.runroom-pane-empty { color: var(--text-secondary); padding: 2rem; text-align: center; }
+
+@media (max-width: 720px) {
+  .runroom-body { flex-direction: column; }
+  .runroom-rail { position: static; flex-basis: auto; width: 100%; }
+}
