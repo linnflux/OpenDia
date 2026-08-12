@@ -83,7 +83,7 @@ function RoomHeader({ plan, hasActiveTimer }) {
   );
 }
 
-function StepPane({ step }) {
+function StepPane({ step, total }) {
   const paneRef = useRef(null);
   const html = useMemo(
     () => (step?.detail ? marked.parse(step.detail) : ""),
@@ -119,15 +119,20 @@ function StepPane({ step }) {
   }, [html]);
 
   if (!step) return <div className="runroom-pane-empty">No step selected.</div>;
+  // key={step.n} re-mounts the pane on step change so the enter animation
+  // plays — one gentle breath per step, not per poll.
   return (
-    <div className="runroom-pane">
-      <div className="runroom-pane-head">
-        <StateGlyph state={step.state} />
-        <h2 className="runroom-step-title">Step {step.n} &mdash; {step.title}</h2>
+    <div className="runroom-pane" key={step.n}>
+      <div className="runroom-overline">
+        <span className="runroom-overline-step">Step {step.n} of {total}</span>
         <span className={`runroom-actor actor-${step.actor}`}>
           {step.actor === "opendia" ? "OpenDia" : step.actor === "human" ? "hands-on" : "either"}
         </span>
       </div>
+      <div className="runroom-breath" aria-hidden="true">
+        <span style={{ width: `${Math.round(((step.n - 1) / Math.max(total, 1)) * 100)}%` }} />
+      </div>
+      <h2 className="runroom-step-title">{step.title}</h2>
       <div className="runroom-step-detail" ref={paneRef}
            dangerouslySetInnerHTML={{ __html: html }} />
       {step.note && (
@@ -402,7 +407,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
           ))}
         </aside>
         <main className="runroom-main">
-          {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} />}
+          {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} />}
           {/* Action buttons aim at the current step only — reading an earlier
               step must not offer buttons that would fire at a different one. */}
           {!finished && shown && shown.n === plan.current_step && (

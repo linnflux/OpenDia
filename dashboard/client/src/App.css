@@ -5655,23 +5655,56 @@ html.vt-no-target::view-transition-old(card-morph) {
 
 .runroom-main { flex: 1; min-width: 0; }
 .runroom-pane {
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg-card); padding: 1rem 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  padding: 2.4rem 2.6rem 2.2rem;
+  max-width: 640px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 16px 48px -24px rgba(0, 0, 0, 0.35);
+  animation: runroom-breathe-in 0.45s cubic-bezier(0.2, 0.6, 0.2, 1) both;
 }
-.runroom-pane-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
-.runroom-step-title { margin: 0; font-size: 1.02rem; color: var(--text-heading); flex: 1; }
+@keyframes runroom-breathe-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.runroom-overline {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.9rem;
+}
+.runroom-overline-step {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+/* A whisper of progress: how far the plan has come, without a chart. */
+.runroom-breath {
+  height: 2px; background: var(--border-subtle); border-radius: 999px;
+  overflow: hidden; margin-bottom: 1.7rem;
+}
+.runroom-breath span {
+  display: block; height: 100%; background: var(--accent); opacity: 0.55;
+  border-radius: 999px; transition: width 0.6s ease;
+}
+.runroom-step-title {
+  margin: 0 0 1.1rem; font-size: 1.65rem; line-height: 1.22;
+  letter-spacing: -0.015em; color: var(--text-heading); font-weight: 650;
+}
 .runroom-actor {
-  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
-  padding: 0.12rem 0.5rem; border-radius: var(--radius-pill); background: var(--badge-bg);
-  color: var(--text-secondary); text-transform: uppercase; flex: 0 0 auto;
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--text-faint); text-transform: uppercase; flex: 0 0 auto;
 }
-.runroom-actor.actor-opendia { color: var(--accent); }
+.runroom-actor.actor-opendia { color: var(--accent); opacity: 0.8; }
 
-.runroom-step-detail { font-size: 0.88rem; line-height: 1.55; color: var(--text-primary); }
-.runroom-step-detail p { margin: 0.5rem 0; }
+/* The step pane is read at arm's length while doing something else — larger
+   type than the app's default, and the skill keeps the words few. Links pick
+   up the theme accent like the card modal does; browser-default blue is
+   unreadable on the dark card background. */
+.runroom-step-detail { font-size: 1.05rem; line-height: 1.65; color: var(--text-primary); }
+.runroom-step-detail p { margin: 0.6rem 0; }
+.runroom-step-detail a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.runroom-step-detail a:hover { color: var(--accent-hover); }
 .runroom-step-detail pre {
   position: relative; background: var(--bg-recessed); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 0.7rem 0.85rem; overflow-x: auto;
+  border-radius: var(--radius-sm); padding: 0.9rem 1.1rem; overflow-x: auto;
   font-family: var(--font-mono); font-size: 0.8rem;
 }
 .runroom-step-detail code { font-family: var(--font-mono); }
@@ -5692,8 +5725,9 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-copy-btn.copied { color: #22c55e; border-color: #22c55e; }
 
 .runroom-step-note {
-  margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px dashed var(--border);
-  font-size: 0.8rem; color: var(--text-notes);
+  margin-top: 1.3rem; padding: 0.7rem 0.9rem;
+  background: var(--bg-recessed); border-radius: var(--radius-sm);
+  font-size: 0.82rem; line-height: 1.5; color: var(--text-notes);
 }
 .runroom-step-note-label {
   font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
@@ -5729,11 +5763,11 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 
 /* Runroom composer — the room's line to the live session (build step 3). */
-.runroom-composer { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: flex-start; }
+.runroom-composer { display: flex; gap: 0.6rem; margin-top: 1.1rem; align-items: flex-start; max-width: 640px; }
 .runroom-composer-input {
   flex: 1; resize: vertical; min-height: 2.6rem;
   background: var(--bg-input); color: var(--text-primary);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-xl);
   padding: 0.55rem 0.7rem; font-family: inherit; font-size: 0.85rem; line-height: 1.4;
 }
 .runroom-composer-input:focus { outline: none; border-color: var(--accent); }
@@ -5741,7 +5775,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-composer-side { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
 .runroom-send-btn {
   background: var(--accent); color: #fff; border: none;
-  border-radius: var(--radius-sm); padding: 0.5rem 1rem;
+  border-radius: var(--radius-pill); padding: 0.55rem 1.25rem;
   font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit;
 }
 .runroom-send-btn:hover:not(:disabled) { background: var(--accent-hover); }
@@ -5751,14 +5785,18 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-send-flash.err { color: var(--danger); }
 
 /* Runroom action row — actor-named buttons for the current step (step 4). */
-.runroom-actions { display: flex; gap: 0.6rem; align-items: center; margin-top: 0.9rem; flex-wrap: wrap; }
+.runroom-actions { display: flex; gap: 0.7rem; align-items: center; margin-top: 1.3rem; flex-wrap: wrap; }
 .runroom-act {
   background: var(--bg-surface); color: var(--text-primary);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 0.5rem 0.95rem; font-size: 0.82rem; font-weight: 600;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  padding: 0.62rem 1.4rem; font-size: 0.86rem; font-weight: 600;
   cursor: pointer; font-family: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-.runroom-act:hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-hover); }
+.runroom-act:hover:not(:disabled) {
+  border-color: var(--border-hover); background: var(--bg-hover);
+  transform: translateY(-1px); box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.4);
+}
 .runroom-act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .runroom-act.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .runroom-act.danger { color: var(--danger); border-color: var(--danger); }
@@ -5766,8 +5804,11 @@ html.vt-no-target::view-transition-old(card-morph) {
 
 /* Runroom dialog card — the session's live dialog as buttons (step 5). */
 .runroom-dialog {
-  margin-top: 0.9rem; border: 1px solid var(--accent);
-  border-radius: var(--radius-sm); background: var(--bg-card); padding: 0.85rem 1rem;
+  margin-top: 1.1rem; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl); background: var(--bg-card); padding: 1.5rem 1.8rem;
+  max-width: 640px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+              0 16px 48px -24px rgba(0, 0, 0, 0.35);
 }
 .runroom-dialog-label {
   font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em;
@@ -5775,7 +5816,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .runroom-dialog-context {
   background: var(--bg-recessed); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 0.6rem 0.75rem; margin: 0 0 0.7rem;
+  border-radius: var(--radius-sm); padding: 0.8rem 1rem; margin: 0 0 0.8rem;
   font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.45;
   white-space: pre-wrap; overflow-x: auto; color: var(--text-primary);
 }

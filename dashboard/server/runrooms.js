@@ -177,7 +177,7 @@ const ACTIONS = {
   opendia_do: (n, t, name) =>
     `[runroom] Step ${n} ("${t}"): do it yourself now, OpenDia. If the step's actor is "either", set it to "opendia" in plan.json first. Keep plan.json current as you work — file before prose.`,
   human_do: (n, t, name) =>
-    `[runroom] Step ${n} ("${t}"): ${name} will do this by hand. Set the step's actor to "human" in plan.json and rewrite its detail as a concise walk-through — copyable commands in fenced code blocks, destructive ones behind a "> ⚠" line, never a secret — then wait for the runroom to report back.`,
+    `[runroom] Step ${n} ("${t}"): ${name} will do this by hand. Set the step's actor to "human" in plan.json and rewrite its detail as a walk-through — SHORT, the pane renders large type: a sentence or two per instruction, copyable commands in fenced code blocks, destructive ones behind a "> ⚠" line, never a secret — then wait for the runroom to report back.`,
   human_done: (n, t, name) =>
     `[runroom] Step ${n} ("${t}"): ${name} reports it finished. If a cheap check exists (file exists, DNS resolves, HTTP 200), run it before believing it. Then update plan.json: state "done" — or "failed" with the evidence in the step's note — advance current_step, and prepare the next step's detail.`,
   human_failed: (n, t, name) =>
