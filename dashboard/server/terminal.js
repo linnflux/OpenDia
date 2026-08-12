@@ -184,6 +184,18 @@ function pollForStateFileDeletion(stateFile, timeoutMs = 90_000) {
   });
 }
 
+// Is anyone holding take-control on this tmux session right now? Runrooms ask
+// before sending keystrokes: two writers into one input box is the data-loss
+// seam, and the holder was here first.
+export function terminalHolderFor(tmuxSession) {
+  for (const state of sessions.values()) {
+    if (state.session === tmuxSession && state.holder) {
+      return { takenAt: state.holder.takenAt, lastInputAt: state.holder.lastInputAt };
+    }
+  }
+  return null;
+}
+
 // ── mountTerminal export ───────────────────────────────────────────────────
 
 export function mountTerminal(server, app) {

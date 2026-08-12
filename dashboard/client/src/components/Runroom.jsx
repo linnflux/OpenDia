@@ -139,6 +139,78 @@ function StepPane({ step }) {
   );
 }
 
+// The chat half of the room: free text straight into the bound session's
+// input box. The server refuses while a dialog is up (modal gate) or while
+// someone holds take-control in the Terminal tab; the composer mirrors that
+// state from the gate the detail poll already carries, so it disables itself
+// before a send would bounce.
+const GATE_REASONS = {
+  "dialog-open": "a dialog is open in the session — answer it in the terminal first",
+  "no-input-box": "the session's input box is busy (a draft may be sitting in it)",
+  "terminal-held": "someone has take-control in the Terminal tab",
+  "session-gone": "the tmux session is gone",
+};
+
+function Composer({ session, gate }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [flash, setFlash] = useState(null); // {ok, msg}
+  const blocked = !gate?.ok;
+
+  async function send() {
+    const body = text.trim();
+    if (!body || sending) return;
+    setSending(true);
+    setFlash(null);
+    try {
+      const r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setFlash({ ok: false, msg: GATE_REASONS[d?.gate?.reason] || d?.error || `HTTP ${r.status}` });
+      } else {
+        setText("");
+        setFlash({ ok: true, msg: "sent — the session has it" });
+        setTimeout(() => setFlash(null), 3000);
+      }
+    } catch (e) {
+      setFlash({ ok: false, msg: e.message });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="runroom-composer">
+      <textarea
+        className="runroom-composer-input"
+        rows={2}
+        value={text}
+        disabled={blocked || sending}
+        placeholder={blocked
+          ? `sending paused — ${GATE_REASONS[gate?.reason] || gate?.reason || "unavailable"}`
+          : "message the session… (Enter to send, Shift+Enter for a new line)"}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+        }}
+      />
+      <div className="runroom-composer-side">
+        <button className="runroom-send-btn" onClick={send}
+                disabled={blocked || sending || !text.trim()}>
+          {sending ? "…" : "Send"}
+        </button>
+        {flash && (
+          <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CompletedSummary({ plan }) {
   return (
     <div className="runroom-pane runroom-summary">
@@ -210,6 +282,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack }) {
         </aside>
         <main className="runroom-main">
           {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} />}
+          {!finished && <Composer session={session} gate={plan.gate} />}
         </main>
       </div>
     </div>

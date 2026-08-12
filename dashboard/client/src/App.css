@@ -5727,3 +5727,25 @@ html.vt-no-target::view-transition-old(card-morph) {
   .runroom-body { flex-direction: column; }
   .runroom-rail { position: static; flex-basis: auto; width: 100%; }
 }
+
+/* Runroom composer — the room's line to the live session (build step 3). */
+.runroom-composer { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: flex-start; }
+.runroom-composer-input {
+  flex: 1; resize: vertical; min-height: 2.6rem;
+  background: var(--bg-input); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem; font-family: inherit; font-size: 0.85rem; line-height: 1.4;
+}
+.runroom-composer-input:focus { outline: none; border-color: var(--accent); }
+.runroom-composer-input:disabled { opacity: 0.6; cursor: not-allowed; }
+.runroom-composer-side { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
+.runroom-send-btn {
+  background: var(--accent); color: #fff; border: none;
+  border-radius: var(--radius-sm); padding: 0.5rem 1rem;
+  font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.runroom-send-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.runroom-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.runroom-send-flash { font-size: 0.72rem; max-width: 180px; text-align: right; }
+.runroom-send-flash.ok { color: #22c55e; }
+.runroom-send-flash.err { color: var(--danger); }
