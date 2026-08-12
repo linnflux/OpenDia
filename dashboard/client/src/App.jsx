@@ -37,6 +37,11 @@ function getInitialCollapsed() {
   return localStorage.getItem("opendia.sidebarCollapsed") === "1";
 }
 
+function getInitialSort() {
+  const saved = localStorage.getItem("opendia.sort");
+  return saved === "next_step" ? saved : "manual";
+}
+
 export default function App() {
   const { grouped, projects, loading, moveProject, updateProject, reorderProjects, refresh } = useProjects();
   const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
@@ -58,6 +63,10 @@ export default function App() {
   const [taraOnly, setTaraOnly] = useState(false);
   const [filter, setFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  // Sort is a display lens, orthogonal to `filter` (which is scope). It never
+  // writes sort_order, so switching back to "manual" restores the hand-dragged
+  // arrangement exactly as it was.
+  const [sort, setSort] = useState(getInitialSort);
   const [inboxFilter, setInboxFilter] = useState("active");
   const [inboxFilterOpen, setInboxFilterOpen] = useState(false);
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
@@ -74,6 +83,10 @@ export default function App() {
   useEffect(() => {
     fetch("/api/themes").then((r) => r.ok ? r.json() : []).then(setThemes).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("opendia.sort", sort);
+  }, [sort]);
 
   useEffect(() => {
     localStorage.setItem("opendia-theme", theme);
@@ -209,6 +222,40 @@ export default function App() {
     const active = list.filter((p) => activeTimerIds.has(p.id));
     if (active.length === 0 || active.length === list.length) return list;
     return [...active, ...list.filter((p) => !activeTimerIds.has(p.id))];
+  }
+
+  /**
+   * Order a column by next_step, oldest first, so overdue work rises to the top.
+   *
+   * A plain string compare is the whole sort. next_step follows the calendar
+   * contract "YYYY-MM-DD: action" and ISO dates sort lexically, so dated cards
+   * land in chronological order; undated steps begin with a letter and fall
+   * after every date on their own, because digits sort before letters in
+   * ASCII. Checked against the live board: all 87 dated steps start with "2",
+   * all 57 undated ones start with A-W, and none leads with punctuation or
+   * whitespace (either would sort ABOVE the dates and want handling here).
+   *
+   * Cards with no next_step at all are the one case the string compare gets
+   * backwards — "" sorts before everything — so they are pushed to the end
+   * explicitly rather than burying the overdue cards under 20 blanks.
+   *
+   * Sort is stable, so cards sharing a next_step keep their dragged order.
+   */
+  function sortByNextStep(list) {
+    return [...list].sort((a, b) => {
+      const A = (a.next_step || "").trim();
+      const B = (b.next_step || "").trim();
+      if (!A !== !B) return A ? -1 : 1;
+      if (A === B) return 0;
+      return A < B ? -1 : 1;
+    });
+  }
+
+  // Sort first, then pin: pinActive preserves relative order inside each
+  // partition, so timer-active cards stay on top AND are themselves ordered by
+  // next step, with the idle cards ordered the same way beneath them.
+  function displayOrder(list) {
+    return pinActive(sort === "next_step" ? sortByNextStep(list) : list);
   }
 
   // Global Cmd+K / Ctrl+K shortcut
@@ -452,9 +499,14 @@ export default function App() {
             <div className="filter-dropdown-wrap">
               {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
               <button
-                className={`filter-dropdown-btn${filter !== "all" ? " active" : ""}`}
+                className={`filter-dropdown-btn${filter !== "all" || sort !== "manual" ? " active" : ""}`}
                 onClick={() => setFilterOpen((v) => !v)}
+                title={sort === "next_step" ? "Sorted by next step date" : undefined}
               >
+                {/* The label stays the scope. An active sort shows as a caret
+                    rather than lengthening the label into "All - by next
+                    step date", which would not fit the button. */}
+                {sort === "next_step" && <span className="filter-sort-mark">↓</span>}
                 {filter === "all" ? "All" : (
                   <>
                     {DIVISION_COLORS[filter] && (
@@ -496,6 +548,23 @@ export default function App() {
                       </button>
                     );
                   })}
+                  {/* Sort is a separate axis from scope, so it gets its own
+                      group rather than becoming "All - by next step date" and
+                      needing a twin for every division above. */}
+                  <div className="filter-divider" />
+                  <div className="filter-group-label">Sort</div>
+                  {[
+                    { key: "manual", label: "Manual" },
+                    { key: "next_step", label: "Next step" },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key}
+                      className={`filter-option${sort === key ? " active" : ""}`}
+                      onClick={() => { setSort(key); setFilterOpen(false); }}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -546,12 +615,16 @@ export default function App() {
                   onChange={handleActiveStatusChange}
                 />
                 <StatusGrid
-                  projects={pinActive(filtered[activeStatus] || [])}
+                  projects={displayOrder(filtered[activeStatus] || [])}
                   onCardClick={handleCardClick}
                   activeTimerIds={activeTimerIds}
                   onStatusChange={handleStatusChange}
                   onToggleTag={handleToggleTag}
                   onReorder={handleReorder}
+                  // Dragging is only meaningful against the persisted order.
+                  // Under a sort the drop could not be saved, so the handle is
+                  // disabled rather than letting a drag silently snap back.
+                  reorderable={sort === "manual"}
                 />
               </>
             )

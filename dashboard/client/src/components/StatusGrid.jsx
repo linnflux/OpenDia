@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import Card from "./Card.jsx";
 
-export default function StatusGrid({ projects, onCardClick, activeTimerIds, onStatusChange, onToggleTag, onReorder }) {
+export default function StatusGrid({ projects, onCardClick, activeTimerIds, onStatusChange, onToggleTag, onReorder, reorderable = true }) {
   const [activeId, setActiveId] = useState(null);
 
   const sensors = useSensors(
@@ -40,6 +40,9 @@ export default function StatusGrid({ projects, onCardClick, activeTimerIds, onSt
 
   function handleDragEnd({ active, over }) {
     setActiveId(null);
+    // Belt and braces: the cards are already non-draggable when a sort is
+    // active, but a drop must never write an order the user cannot see.
+    if (!reorderable) return;
     if (!over || active.id === over.id) return;
     const from = ids.indexOf(active.id);
     const to = ids.indexOf(over.id);
@@ -65,7 +68,7 @@ export default function StatusGrid({ projects, onCardClick, activeTimerIds, onSt
               hasActiveTimer={activeTimerIds?.has(p.id)}
               onStatusChange={onStatusChange}
               onToggleTag={onToggleTag}
-              sortable
+              sortable={reorderable}
             />
           ))}
         </div>
