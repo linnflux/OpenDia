@@ -5864,3 +5864,23 @@ html.vt-no-target::view-transition-old(card-morph) {
   font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0.2rem 0.4rem;
 }
 .runroom-attachment-remove:hover { color: var(--danger); }
+
+/* Runroom thinking strip — the session's own spinner verb, mirrored. */
+.runroom-thinking {
+  display: flex; align-items: baseline; gap: 0.15rem;
+  max-width: 640px; margin-top: 1rem; padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-pill); background: var(--bg-recessed);
+  font-size: 0.82rem; color: var(--text-secondary); width: fit-content;
+}
+.runroom-thinking-verb { font-weight: 600; color: var(--text-primary); }
+.runroom-thinking-dots i {
+  font-style: normal; font-weight: 700; color: var(--accent);
+  animation: runroom-dot 1.2s infinite;
+}
+.runroom-thinking-dots i:nth-child(2) { animation-delay: 0.2s; }
+.runroom-thinking-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes runroom-dot {
+  0%, 60%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
+}
+.runroom-thinking-meta { margin-left: 0.6rem; font-size: 0.72rem; color: var(--text-faint); }

@@ -103,8 +103,18 @@ function parseDialog(lines) {
   return { context, options, hint, fingerprint };
 }
 
-function classifyPane(pane) {
-  const lines = pane.split("\n");
+// SGR helpers for the suggestion problem: Claude Code ghosts a SUGGESTED
+// prompt into the idle input box as dim text ("\x1b[2m…"). A colorless
+// capture cannot tell it from a typed draft — measured live, the suggestion
+// is dim-wrapped and typed text is not. So the gate captures WITH escapes,
+// judges the input line after deleting dim spans, and hands everything else
+// a plain-stripped copy.
+const SGR_RE = /\x1b\[[0-9;]*m/g;
+const DIM_SPAN_RE = /\x1b\[2m[^\x1b]*(?:\x1b\[(?:0|22)m)?/g;
+
+function classifyPane(escPane) {
+  const escLines = escPane.split("\n");
+  const lines = escLines.map((l) => l.replace(SGR_RE, ""));
   if (lines.slice(-40).some((l) => OPTION_CURSOR_RE.test(l))) {
     return { ok: false, reason: "dialog-open", dialog: parseDialog(lines) };
   }
@@ -117,26 +127,51 @@ function classifyPane(pane) {
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].startsWith("❯")) continue;
     if (!RULE_RE.test(nonBlank(i, -1)) || !RULE_RE.test(nonBlank(i, +1))) continue;
-    const content = lines[i].slice(1).trim();
+    // Emptiness is judged with dim spans DELETED: a ghosted suggestion is
+    // not a draft. Whatever survives dim-stripping was really typed.
+    const typed = escLines[i].replace(DIM_SPAN_RE, "").replace(SGR_RE, "");
+    const content = typed.replace(/^[^❯]*❯/, "").trim();
     if (content === "" || content.startsWith('Try "')) return { ok: true };
     return { ok: false, reason: "no-input-box", detail: "draft in input box" };
   }
   return { ok: false, reason: "no-input-box" };
 }
 
+// Is the session mid-turn, and on what? The TUI's own spinner line says:
+// "✢ Caramelizing… (45s · ↓ 1.2k tokens)" — animated glyph, a verb ending in
+// a real ellipsis, then timing meta. Lifting the session's actual verb beats
+// inventing a generic "thinking" — the page shows what the terminal shows.
+// Fallback: the status line carries "esc to interrupt" whenever a turn is
+// running, even if the spinner line scrolled or changed shape.
+const SPINNER_RE = /^\s*\S{1,2}\s+([A-Z][^(…]{0,40}…)\s*(?:\(([^)]*)\))?/;
+
+function detectWorking(lines) {
+  const tail = lines.slice(-15);
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const m = tail[i].match(SPINNER_RE);
+    if (m) return { verb: m[1], meta: m[2] || "" };
+  }
+  if (tail.some((l) => l.includes("esc to interrupt"))) return { verb: "Working\u2026", meta: "" };
+  return null;
+}
+
 function gateForSession(tmuxSession) {
   let pane;
   try {
-    pane = execFileSync("tmux", ["capture-pane", "-t", tmuxSession, "-p"],
+    // -e keeps SGR escapes: classifyPane needs them to tell a dim ghost
+    // suggestion from typed text in the input box.
+    pane = execFileSync("tmux", ["capture-pane", "-t", tmuxSession, "-p", "-e"],
                         { encoding: "utf8", timeout: 3000 });
   } catch {
     return { ok: false, reason: "session-gone" };
   }
+  const plainLines = pane.replace(SGR_RE, "").split("\n");
+  const working = detectWorking(plainLines);
   const verdict = classifyPane(pane);
-  if (!verdict.ok) return verdict;
+  if (!verdict.ok) return { ...verdict, working };
   const holder = terminalHolderFor(tmuxSession);
-  if (holder) return { ok: false, reason: "terminal-held", holder };
-  return { ok: true };
+  if (holder) return { ok: false, reason: "terminal-held", holder, working };
+  return { ok: true, working };
 }
 
 const MAX_SEND_CHARS = 4000;

@@ -144,6 +144,21 @@ function StepPane({ step, total }) {
   );
 }
 
+// The session's own spinner, mirrored: verb + timing meta lifted straight
+// off the terminal by the gate, with Spark-style animated ellipses. Appears
+// within one poll (~2.5s) of the session starting a turn — this is the
+// "did my send do anything?" answer.
+function ThinkingStrip({ working }) {
+  if (!working) return null;
+  return (
+    <div className="runroom-thinking">
+      <span className="runroom-thinking-verb">{(working.verb || "Working…").replace(/…$/, "")}</span>
+      <span className="runroom-thinking-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
+      {working.meta && <span className="runroom-thinking-meta">{working.meta}</span>}
+    </div>
+  );
+}
+
 // The chat half of the room: free text straight into the bound session's
 // input box. The server refuses while a dialog is up (modal gate) or while
 // someone holds take-control in the Terminal tab; the composer mirrors that
@@ -474,6 +489,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
           {!finished && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
             <DialogCard session={session} dialog={plan.gate.dialog} />
           )}
+          {!finished && <ThinkingStrip working={plan.gate?.working} />}
           {!finished && <Composer session={session} gate={plan.gate} />}
         </main>
       </div>
