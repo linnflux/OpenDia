@@ -5749,3 +5749,17 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-send-flash { font-size: 0.72rem; max-width: 180px; text-align: right; }
 .runroom-send-flash.ok { color: #22c55e; }
 .runroom-send-flash.err { color: var(--danger); }
+
+/* Runroom action row — actor-named buttons for the current step (step 4). */
+.runroom-actions { display: flex; gap: 0.6rem; align-items: center; margin-top: 0.9rem; flex-wrap: wrap; }
+.runroom-act {
+  background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.5rem 0.95rem; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.runroom-act:hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-hover); }
+.runroom-act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.runroom-act.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.runroom-act.danger { color: var(--danger); border-color: var(--danger); }
+.runroom-act:disabled { opacity: 0.45; cursor: not-allowed; }

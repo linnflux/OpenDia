@@ -151,6 +151,70 @@ const GATE_REASONS = {
   "session-gone": "the tmux session is gone",
 };
 
+// Mirror of the server's firstNameOf: actor labels never use pronouns, and
+// the loopback identity has no human name.
+function firstNameOf(me) {
+  if (!me || me.source === "loopback") return "Human";
+  const name = (me.name || "").trim();
+  if (name) return name.split(/\s+/)[0];
+  return (me.login || "").split("@")[0] || "Human";
+}
+
+// Actor buttons for the CURRENT step. Every button names its actor, and its
+// visible effect arrives through plan.json on the next poll — the session
+// flips the step's actor/state per the canned instruction, not the client.
+function ActionRow({ session, step, gate, me }) {
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const name = firstNameOf(me);
+  const blocked = !gate?.ok;
+
+  async function act(action) {
+    if (busy) return;
+    setBusy(true); setFlash(null);
+    try {
+      const r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, step: step.n }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setFlash({ ok: false, msg: GATE_REASONS[d?.gate?.reason] || d?.error || `HTTP ${r.status}` });
+      else { setFlash({ ok: true, msg: "sent — the session has it" }); setTimeout(() => setFlash(null), 3000); }
+    } catch (e) {
+      setFlash({ ok: false, msg: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const disabled = blocked || busy;
+  const buttons =
+    step.actor === "either" ? (
+      <>
+        <button className="runroom-act primary" disabled={disabled} onClick={() => act("opendia_do")}>OpenDia does it</button>
+        <button className="runroom-act" disabled={disabled} onClick={() => act("human_do")}>{name} does it</button>
+      </>
+    ) : step.actor === "human" ? (
+      <>
+        <button className="runroom-act primary" disabled={disabled} onClick={() => act("human_done")}>{name} finished</button>
+        <button className="runroom-act danger" disabled={disabled} onClick={() => act("human_failed")}>It failed</button>
+      </>
+    ) : (
+      <>
+        <button className="runroom-act primary" disabled={disabled} onClick={() => act("opendia_do")}>OpenDia does it</button>
+        <button className="runroom-act" disabled={disabled} onClick={() => act("human_done")}>{name} finished</button>
+      </>
+    );
+
+  return (
+    <div className="runroom-actions">
+      {buttons}
+      {flash && <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>}
+    </div>
+  );
+}
+
 function Composer({ session, gate }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -229,7 +293,7 @@ function CompletedSummary({ plan }) {
   );
 }
 
-function RoomView({ session, activeTimerIds, onBack, showBack }) {
+function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState(null);
   const [railOpen, setRailOpen] = useState(true);
@@ -282,6 +346,11 @@ function RoomView({ session, activeTimerIds, onBack, showBack }) {
         </aside>
         <main className="runroom-main">
           {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} />}
+          {/* Action buttons aim at the current step only — reading an earlier
+              step must not offer buttons that would fire at a different one. */}
+          {!finished && shown && shown.n === plan.current_step && (
+            <ActionRow session={session} step={shown} gate={plan.gate} me={me} />
+          )}
           {!finished && <Composer session={session} gate={plan.gate} />}
         </main>
       </div>
@@ -289,7 +358,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack }) {
   );
 }
 
-export default function Runroom({ activeTimerIds }) {
+export default function Runroom({ activeTimerIds, me }) {
   const [rooms, setRooms] = useState(null); // null = loading
   const [selected, setSelected] = useState(null);
   const [autoOpened, setAutoOpened] = useState(false);
@@ -320,6 +389,7 @@ export default function Runroom({ activeTimerIds }) {
       <RoomView
         session={selected}
         activeTimerIds={activeTimerIds}
+        me={me}
         onBack={() => { setSelected(null); setAutoOpened(true); }}
         showBack={(rooms || []).length > 1}
       />

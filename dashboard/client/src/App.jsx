@@ -656,7 +656,7 @@ export default function App() {
           ) : view === "rooms" && me?.is_admin ? (
             <Rooms />
           ) : view === "runrooms" ? (
-            <Runroom activeTimerIds={activeTimerIds} />
+            <Runroom activeTimerIds={activeTimerIds} me={me} />
           ) : (
             <Clients
               projects={projects}

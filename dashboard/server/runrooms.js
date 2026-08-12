@@ -102,6 +102,50 @@ function gateForSession(tmuxSession) {
 
 const MAX_SEND_CHARS = 4000;
 
+// Gate + type + submit + audit, shared by the free-text composer and the
+// action buttons. Returns an {status, body} the caller forwards.
+function deliver(session, plan, text, user, tag) {
+  const gate = gateForSession(plan.tmux_session);
+  if (!gate.ok) return { status: 409, body: { error: "gate closed", gate } };
+  try {
+    execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, "-l", text], { timeout: 3000 });
+    execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, "Enter"], { timeout: 3000 });
+  } catch (e) {
+    return { status: 502, body: { error: `send failed: ${e.message}` } };
+  }
+  try {
+    appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
+      `${new Date().toISOString()} ${user?.login || "?"}${tag ? ` [${tag}]` : ""}: ${text.replace(/\n/g, "\\n")}\n`);
+  } catch {}
+  return { status: 200, body: { sent: true } };
+}
+
+// The operator's first name, for actor-labeled buttons and canned messages.
+// No pronouns anywhere; loopback has no human name, so it gets "Human".
+function firstNameOf(user) {
+  if (!user || user.source === "loopback") return "Human";
+  const name = (user.name || "").trim();
+  if (name) return name.split(/\s+/)[0];
+  return (user.login || "").split("@")[0] || "Human";
+}
+
+// The action protocol. Canned messages live HERE, not in the client, so the
+// contract between button and session has exactly one author. Every message
+// leads with [runroom] so the session knows the operator is speaking through
+// the room, and every one restates the contract obligation it triggers —
+// the UI's response to a click comes back through plan.json, not through an
+// API side effect.
+const ACTIONS = {
+  opendia_do: (n, t, name) =>
+    `[runroom] Step ${n} ("${t}"): do it yourself now, OpenDia. If the step's actor is "either", set it to "opendia" in plan.json first. Keep plan.json current as you work — file before prose.`,
+  human_do: (n, t, name) =>
+    `[runroom] Step ${n} ("${t}"): ${name} will do this by hand. Set the step's actor to "human" in plan.json and rewrite its detail as a concise walk-through — copyable commands in fenced code blocks, destructive ones behind a "> ⚠" line, never a secret — then wait for the runroom to report back.`,
+  human_done: (n, t, name) =>
+    `[runroom] Step ${n} ("${t}"): ${name} reports it finished. If a cheap check exists (file exists, DNS resolves, HTTP 200), run it before believing it. Then update plan.json: state "done" — or "failed" with the evidence in the step's note — advance current_step, and prepare the next step's detail.`,
+  human_failed: (n, t, name) =>
+    `[runroom] Step ${n} ("${t}"): ${name} reports it FAILED. Set state "failed" and record what is known in the step's note. Ask for or gather the error, then write next-move guidance into the step's detail — and if the plan needs restructuring, follow the contract's drift rule.`,
+};
+
 export function registerRunroomRoutes(app) {
   app.get("/api/runrooms", (_req, res) => {
     let sessions = [];
@@ -160,24 +204,33 @@ export function registerRunroomRoutes(app) {
     if (!text) return res.status(400).json({ error: "empty message" });
     if (text.length > MAX_SEND_CHARS) return res.status(400).json({ error: `over ${MAX_SEND_CHARS} chars` });
 
-    // Gate at send time, not just at poll time — the screen may have changed
-    // in the seconds since the composer last looked.
-    const gate = gateForSession(plan.tmux_session);
-    if (!gate.ok) return res.status(409).json({ error: "gate closed", gate });
+    // Gate is re-checked inside deliver() at send time, not just at poll
+    // time — the screen may have changed in the seconds since the composer
+    // last looked. (-l literal, args array, no shell.)
+    const { status, body } = deliver(session, plan, text, req.user, null);
+    res.status(status).json(body);
+  });
 
-    try {
-      // -l = literal (no key-name interpretation); args array = no shell.
-      execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, "-l", text], { timeout: 3000 });
-      execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, "Enter"], { timeout: 3000 });
-    } catch (e) {
-      return res.status(502).json({ error: `send failed: ${e.message}` });
+  app.post("/api/runrooms/:session/action", (req, res) => {
+    const { session } = req.params;
+    if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
+    const plan = readPlan(session);
+    if (!plan) return res.status(404).json({ error: "no such runroom" });
+    if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+
+    const { action, step } = req.body || {};
+    const make = ACTIONS[action];
+    if (!make) return res.status(400).json({ error: "unknown action" });
+    // Buttons act on the CURRENT step only. A stale page (plan advanced since
+    // its last poll) gets a conflict, not a mis-aimed instruction.
+    if (Number(step) !== Number(plan.current_step)) {
+      return res.status(409).json({ error: "stale step", current_step: plan.current_step });
     }
+    const s = (plan.steps || []).find((x) => Number(x.n) === Number(step));
+    if (!s) return res.status(400).json({ error: "no such step" });
 
-    // Audit next to the plan: who said what, when, from the room.
-    try {
-      appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
-        `${new Date().toISOString()} ${req.user?.login || "?"}: ${text.replace(/\n/g, "\\n")}\n`);
-    } catch {}
-    res.json({ sent: true });
+    const text = make(s.n, s.title, firstNameOf(req.user));
+    const { status, body } = deliver(session, plan, text, req.user, action);
+    res.status(status).json(body);
   });
 }
