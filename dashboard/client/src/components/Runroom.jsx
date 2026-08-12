@@ -215,6 +215,63 @@ function ActionRow({ session, step, gate, me }) {
   );
 }
 
+// The payoff of the modal gate: while the session shows a dialog, the room
+// shows it too — as real buttons — instead of a disabled text box (step 5).
+// Answers carry the dialog's fingerprint, so a click aimed at a dialog that
+// has since changed is refused rather than answering the wrong question.
+function DialogCard({ session, dialog }) {
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(null);
+
+  async function answer(choice) {
+    if (busy) return;
+    setBusy(true); setFlash(null);
+    try {
+      const r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/dialog`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ choice, fingerprint: dialog.fingerprint }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setFlash({ ok: false, msg: d?.error || `HTTP ${r.status}` });
+      else setFlash({ ok: true, msg: "answered" });
+    } catch (e) {
+      setFlash({ ok: false, msg: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="runroom-dialog">
+      <div className="runroom-dialog-label">The session is asking</div>
+      {dialog.context.length > 0 && (
+        <pre className="runroom-dialog-context">{dialog.context.join("\n")}</pre>
+      )}
+      <div className="runroom-dialog-options">
+        {dialog.options.map((o) => (
+          <button
+            key={o.n}
+            disabled={busy}
+            // "always allow" / "don't ask again" widens standing permissions —
+            // visually set apart so it is never the reflex click.
+            className={`runroom-dialog-opt${/always|don't ask/i.test(o.label) ? " warn" : ""}${o.selected ? " selected" : ""}`}
+            onClick={() => answer(String(o.n))}
+          >
+            <span className="runroom-dialog-num">{o.n}</span> {o.label}
+          </button>
+        ))}
+      </div>
+      <div className="runroom-dialog-foot">
+        <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("enter")}>Enter</button>
+        <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("esc")}>Esc</button>
+        {dialog.hint && <span className="runroom-dialog-hint">{dialog.hint}</span>}
+        {flash && <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 function Composer({ session, gate }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -350,6 +407,9 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
               step must not offer buttons that would fire at a different one. */}
           {!finished && shown && shown.n === plan.current_step && (
             <ActionRow session={session} step={shown} gate={plan.gate} me={me} />
+          )}
+          {!finished && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
+            <DialogCard session={session} dialog={plan.gate.dialog} />
           )}
           {!finished && <Composer session={session} gate={plan.gate} />}
         </main>

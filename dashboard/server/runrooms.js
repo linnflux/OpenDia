@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync, appendFileSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
+import { createHash } from "crypto";
 import { terminalHolderFor } from "./terminal.js";
 
 // Runrooms — read-only API over ~/OpenDia/runrooms/<tmux-session>/plan.json.
@@ -64,10 +65,47 @@ function readPlan(session) {
 const OPTION_CURSOR_RE = /^\s*❯\s+\d+\.\s/;
 const RULE_RE = /─{10,}/;
 
+// When a dialog is up, pull it apart so the page can render it as buttons
+// (build step 5). Anchored on the option-cursor line ("❯ N.") — the one
+// marker that only dialogs produce — then expanded over the contiguous
+// numbered-option block around it. Context is what sits above the options up
+// to the nearest rule: the question, the command being approved, the trust
+// text. The fingerprint hashes what was parsed, so an answer can be refused
+// if the dialog changed between the page's poll and the click — the
+// dialog-race twin of the action endpoint's stale-step guard.
+const OPTION_LINE_RE = /^\s*❯?\s*\d+\.\s/;
+
+function parseDialog(lines) {
+  let cursor = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (OPTION_CURSOR_RE.test(lines[i])) { cursor = i; break; }
+  }
+  if (cursor < 0) return null;
+  let start = cursor, end = cursor;
+  while (start - 1 >= 0 && OPTION_LINE_RE.test(lines[start - 1])) start--;
+  while (end + 1 < lines.length && OPTION_LINE_RE.test(lines[end + 1])) end++;
+  const options = [];
+  for (let i = start; i <= end; i++) {
+    const m = lines[i].match(/^\s*(❯)?\s*(\d+)\.\s+(.*)$/);
+    if (m) options.push({ n: Number(m[2]), label: m[3].trim(), selected: !!m[1] });
+  }
+  if (options.length === 0) return null;
+  const context = [];
+  for (let i = start - 1; i >= 0 && context.length < 12; i--) {
+    if (RULE_RE.test(lines[i])) break;
+    if (lines[i].trim() !== "") context.unshift(lines[i].trim());
+  }
+  const hint = ((lines[end + 1] || "").trim() || (lines[end + 2] || "").trim()) || "";
+  const fingerprint = createHash("sha1")
+    .update(JSON.stringify({ context, options: options.map((o) => [o.n, o.label]) }))
+    .digest("hex").slice(0, 16);
+  return { context, options, hint, fingerprint };
+}
+
 function classifyPane(pane) {
   const lines = pane.split("\n");
   if (lines.slice(-40).some((l) => OPTION_CURSOR_RE.test(l))) {
-    return { ok: false, reason: "dialog-open" };
+    return { ok: false, reason: "dialog-open", dialog: parseDialog(lines) };
   }
   const nonBlank = (i, dir) => {
     for (let j = i + dir; j >= 0 && j < lines.length; j += dir) {
@@ -232,5 +270,51 @@ export function registerRunroomRoutes(app) {
     const text = make(s.n, s.title, firstNameOf(req.user));
     const { status, body } = deliver(session, plan, text, req.user, action);
     res.status(status).json(body);
+  });
+
+  // Answer the dialog the session is currently showing. The one write that is
+  // ALLOWED while the gate is closed — it exists precisely because the gate
+  // is closed. Digits select immediately in the TUI's dialogs; Enter confirms
+  // a multi-select; Escape cancels.
+  app.post("/api/runrooms/:session/dialog", (req, res) => {
+    const { session } = req.params;
+    if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
+    const plan = readPlan(session);
+    if (!plan) return res.status(404).json({ error: "no such runroom" });
+    if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+
+    const { choice, fingerprint } = req.body || {};
+    if (!/^([1-9]|enter|esc)$/.test(String(choice))) {
+      return res.status(400).json({ error: "bad choice" });
+    }
+
+    // Re-read the screen at answer time. The dialog must still be up, must
+    // still parse, and must be the SAME dialog the operator saw — a changed
+    // fingerprint means their click was aimed at something that is gone.
+    const gate = gateForSession(plan.tmux_session);
+    if (gate.reason !== "dialog-open" || !gate.dialog) {
+      return res.status(409).json({ error: "no dialog on screen", gate });
+    }
+    if (!fingerprint || fingerprint !== gate.dialog.fingerprint) {
+      return res.status(409).json({ error: "dialog changed", gate });
+    }
+    if (/^[1-9]$/.test(String(choice)) &&
+        !gate.dialog.options.some((o) => o.n === Number(choice))) {
+      return res.status(400).json({ error: "no such option", gate });
+    }
+
+    const key = choice === "esc" ? "Escape" : choice === "enter" ? "Enter" : String(choice);
+    try {
+      execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, key], { timeout: 3000 });
+    } catch (e) {
+      return res.status(502).json({ error: `send failed: ${e.message}` });
+    }
+    try {
+      const label = choice === "esc" || choice === "enter" ? choice
+        : gate.dialog.options.find((o) => o.n === Number(choice))?.label;
+      appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
+        `${new Date().toISOString()} ${req.user?.login || "?"} [dialog]: ${choice} (${label})\n`);
+    } catch {}
+    res.json({ answered: true });
   });
 }
