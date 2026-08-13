@@ -144,6 +144,37 @@ function StepPane({ step, total }) {
   );
 }
 
+// ── Completion chime ───────────────────────────────────────────────────────
+// A soft two-note kalimba drop (C6 → G5) when the session finishes working.
+// Synthesized, not sampled: no asset in a public repo, no licensing, and the
+// timbre is tunable in code. Browsers gate audio behind a user gesture, so
+// the context is primed by the first pointer/key event; if it never was
+// (page opened and only watched), the chime silently skips.
+let audioCtx = null;
+function primeAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+}
+
+function playDoneChime() {
+  if (!audioCtx || audioCtx.state !== "running") return;
+  const t0 = audioCtx.currentTime;
+  for (const [freq, at, dur, peak] of [[1046.5, 0, 0.5, 0.12], [784, 0.16, 0.7, 0.1]]) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0 + at);
+    gain.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0 + at);
+    osc.stop(t0 + at + dur + 0.05);
+  }
+}
+
 // The session's own spinner, mirrored: verb + timing meta lifted straight
 // off the terminal by the gate, with Spark-style animated ellipses. Appears
 // within one poll (~2.5s) of the session starting a turn — this is the
@@ -435,11 +466,22 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
   // null = follow the plan's current step as it moves; a number = the
   // operator clicked a rail item to read that step, so stay on it.
   const [viewStep, setViewStep] = useState(null);
+  // undefined = no observation yet (never chime on the first poll);
+  // afterwards: was the session working at the last poll?
+  const wasWorking = useRef(undefined);
 
   const fetchPlan = useCallback(() => {
     fetch(`/api/runrooms/${encodeURIComponent(session)}`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((p) => { setPlan(p); setError(null); })
+      .then((p) => {
+        // Chime on the working -> idle edge: the answer to "is it done yet?"
+        // for an operator who is looking at another window.
+        const nowWorking = !!p.gate?.working;
+        if (wasWorking.current === true && !nowWorking && p.status === "active") playDoneChime();
+        wasWorking.current = nowWorking;
+        setPlan(p);
+        setError(null);
+      })
       .catch((e) => setError(e.message));
   }, [session]);
 
@@ -501,6 +543,18 @@ export default function Runroom({ activeTimerIds, me }) {
   const [rooms, setRooms] = useState(null); // null = loading
   const [selected, setSelected] = useState(null);
   const [autoOpened, setAutoOpened] = useState(false);
+
+  // Prime the audio context on the first real gesture anywhere in the view,
+  // so the completion chime is allowed to sound later.
+  useEffect(() => {
+    const prime = () => primeAudio();
+    window.addEventListener("pointerdown", prime, { once: true });
+    window.addEventListener("keydown", prime, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+  }, []);
 
   const fetchRooms = useCallback(() => {
     fetch("/api/runrooms")
