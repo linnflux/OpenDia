@@ -244,9 +244,14 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
   const filteredProjects = useMemo(() => {
     if (!query || !projects) return [];
     const q = query.toLowerCase();
+    // A bare integer is almost always a card id — the operators speak in
+    // them ("card #42"). Exact id match outranks every text match, but text
+    // scoring still runs so "2026" can also find names containing it.
+    const idQuery = /^\d+$/.test(query.trim()) ? Number(query.trim()) : null;
     const scored = [];
     for (const p of projects) {
       let score = 0;
+      if (idQuery !== null && p.id === idQuery) score += 20;
       if ((p.tmux_session || "").toLowerCase().includes(q)) score += 4;
       if ((p.name || "").toLowerCase().includes(q)) score += 3;
       if ((p.company_name || "").toLowerCase().includes(q)) score += 2;
@@ -279,7 +284,8 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
       id: `project-${p.id}`,
       icon: "\u25A3",
       label: p.name,
-      sublabel: p.company_name || "",
+      // Lead with the card number so an id search visibly hit its card.
+      sublabel: `#${p.id}${p.company_name ? ` \u00B7 ${p.company_name}` : ""}`,
       tmux: p.tmux_session || "",
       action: () => { onSelectProject(p); onClose(); },
     }));
