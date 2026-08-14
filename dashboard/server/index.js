@@ -6,8 +6,9 @@ import { PORT, BILLING_MASTER_SHEET_ID, confValue } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { mountSpark } from "./spark.js";
 import { registerRunroomRoutes } from "./runrooms.js";
+import { mountAgents } from "./agents.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns, ensureAgentsTables } from "./db.js";
 import { spawn, execFile } from "child_process";
 import { timingSafeEqual, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
@@ -937,6 +938,7 @@ app.get("/api/projects/:id/inbox", (req, res) => {
 ensureInboxTable();
 ensureClientAliasesTable();
 ensureProjectsColumns();
+ensureAgentsTables();
 
 // ── Running-timer → In Progress reconciler ────────────────────────────────────
 // A timer left running on an Ice/WFHuman/Completed card is invisible (the board
@@ -1271,6 +1273,9 @@ mountSpark(app);
 
 // Runrooms: read-only view over ~/OpenDia/runrooms/*/plan.json
 registerRunroomRoutes(app);
+
+// OpenDia Agents: scheduled scan-and-propose agents (admin)
+mountAgents(app);
 
 // Serve static files in production
 const distPath = resolve(__dirname, "..", "client", "dist");

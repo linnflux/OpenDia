@@ -622,3 +622,151 @@ export function getRecentInbox(n = 5) {
     ORDER BY i.created_at DESC LIMIT ?
   `).all(n);
 }
+
+// ── OpenDia Agents (ODAs) ─────────────────────────────────────────────────────
+
+export function ensureAgentsTables() {
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug                  TEXT NOT NULL UNIQUE,
+      name                  TEXT NOT NULL,
+      enabled               INTEGER NOT NULL DEFAULT 0,
+      model                 TEXT NOT NULL DEFAULT 'opus',
+      schedule_days         TEXT NOT NULL DEFAULT '1,2,3,4,5',
+      schedule_start        TEXT NOT NULL DEFAULT '10:00',
+      schedule_end          TEXT NOT NULL DEFAULT '13:00',
+      heartbeat_minutes     INTEGER NOT NULL DEFAULT 60,
+      heartbeat_token_limit INTEGER NOT NULL DEFAULT 200000,
+      run_budget_usd        REAL NOT NULL DEFAULT 1.5,
+      chat_webhook_url      TEXT,
+      rotation_cursor       INTEGER NOT NULL DEFAULT 0,
+      last_heartbeat_at     TEXT,
+      created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at            TEXT
+    );
+    CREATE TABLE IF NOT EXISTS agent_projects (
+      agent_id    INTEGER NOT NULL REFERENCES agents(id)   ON DELETE CASCADE,
+      project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (agent_id, project_id)
+    );
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      id          TEXT PRIMARY KEY,
+      agent_id    INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      trigger     TEXT NOT NULL,
+      status      TEXT NOT NULL,
+      started_at  TEXT NOT NULL,
+      finished_at TEXT,
+      tokens_used INTEGER NOT NULL DEFAULT 0,
+      cost_usd    REAL NOT NULL DEFAULT 0,
+      summary     TEXT,
+      detail      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, started_at DESC);
+  `);
+}
+
+const AGENT_UPDATABLE_FIELDS = new Set([
+  "name", "enabled", "model", "schedule_days", "schedule_start", "schedule_end",
+  "heartbeat_minutes", "heartbeat_token_limit", "run_budget_usd", "chat_webhook_url",
+]);
+
+export function getAllAgents() {
+  return getDb().prepare("SELECT * FROM agents ORDER BY name COLLATE NOCASE ASC").all();
+}
+
+export function getAgentById(id) {
+  return getDb().prepare("SELECT * FROM agents WHERE id = ?").get(id);
+}
+
+export function createAgent({ slug, name }) {
+  const result = getDb().prepare(
+    "INSERT INTO agents (slug, name) VALUES (?, ?)"
+  ).run(slug, name);
+  return getAgentById(result.lastInsertRowid);
+}
+
+export function updateAgent(id, fields) {
+  const sets = [];
+  const vals = [];
+  for (const [key, val] of Object.entries(fields)) {
+    if (!AGENT_UPDATABLE_FIELDS.has(key)) continue;
+    sets.push(`${key} = ?`);
+    vals.push(val);
+  }
+  if (sets.length === 0) throw new Error("No valid fields to update");
+  sets.push("updated_at = datetime('now')");
+  vals.push(id);
+  return getDb().prepare(`UPDATE agents SET ${sets.join(", ")} WHERE id = ?`).run(...vals).changes > 0;
+}
+
+// Heartbeat bookkeeping writes bypass the admin-editable allowlist on purpose.
+export function markAgentHeartbeat(id, rotationCursor) {
+  getDb().prepare(
+    "UPDATE agents SET last_heartbeat_at = datetime('now'), rotation_cursor = ? WHERE id = ?"
+  ).run(rotationCursor, id);
+}
+
+export function getAgentProjects(agentId) {
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.status, p.next_step, p.tmux_session, p.notion_id,
+           c.name AS company_name, c.short_name AS company_short, d.name AS division,
+           ap.assigned_at
+    FROM agent_projects ap
+    JOIN projects p ON ap.project_id = p.id
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE ap.agent_id = ?
+    ORDER BY ap.assigned_at ASC
+  `).all(agentId);
+}
+
+export function assignAgentProject(agentId, projectId) {
+  return getDb().prepare(
+    "INSERT OR IGNORE INTO agent_projects (agent_id, project_id) VALUES (?, ?)"
+  ).run(agentId, projectId).changes > 0;
+}
+
+export function unassignAgentProject(agentId, projectId) {
+  return getDb().prepare(
+    "DELETE FROM agent_projects WHERE agent_id = ? AND project_id = ?"
+  ).run(agentId, projectId).changes > 0;
+}
+
+export function insertAgentRun({ id, agentId, trigger, status, summary = null, detail = null }) {
+  getDb().prepare(`
+    INSERT INTO agent_runs (id, agent_id, trigger, status, started_at, summary, detail)
+    VALUES (?, ?, ?, ?, datetime('now'), ?, ?)
+  `).run(id, agentId, trigger, status, summary, detail);
+}
+
+export function updateAgentRun(id, { status, tokensUsed, costUsd, summary, detail, finished }) {
+  const sets = [];
+  const vals = [];
+  if (status !== undefined) { sets.push("status = ?"); vals.push(status); }
+  if (tokensUsed !== undefined) { sets.push("tokens_used = ?"); vals.push(tokensUsed); }
+  if (costUsd !== undefined) { sets.push("cost_usd = ?"); vals.push(costUsd); }
+  if (summary !== undefined) { sets.push("summary = ?"); vals.push(summary); }
+  if (detail !== undefined) { sets.push("detail = ?"); vals.push(detail); }
+  if (finished) sets.push("finished_at = datetime('now')");
+  if (sets.length === 0) return;
+  vals.push(id);
+  getDb().prepare(`UPDATE agent_runs SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+}
+
+export function getAgentRuns(agentId, limit = 25) {
+  return getDb().prepare(
+    "SELECT * FROM agent_runs WHERE agent_id = ? ORDER BY started_at DESC LIMIT ?"
+  ).all(agentId, limit);
+}
+
+// Dashboard restarted mid-heartbeat: the executor's in-memory state is gone,
+// so any row still 'running' can never finish — close it out as interrupted.
+export function interruptStaleAgentRuns() {
+  return getDb().prepare(`
+    UPDATE agent_runs SET status = 'interrupted', finished_at = datetime('now')
+    WHERE status = 'running'
+  `).run().changes;
+}

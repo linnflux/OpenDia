@@ -86,6 +86,7 @@ export const NAV_SECTIONS = [
       { key: "billing",    label: "Billing",    icon: "\u{1F4B0}", badge: null },
       { key: "newsletter", label: "Newsletter", icon: "\u{1F4F0}", badge: null },
       { key: "rooms",      label: "Rooms",      icon: "\u{1F6AA}", badge: null },
+      { key: "agents",     label: "Agents",     icon: "\u{1F916}", badge: null },
     ],
   },
 ];

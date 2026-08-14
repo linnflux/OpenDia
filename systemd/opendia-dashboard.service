@@ -10,7 +10,8 @@ Restart=always
 RestartSec=5
 StartLimitBurst=5
 StartLimitIntervalSec=60
-MemoryMax=512M
+MemoryHigh=1G
+MemoryMax=2G
 EnvironmentFile=/home/linnflux/OpenDia/repo/dashboard/.env
 
 [Install]

@@ -72,6 +72,16 @@ const NAV_ICONS = {
       <circle cx="9.5" cy="8" r="0.5" fill="currentColor" />
     </svg>
   ),
+  // A robot head: the ODA roster.
+  agents: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2.5" y="4.5" width="10" height="8" rx="1.5" />
+      <path d="M7.5 4.5V2M7.5 2h.01" />
+      <circle cx="5.5" cy="8" r="0.5" fill="currentColor" />
+      <circle cx="9.5" cy="8" r="0.5" fill="currentColor" />
+      <path d="M5.5 10.5h4" />
+    </svg>
+  ),
 };
 
 export default function NavSidebar({

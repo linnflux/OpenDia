@@ -4,7 +4,7 @@ import { spawn } from "child_process";
 // Run a prompt through the claude CLI (same auth + pattern as the newsletter
 // and sweep features). The previous direct-API approach sent the Claude Code
 // OAuth token as x-api-key, which the API rejects with 401 — it never worked.
-function runClaude(prompt, { model = "haiku", timeoutMs = 120000 } = {}) {
+export function runClaude(prompt, { model = "haiku", timeoutMs = 120000 } = {}) {
   return new Promise((resolvePromise, reject) => {
     const claudeBin = resolve(process.env.HOME, ".local", "bin", "claude");
     const proc = spawn(claudeBin, [

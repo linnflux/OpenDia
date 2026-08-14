@@ -59,7 +59,7 @@ BASH_DENY = [
 WRITE_TOOLS = {"Write", "Edit", "NotebookEdit", "MultiEdit"}
 
 
-def denied_reason(tool_name: str, tool_input: dict, run_dir: Path) -> str | None:
+def denied_reason(tool_name: str, tool_input: dict, run_dir: Path, allow_dirs: list[Path]) -> str | None:
     if tool_name == "Bash":
         command = (tool_input.get("command") or "")
         for label, pattern in BASH_DENY:
@@ -80,11 +80,12 @@ def denied_reason(tool_name: str, tool_input: dict, run_dir: Path) -> str | None
             target = Path(os.path.expanduser(raw)).resolve()
         except OSError:
             return f"Spark could not resolve the write path {raw!r}."
-        allowed = [run_dir.resolve(), (HOME / "OpenDia" / "handoffs").resolve()]
+        allowed = [run_dir.resolve(), (HOME / "OpenDia" / "handoffs").resolve()] + allow_dirs
         if not any(target == root or root in target.parents for root in allowed):
             return (
-                f"Spark may only write inside its own run directory ({run_dir}) "
-                f"or ~/OpenDia/handoffs. Refusing to write {target}."
+                f"Spark may only write inside its own run directory ({run_dir}), "
+                f"~/OpenDia/handoffs, or an explicitly allowed directory. "
+                f"Refusing to write {target}."
             )
     return None
 
@@ -92,8 +93,12 @@ def denied_reason(tool_name: str, tool_input: dict, run_dir: Path) -> str | None
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-dir", required=True)
+    # Extra writable roots — ODA runs pass their own ~/OpenDia/agents/<slug>/
+    # so the agent can maintain its scratchpad memory.
+    ap.add_argument("--allow-dir", action="append", default=[])
     args = ap.parse_args()
     run_dir = Path(args.run_dir)
+    allow_dirs = [Path(os.path.expanduser(d)).resolve() for d in args.allow_dir]
 
     try:
         payload = json.load(sys.stdin)
@@ -105,7 +110,7 @@ def main():
     tool_name = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
 
-    reason = denied_reason(tool_name, tool_input, run_dir)
+    reason = denied_reason(tool_name, tool_input, run_dir, allow_dirs)
     if not reason:
         sys.exit(0)
 

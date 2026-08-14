@@ -615,6 +615,7 @@ function handleStreamLine(run, line) {
 
   if (msg.type === "result") {
     if (typeof msg.total_cost_usd === "number") run.costUsd = msg.total_cost_usd;
+    if (msg.usage && typeof msg.usage === "object") run.usage = msg.usage;
     run.finalText = typeof msg.result === "string" ? msg.result : "";
   }
 }
@@ -761,12 +762,12 @@ function spawnPhase(run, { prompt, deny, resume }) {
   const args = [
     "-p", prompt,
     ...(resume ? ["--resume", run.id] : ["--session-id", run.id]),
-    "--model", MODEL,
+    "--model", run.agent?.model || MODEL,
     "--permission-mode", "bypassPermissions",
     "--disallowedTools", deny.join(" "),
     "--output-format", "stream-json",
     "--verbose",
-    "--max-budget-usd", BUDGET_USD,
+    "--max-budget-usd", String(run.agent?.budgetUsd || BUDGET_USD),
     "--add-dir", `${HOME}/OpenDia`,
   ];
 
@@ -776,11 +777,13 @@ function spawnPhase(run, { prompt, deny, resume }) {
   const guardScript = `${HOME}/OpenDia/scripts/spark_guard.py`;
   if (existsSync(guardScript)) {
     const guardFile = `${run.runDir}/guard.json`;
+    // An agent run may also write its own scratchpad memory.
+    const allowDir = run.agent ? ` --allow-dir ${HOME}/OpenDia/agents/${run.agent.slug}` : "";
     writeFileSync(guardFile, JSON.stringify({
       hooks: {
         PreToolUse: [{
           matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit",
-          hooks: [{ type: "command", command: `python3 ${guardScript} --run-dir ${run.runDir}` }],
+          hooks: [{ type: "command", command: `python3 ${guardScript} --run-dir ${run.runDir}${allowDir}` }],
         }],
       },
     }, null, 2));
@@ -851,12 +854,15 @@ function newRun(project, runId, runDir, startedBy) {
   };
 }
 
-async function startScan(project, startedBy) {
+export async function startScan(project, startedBy, opts = {}) {
   const runId = randomUUID();
   const runDir = `${SPARK_ROOT}/${project.id}/${runId}`;
   mkdirSync(runDir, { recursive: true });
 
   const run = newRun(project, runId, runDir, startedBy);
+  // ODA context: {slug, name, model, budgetUsd}. Persisted on the run so act
+  // rounds (spawnPhase resume) keep the agent's model/budget and guard jail.
+  run.agent = opts.agent || null;
   runs.set(String(project.id), run);
 
   // The brief is built before the spawn so the first fronts light up fast.
@@ -871,8 +877,17 @@ async function startScan(project, startedBy) {
   }
   writeFileSync(`${runDir}/brief.json`, JSON.stringify(brief, null, 2));
 
+  const agentPreamble = run.agent
+    ? `You are ${run.agent.name}, an OpenDia Agent (ODA). Before the sweep, read ` +
+      `${HOME}/OpenDia/agents/${run.agent.slug}/agent.md (your expertise and operating rules) and ` +
+      `${HOME}/OpenDia/agents/${run.agent.slug}/memory.md (your scratchpad). Apply that expertise ` +
+      `throughout. After writing the result JSON, append any durable learnings to memory.md as ` +
+      `dated bullets, newest first — keep the file under 60 lines, pruning the oldest entries.\n\n`
+    : "";
+
   const proc = spawnPhase(run, {
     prompt:
+      agentPreamble +
       `Run /spark ${runDir}/brief.json\n\n` +
       "Invoked headlessly from the OpenDia dashboard Spark tab. There is no interactive user — " +
       "never ask a question and never wait for input. Write the result JSON to the out_path " +
@@ -1194,6 +1209,20 @@ function loadProject(req, res) {
     return null;
   }
   return project;
+}
+
+// For the ODA heartbeat executor (agents.js): share the concurrency cap and
+// per-card busy check with human-started sparks.
+export const SPARK_MAX_CONCURRENT = MAX_CONCURRENT;
+// A "proposing" run is waiting on a human decision and its claude child has
+// already exited, so it holds no compute — the executor may look past it.
+export function activeSparkCount({ excludeProposing = false } = {}) {
+  return [...runs.values()]
+    .filter((r) => !r.finishedAt && (!excludeProposing || r.status !== "proposing"))
+    .length;
+}
+export function getSparkRun(projectId) {
+  return runs.get(String(projectId));
 }
 
 export function mountSpark(app) {
