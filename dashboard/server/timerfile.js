@@ -90,6 +90,26 @@ export function listRunningTimers() {
 }
 
 /**
+ * Whether an entry for this client and division bills.
+ *
+ * **The client decides, not the division.** Internal work is our own name on
+ * the card, or no client at all — the same test `timeentry.py`'s skip_internal
+ * applies before billing sees an entry, and the one `inbox_stage_b.py` already
+ * uses when it opens a timer. Deriving billability from the division instead
+ * meant every internal Bedford AI, WordFlux or FluxCC card opened `billable:
+ * true` and had to be corrected in the ledger by hand afterwards.
+ *
+ * Admin and Onboarding stay non-billable on top of that, because they are
+ * non-billable *for a real client too* — three live cards depend on it. Dropping
+ * that half would start billing clients for work that has never been billed.
+ */
+export function isBillable(client, division) {
+  const c = String(client || "").trim().toLowerCase();
+  if (!c || c === "linnflux") return false;
+  return !["Admin", "Onboarding"].includes(division);
+}
+
+/**
  * Append a new open entry to today's ledger and write its state file.
  *
  * opts.estimatedMinutes — what the entry bills (estimate, not stopwatch).
@@ -105,7 +125,10 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
 
   const t = etNow();
   const task = taskOverride || project.next_step || `${project.name} — dashboard terminal session`;
-  const billable = !["Admin", "Onboarding"].includes(project.division);
+  // One definition, used by both artifacts below — they disagreed about nothing
+  // before, but the client string was being derived twice.
+  const client = project.company_name || project.name;
+  const billable = isBillable(client, project.division);
   const marker = t.iso;
 
   const yearDir = `${TIMER_DIR}/${t.YYYY}/${t.MM}`;
@@ -120,7 +143,7 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
     ``,
     `---`,
     `<!-- entry:${marker} -->`,
-    `client: ${project.company_name || project.name}`,
+    `client: ${client}`,
     `project: ${project.name}`,
     `division: ${project.division || ""}`,
     `task: ${task}`,
@@ -139,7 +162,7 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
 
   const stateFile = stateFileFor(marker);
   writeFileSync(stateFile, JSON.stringify({
-    client: project.company_name || project.name,
+    client,
     project: project.name,
     division: project.division || "",
     task,
