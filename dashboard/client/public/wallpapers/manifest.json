@@ -1,0 +1,39 @@
+{
+  "wallpapers": [
+    {
+      "file": "wp-01.jpg",
+      "label": "Island Dusk",
+      "hash": "d89d6abff237"
+    },
+    {
+      "file": "wp-02.jpg",
+      "label": "The Falls",
+      "hash": "17de99ef071e"
+    },
+    {
+      "file": "wp-03.jpg",
+      "label": "Still Water",
+      "hash": "2e8821c12416"
+    },
+    {
+      "file": "wp-04.jpg",
+      "label": "Last Light",
+      "hash": "ea940cdc67b4"
+    },
+    {
+      "file": "wp-05.jpg",
+      "label": "Tide Pools",
+      "hash": "61b6d55c6cc4"
+    },
+    {
+      "file": "wp-06.jpg",
+      "label": "Glacier Bay",
+      "hash": "971402a47733"
+    },
+    {
+      "file": "wp-07.jpg",
+      "label": "Ember Sky",
+      "hash": "98e38e80ef36"
+    }
+  ]
+}
