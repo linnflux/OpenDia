@@ -2,8 +2,14 @@
 //
 // A Spark run is a headless Claude session scoped to one card. It sweeps every
 // message front (email, Google Voice relays, Google Chat, Notion, timers,
-// artifacts), then reports a single next step with a self-rated certitude
-// number and up to three actions worth doing next.
+// artifacts), then reports where the project stands, what happened lately, and
+// exactly ONE next step with a self-rated certitude number.
+//
+// One next step, not a menu. The step carries a `route` saying who carries it
+// out: "opendia" means the dashboard can do it on approval, "human" means it
+// becomes a runroom and a working session. That single field replaced a
+// per-action tier — with one recommendation there is nothing to rank, and the
+// only question left is who does it.
 //
 // Three shape decisions worth knowing before reading:
 //
@@ -39,6 +45,7 @@ import {
   etNow, durationStr, minutesBetween, listRunningTimers,
   findTimerForSession, startTimerForProject, closeTimerEntry, setEntryEstimate
 } from "./timerfile.js";
+import { resolveFreeSession, writeSeedPlan, spawnSession, relocatePlan } from "./runroom_build.js";
 
 const HOME = process.env.HOME || "/home/linnflux";
 const CLAUDE_BIN = resolve(HOME, ".local", "bin", "claude");
@@ -55,8 +62,12 @@ const BASE_ESTIMATE_MIN = 15;
 const LOG_NOTION = process.env.SPARK_LOG_NOTION !== "false";
 
 const MAX_ROUNDS = 4;
-const MAX_ACTIONS_TOTAL = 8;
+const MAX_STEPS_TOTAL = 8;
 const ACCRUAL_PAUSE_MIN = 60;        // stop auto-accruing; ask the human first
+// Below this the evidence did not hold up (fronts disagreed, or a decisive one
+// could not be read). The panel demotes "Do it" and promotes "Adjust"; the
+// server ships the threshold so both surfaces agree on one number.
+const LOW_CERTITUDE = 60;
 const IDLE_WARN_MS = 20 * 60 * 1000; // waiting on a decision
 const IDLE_WRAP_MS = 30 * 60 * 1000;
 
@@ -96,16 +107,16 @@ const runs = new Map();
 
 // ── small helpers ──────────────────────────────────────────────────────────
 
-/** Markdown survives; HTML does not. Spark's text is derived from client mail
- *  and chat, and the client renders body_md through marked into innerHTML. */
-function escapeAngles(value) {
-  if (typeof value === "string") return value.replace(/</g, "&lt;");
-  if (Array.isArray(value)) return value.map(escapeAngles);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, escapeAngles(v)]));
-  }
-  return value;
-}
+// There is no escapeAngles here any more, and that is deliberate.
+//
+// It existed because the panel rendered body_md through marked into innerHTML,
+// which made a client's `<` a script-injection surface. body_md is gone and the
+// panel renders every field as a JSX text node, so React escapes it — while the
+// report's other consumers are all plain text: the handoff brief, the runroom
+// plan's detail pane, the timer notes, and next_step on its way into SQLite.
+// Escaping on the way out of here corrupted every one of those (a brief read
+// `~/OpenDia/runrooms/&lt;session>/plan.json`). Escape at the render boundary,
+// which React already does, not at the source.
 
 function freshFronts() {
   return Object.fromEntries(FRONTS.map((f) => [f, { state: "pending", detail: null }]));
@@ -127,12 +138,10 @@ function publicRun(run) {
     round: run.round,
     roundsUsed: run.roundsUsed,
     roundsMax: MAX_ROUNDS,
-    actions: run.actions,
-    actionStates: run.actionStates,
-    handoffs: run.handoffs || [],
+    // The offered step is result.next_step; this is only its execution state
+    // while a round is in flight.
+    stepState: run.stepState,
     drafts: run.drafts,
-    completed: run.completed,
-    ballMoved: run.ballMoved,
     accruedMinutes: run.accruedMinutes,
     accrualPaused: run.accrualPaused,
     idleWrapAt: run.idleWrapAt || null,
@@ -140,6 +149,7 @@ function publicRun(run) {
     timerNote: run.timerNote,
     costUsd: run.costUsd,
     model: MODEL,
+    lowCertitude: LOW_CERTITUDE,
     result: run.result,
     error: run.error,
   };
@@ -233,14 +243,11 @@ function writeInterrupted(runDir, reason) {
 }
 
 function readRunResult(entry) {
-  try { return JSON.parse(readFileSync(entry.file, "utf8")); } catch { return null; }
-}
-
-function latestResultOnDisk(projectId) {
-  const [newest] = runsOnDisk(projectId).filter((r) => r.status === "done");
-  if (!newest) return null;
-  const result = readRunResult(newest);
-  return result ? { runId: newest.runId, at: newest.at, result } : null;
+  try {
+    const raw = JSON.parse(readFileSync(entry.file, "utf8"));
+    // interrupted.json has its own shape and no recommendation to adapt.
+    return entry.status === "interrupted" ? raw : adaptResult(raw);
+  } catch { return null; }
 }
 
 /**
@@ -282,6 +289,44 @@ function recordAbandonedRuns() {
   }
 }
 
+/**
+ * Rebuild what the rounds did, from the round files they already wrote.
+ *
+ * Without this a recovered run starts at round 0 with no outcomes: it would
+ * grant four fresh rounds on top of the ones already spent, and close its timer
+ * with notes justifying only the sweep, having dropped the ledger bullet for
+ * every step actually carried out. All of it is on disk in round-N-result.json;
+ * nothing new needs persisting, it just needs reading back.
+ */
+function restoreRounds(run) {
+  let files = [];
+  try {
+    files = readdirSync(run.runDir)
+      .filter((f) => /^round-\d+-result\.json$/.test(f))
+      .sort((a, b) => parseInt(a.slice(6), 10) - parseInt(b.slice(6), 10));
+  } catch { return; }
+
+  for (const name of files) {
+    let raw;
+    try { raw = JSON.parse(readFileSync(`${run.runDir}/${name}`, "utf8")); } catch { continue; }
+    const v = validateRound(raw);
+    if (!v.ok) continue;
+    run.roundsUsed += 1;
+    run.round = run.roundsUsed;
+    if (v.round.outcome.status !== "none") {
+      run.outcomes.push(v.round.outcome);
+      run.stepsRun += 1;
+    }
+    for (const d of v.round.drafts || []) {
+      if (d?.to && d?.body) run.drafts.push({ id: d.id || `d${run.drafts.length + 1}`, ...d });
+    }
+  }
+  if (run.roundsUsed) {
+    pushLedger(run, "note",
+      `Restored ${run.roundsUsed} round(s) from disk — ${run.outcomes.length} step(s) already carried out.`);
+  }
+}
+
 function recoverOrphanRuns() {
   for (const { file, data } of listRunningTimers()) {
     if (data.source !== "spark") continue;
@@ -295,11 +340,14 @@ function recoverOrphanRuns() {
 
     if (project && result && !result.__parseError) {
       const run = newRun(project, runId, runDir, data.started_by || "");
-      run.result = escapeAngles(result);
+      // A run archived before schema 2 carries no `route` and no `recent`, and
+      // it never passed through a validator. Adapt it here rather than teaching
+      // every downstream reader two shapes.
+      run.result = adaptResult(result);
       run.timer = { stateFile: file, marker: data.marker, dailyFile: data.file, task: data.task };
       run.timerChecked = true;
       run.accruedMinutes = data.estimated_minutes || BASE_ESTIMATE_MIN;
-      for (const f of result.fronts || []) {
+      for (const f of run.result.fronts || []) {
         if (FRONTS.includes(f.front)) {
           const state = f.state === "checked" ? "done" : f.state;
           run.fronts[f.front] = { state: FRONT_STATES.includes(state) ? state : "done", detail: f.reason || null };
@@ -307,7 +355,8 @@ function recoverOrphanRuns() {
       }
       runs.set(String(projectId), run);
       pushLedger(run, "warn", "The dashboard restarted; this run was recovered from disk.");
-      offerActions(run, result.actions || []);
+      restoreRounds(run);
+      offerNextStep(run);
       console.log(`spark: recovered run ${runId} for card ${projectId}`);
       continue;
     }
@@ -475,16 +524,16 @@ async function closeSparkTimer(run, project, { failed = false, reason = "" } = {
       ? run.result.timer_notes.filter((b) => typeof b === "string" && b.trim())
       : [];
     if (bullets.length >= 2) {
-      // Every executed action adds its own bullet, so the notes justify the
+      // Every step carried out adds its own bullet, so the notes justify the
       // accrued estimate rather than only the 15-minute sweep. The NEXT line
       // stays last.
-      const actionBullets = run.completed
+      const stepBullets = run.outcomes
         .map((c) => c.note_bullet || c.summary)
         .filter(Boolean);
       const nextIdx = bullets.findIndex((b) => b.trim().startsWith("NEXT:"));
       const body = nextIdx === -1 ? bullets : bullets.slice(0, nextIdx);
       const tail = nextIdx === -1 ? [] : bullets.slice(nextIdx);
-      notes = [...body, ...actionBullets, ...tail].join("\n");
+      notes = [...body, ...stepBullets, ...tail].join("\n");
     } else {
       // Floor: never write a note-less entry. Synthesise from what was checked.
       const checked = Object.entries(run.fronts)
@@ -499,11 +548,12 @@ async function closeSparkTimer(run, project, { failed = false, reason = "" } = {
 
     // An ODA scan is scheduled monitoring, not client-requested work: the
     // sweep itself bills nothing (plan-covered overhead), and the estimate
-    // covers only approved-and-executed actions. Human-triggered Sparks keep
-    // the base estimate — a human judged the card needed the attention.
+    // covers only the approved step if one was carried out. Human-triggered
+    // Sparks keep the base estimate — a human judged the card needed the
+    // attention.
     if ((run.startedBy || "").startsWith("agent:")) {
       estimate = Math.max(0, (run.accruedMinutes || BASE_ESTIMATE_MIN) - BASE_ESTIMATE_MIN);
-      notes += `\nODA scan (${run.startedBy}) — sweep not billed; estimate covers approved actions only.`;
+      notes += `\nODA scan (${run.startedBy}) — sweep not billed; estimate covers approved work only.`;
     }
   }
 
@@ -567,15 +617,17 @@ function applyMarker(run, front, state, detail) {
   if (normalised === "done") startSparkTimer(run, run.project);
 }
 
-function applyActionMarker(run, id, state, detail) {
-  if (!run.actionStates[id]) return;
+/** There is one step in play, so the marker's id is ignored — the routine emits
+ *  `action=step`, but an older cached routine emitting `action=a1` should still
+ *  move the same indicator rather than being dropped on the floor. */
+function applyStepMarker(run, state, detail) {
   const allowed = ["running", "done", "failed", "blocked"];
   if (!allowed.includes(state)) return;
-  run.actionStates[id] = { state, detail: detail || run.actionStates[id].detail || null };
-  emit(run, "action_progress", { id, state, detail: detail || null });
+  run.stepState = { state, detail: detail || run.stepState?.detail || null };
+  emit(run, "step_progress", run.stepState);
   if (state === "running") {
-    const label = run.actions.find((x) => x.id === id)?.label;
-    if (label) setVerb(run, `Working on: ${label}`);
+    const text = run.result?.next_step?.text;
+    if (text) setVerb(run, `Working on: ${text.slice(0, 60)}`);
   }
 }
 
@@ -607,7 +659,7 @@ function handleStreamLine(run, line) {
       let a;
       while ((a = ACTION_RE.exec(payload)) !== null) {
         sawMarker = true;
-        applyActionMarker(run, a[1], a[2], a[3] ? a[3].replace(/\\n/g, " ").trim() : "");
+        applyStepMarker(run, a[2], a[3] ? a[3].replace(/\\n/g, " ").trim() : "");
       }
       if (sawMarker) continue;
 
@@ -648,101 +700,191 @@ function readResultFile(run, name = "result.json") {
 
 const PRONOUNS = /\b(I|we|you|he|she|they|us|our|your|their|my|me|him|her|them)\b/i;
 
-// Tiers are named rather than numbered. The model has to emit this field from a
-// routine it read once, and "handoff" is self-describing where 3 was a mapping
-// it had to recall — which is why the defaulting branch below exists at all.
-// Names also survive adding a tier later; numbers would shift underneath us.
-const TIER_PERFORMED = "performed";  // done on approval
-const TIER_HANDOFF = "handoff";      // never done here; becomes a brief + session
-const TIERS = [TIER_PERFORMED, TIER_HANDOFF];
+// The next step carries a route, not a tier. With one recommendation instead of
+// a menu there is nothing left to rank, so the only open question is who carries
+// it out. Written as a name rather than a number: the model emits this from a
+// routine it read once, and "human" is self-describing where 3 was a mapping it
+// had to recall — which is why the defaulting branch below exists at all.
+const ROUTE_OPENDIA = "opendia";  // the dashboard performs it on approval
+const ROUTE_HUMAN = "human";      // becomes a runroom and a working session
+const ROUTES = [ROUTE_OPENDIA, ROUTE_HUMAN];
 
-// Legacy runs on disk carry integers, and a model that has cached the old
-// routine may still emit one. 2 was the dashboard-sends-an-email tier and no
-// longer exists, so it lands on handoff with everything else unrecognised.
-const LEGACY_TIERS = { 1: TIER_PERFORMED, 2: TIER_HANDOFF, 3: TIER_HANDOFF };
+// Runs archived before schema 2 carry a per-action `tier`, and a model holding a
+// cached routine may still emit one. `performed` and its numeric ancestor 1 map
+// to opendia; everything else lands on human, including the long-dead
+// dashboard-sends-an-email tier 2.
+const LEGACY_ROUTES = {
+  performed: ROUTE_OPENDIA, handoff: ROUTE_HUMAN,
+  1: ROUTE_OPENDIA, 2: ROUTE_HUMAN, 3: ROUTE_HUMAN,
+};
 
-/** Coerce any tier — named, legacy integer, or junk — to a known name.
- *  Unknown always resolves to handoff: guessing toward "performed" would be
- *  the dangerous direction, so the safe default is written into the fallback
- *  rather than left to depend on which value happens to sort last. */
-function normaliseTier(tier) {
-  if (TIERS.includes(tier)) return tier;
-  return LEGACY_TIERS[tier] || TIER_HANDOFF;
+/** Coerce any route — named, legacy tier, or junk — to a known name. Unknown
+ *  always resolves to human: guessing toward opendia would point automation at
+ *  work that should have had a person in front of it, so the safe default is
+ *  written into the fallback rather than left to depend on which value happens
+ *  to sort last. */
+function normaliseRoute(route) {
+  if (ROUTES.includes(route)) return route;
+  return LEGACY_ROUTES[route] || ROUTE_HUMAN;
+}
+
+/** One step or null — never an array, and never a half-populated object that
+ *  the panel would have to defend itself against. */
+function normaliseStep(step) {
+  if (!step || typeof step !== "object" || !step.text) return null;
+  return {
+    text: String(step.text),
+    why: step.why || "",
+    owner: step.owner || "",
+    route: normaliseRoute(step.route),
+    estimated_minutes: Number.isFinite(step.estimated_minutes)
+      ? Math.max(0, Math.round(step.estimated_minutes)) : 5,
+    first_action: step.first_action || null,
+    by_when: step.by_when || null,
+    reversible: step.reversible !== false,
+  };
+}
+
+function normaliseRecent(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((r) => r && r.text)
+    .slice(0, 20)
+    .map((r) => ({
+      date: r.date || null,
+      front: FRONTS.includes(r.front) ? r.front : null,
+      text: String(r.text),
+    }));
+}
+
+/**
+ * Upgrade a schema-1 report to the shape everything downstream now expects.
+ *
+ * Past runs are never pruned, so every archived result.json still has to render.
+ * v1 scattered its evidence through `fronts[].findings[]` and offered a menu of
+ * tiered actions instead of one routed step; the top action is the closest thing
+ * it has to "what Spark would have done next", and its tier is the closest thing
+ * to a route. `body_md` is deliberately kept rather than mapped away — the panel
+ * shows it as the full report for v1 runs, so no archived detail is lost.
+ *
+ * Idempotent, which matters: recovery and history both call it, and a v2 result
+ * has to survive passing through twice.
+ */
+function adaptResult(raw) {
+  if (!raw || typeof raw !== "object" || raw.schema !== 1) return raw;
+
+  const recent = Array.isArray(raw.recent)
+    ? [...raw.recent]
+    : (raw.fronts || []).flatMap((f) =>
+        (f.findings || []).map((x) => ({
+          date: x.date || f.as_of || null, front: f.front, text: x.text,
+        })));
+  recent.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+
+  const top = (raw.actions || [])[0];
+  // Everything mapped forward is dropped rather than carried alongside its
+  // replacement: a wire shape with both `actions` and a routed `next_step` on it
+  // invites the next reader to wonder which one is live. body_md is the one v1
+  // field kept, because nothing in v2 replaces it.
+  const { headline, ball, who_does_what, actions, proposed_next_step, ...rest } = raw;
+  return {
+    ...rest,
+    schema: 2,
+    schema_was: 1,
+    where_it_stands: raw.where_it_stands || headline || "",
+    recent,
+    fronts: (raw.fronts || []).map(({ findings, ...f }) => f),   // findings are now `recent`
+    next_step: raw.next_step ? {
+      ...raw.next_step,
+      why: raw.next_step.why || top?.why || "",
+      // A v1 step has no route of its own. The top action's tier is the only
+      // recorded signal about who was meant to act, and normaliseRoute sends
+      // everything it does not recognise — including no signal at all — to human.
+      route: normaliseRoute(raw.next_step.route ?? top?.tier),
+      estimated_minutes: raw.next_step.estimated_minutes ?? top?.estimated_minutes ?? 5,
+    } : null,
+    card_next_step: raw.card_next_step ?? raw.proposed_next_step?.value ?? null,
+  };
 }
 
 function validateResult(raw) {
   const problems = [];
   if (!raw || typeof raw !== "object") return { ok: false, problems: ["no result JSON was produced"] };
   if (raw.__parseError) return { ok: false, problems: [`result.json is not valid JSON: ${raw.__parseError}`] };
-  if (raw.schema !== 1) problems.push(`unexpected schema ${JSON.stringify(raw.schema)}`);
 
-  const pct = raw?.certitude?.pct;
+  const r = adaptResult(raw);
+  if (r.schema !== 2) problems.push(`unexpected schema ${JSON.stringify(raw.schema)}`);
+
+  const pct = r?.certitude?.pct;
   if (!Number.isInteger(pct) || pct < 0 || pct > 100) problems.push("certitude.pct must be an integer 0-100");
-  if (!raw?.next_step?.text) problems.push("next_step.text is empty");
-  if (!raw?.body_md) problems.push("body_md is empty");
-  if (!Array.isArray(raw.fronts) || raw.fronts.length === 0) problems.push("fronts is empty");
+  if (!r?.next_step?.text) problems.push("next_step.text is empty");
+  if (!r?.where_it_stands) problems.push("where_it_stands is empty");
+  if (!Array.isArray(r.fronts) || r.fronts.length === 0) problems.push("fronts is empty");
   else {
-    const unknown = raw.fronts.map((f) => f.front).filter((f) => !FRONTS.includes(f));
+    const unknown = r.fronts.map((f) => f.front).filter((f) => !FRONTS.includes(f));
     if (unknown.length) problems.push(`unknown front(s): ${unknown.join(", ")}`);
   }
-  if (raw.actions && !Array.isArray(raw.actions)) problems.push("actions must be an array");
+  if (r.recent && !Array.isArray(r.recent)) problems.push("recent must be an array");
 
   if (problems.length) return { ok: false, problems };
 
   // Soft lints — surfaced, never blocking. A good recommendation is not
   // withheld over grammar.
   const warnings = [];
-  const prose = [raw.headline, raw.next_step?.text, raw.risk, raw.body_md]
+  const prose = [r.where_it_stands, r.next_step?.text, r.next_step?.why, r.risk]
     .filter((s) => typeof s === "string").join("\n");
   if (PRONOUNS.test(prose)) warnings.push("contains personal pronouns");
-  if ((raw.certitude?.reason || "").length < 20) warnings.push("certitude reason is thin");
-  if ((raw.proposed_next_step?.value || "").length > 100) warnings.push("proposed next step exceeds 100 chars");
+  if ((r.certitude?.reason || "").length < 20) warnings.push("certitude reason is thin");
+  if ((r.card_next_step || "").length > 100) warnings.push("card next step exceeds 100 chars");
 
-  const actions = (raw.actions || []).slice(0, 3).map((a, i) => ({
-    id: a.id || `a${i + 1}`,
-    label: String(a.label || "Action").slice(0, 24),
-    what: a.what || "",
-    why: a.why || "",
-    tier: normaliseTier(a.tier),
-    estimated_minutes: Number.isFinite(a.estimated_minutes) ? Math.max(0, Math.round(a.estimated_minutes)) : 5,
-    reversible: a.reversible !== false,
-    preview: a.preview || null,
-  }));
-
-  return { ok: true, result: { ...raw, actions, style_warnings: warnings } };
-}
-
-function normaliseActions(list, offset = 0) {
-  return (Array.isArray(list) ? list : []).slice(0, 3).map((a, i) => ({
-    id: a.id || `x${offset + i + 1}`,
-    label: String(a.label || "Action").slice(0, 24),
-    what: a.what || "",
-    why: a.why || "",
-    tier: normaliseTier(a.tier),
-    estimated_minutes: Number.isFinite(a.estimated_minutes) ? Math.max(0, Math.round(a.estimated_minutes)) : 5,
-    reversible: a.reversible !== false,
-    preview: a.preview || null,
-  }));
+  return {
+    ok: true,
+    result: {
+      ...r,
+      next_step: normaliseStep(r.next_step),
+      recent: normaliseRecent(r.recent),
+      style_warnings: warnings,
+    },
+  };
 }
 
 function validateRound(raw) {
   if (!raw || typeof raw !== "object") return { ok: false, problems: ["no round JSON was produced"] };
   if (raw.__parseError) return { ok: false, problems: [`round JSON is invalid: ${raw.__parseError}`] };
-  if (!Array.isArray(raw.completed)) return { ok: false, problems: ["completed must be an array"] };
+
+  // A cached older routine reports completed[] and next_actions[] instead of one
+  // outcome and one step. Fold both down rather than failing the round: the work
+  // has already happened by the time this runs, and discarding the report would
+  // lose the record of it.
+  const o = raw.outcome || (Array.isArray(raw.completed) ? raw.completed[0] : null);
+  const legacyNext = (raw.next_actions || [])[0];
+  const step = raw.next_step ?? raw.recommendation_update?.next_step ?? (legacyNext ? {
+    text: legacyNext.what || legacyNext.label,
+    why: legacyNext.why,
+    route: legacyNext.tier,
+    estimated_minutes: legacyNext.estimated_minutes,
+    reversible: legacyNext.reversible,
+  } : null);
+
+  if (!o && !step) {
+    return { ok: false, problems: ["neither an outcome nor a revised next step was reported"] };
+  }
 
   return {
     ok: true,
     round: {
       ...raw,
-      completed: raw.completed.map((c) => ({
-        id: c.id,
-        status: ["done", "failed", "blocked"].includes(c.status) ? c.status : "done",
-        summary: c.summary || "",
-        evidence: c.evidence || null,
-        minutes: Number.isFinite(c.minutes) ? Math.max(0, Math.round(c.minutes)) : 5,
-        note_bullet: c.note_bullet || c.summary || "",
-      })),
-      next_actions: normaliseActions(raw.next_actions),
+      outcome: {
+        // "none" is the adjust path's correct answer, not a missing value.
+        status: ["done", "failed", "blocked", "none"].includes(o?.status)
+          ? o.status : (o ? "done" : "none"),
+        summary: o?.summary || "",
+        evidence: o?.evidence || null,
+        minutes: Number.isFinite(o?.minutes) ? Math.max(0, Math.round(o.minutes)) : (o ? 5 : 0),
+        note_bullet: o?.note_bullet || o?.summary || "",
+      },
+      recent_add: normaliseRecent(raw.recent_add),
+      next_step: normaliseStep(step),
+      certitude: raw.certitude || raw.recommendation_update?.certitude || null,
     },
   };
 }
@@ -840,16 +982,13 @@ function newRun(project, runId, runDir, startedBy) {
     fronts: freshFronts(),
     verb: "Reading the card",
     ledger: [],
-    actions: [],
-    actionStates: {},
-    handoffs: [],
+    stepState: null,
     drafts: [],
-    completed: [],
-    ballMoved: null,
+    outcomes: [],
     accruedMinutes: 0,
     accrualPaused: false,
     roundsUsed: 0,
-    actionsRun: 0,
+    stepsRun: 0,
     timer: null,
     timerChecked: false,
     timerClosed: false,
@@ -932,7 +1071,7 @@ export async function startScan(project, startedBy, opts = {}) {
       return;
     }
 
-    run.result = escapeAngles(verdict.result);
+    run.result = verdict.result;
     // Reconcile the checklist with what the report actually claims, so a
     // missed marker doesn't leave a front stuck on "pending".
     for (const f of run.result.fronts || []) {
@@ -945,44 +1084,67 @@ export async function startScan(project, startedBy, opts = {}) {
       }
     }
     startSparkTimer(run, project);
+    applyCardNextStep(run, project);
     emit(run, "result", run.result);
-    offerActions(run, run.result.actions || []);
+    offerNextStep(run);
   });
 
   return run;
 }
 
 /**
- * Hand a set of proposals to the human and wait. The run stays open (and the
- * timer with it) until a decision arrives, the actions run out, or the idle
- * timeout wraps it up.
+ * Put the recommendation on the card.
+ *
+ * This is the whole point of a scan, and for a long time it did not happen: the
+ * report landed in a JSON file and the card only changed if a human clicked
+ * Apply at the bottom of a long scroll. Keeping `next_step` true is Spark's job,
+ * the field is a reversible one-liner, and a dated value is what feeds the
+ * calendar — so the scan writes it, and says so in the ledger rather than
+ * changing the board silently.
  */
-function offerActions(run, actions) {
+function applyCardNextStep(run, project) {
+  const value = run.result?.card_next_step;
+  if (!value || typeof value !== "string") return;      // null means "leave the card alone"
+  if (value === project.next_step) return;
+  try {
+    updateProject(project.id, { next_step: value });
+    project.next_step = value;
+    pushLedger(run, "done", `Card next step set to "${value}".`);
+  } catch (err) {
+    pushLedger(run, "warn", `Could not write the next step to the card: ${err.message}`);
+  }
+}
+
+/**
+ * Offer the one next step to the human and wait. The run stays open (and the
+ * timer with it) until a decision arrives or the idle timeout wraps it up.
+ *
+ * A step routed `human` is still offered — it is the runroom button rather than
+ * the do-it button. That is the difference from the tiered model this replaced,
+ * where a handoff was filtered out of the buttons entirely and the run wrapped
+ * up with nothing to click.
+ */
+function offerNextStep(run) {
   // The phase is over: neither the hard-kill nor the overrun verb applies
   // while a human is deciding.
   clearTimeout(run.killTimer);
   clearTimeout(run.overrunTimer);
 
-  const roomLeft = MAX_ACTIONS_TOTAL - run.actionsRun;
-  // Normalise here rather than trusting the caller: the recovery path feeds
-  // this straight from a result.json on disk, and an archived run carries
-  // integer tiers that never went through a validator. Coercion is idempotent,
-  // so the two already-validated callers are unaffected.
-  const tiered = (actions || []).map((a) => ({ ...a, tier: normaliseTier(a.tier) }));
-  const usable = tiered
-    .filter((a) => a.tier === TIER_PERFORMED)   // a handoff is a brief, never a button
-    .slice(0, Math.max(0, Math.min(3, roomLeft)));
-  const handoffs = tiered.filter((a) => a.tier === TIER_HANDOFF);
-
-  run.actions = usable;
-  run.handoffs = handoffs;
-  for (const a of usable) run.actionStates[a.id] = { state: "pending" };
+  // Normalise here rather than trusting the caller: the recovery path feeds this
+  // straight from a result.json on disk that never passed a validator. Coercion
+  // is idempotent, so the already-validated callers are unaffected.
+  const step = normaliseStep(run.result?.next_step);
+  if (run.result) run.result = { ...run.result, next_step: step };
+  run.stepState = null;
 
   if (run.roundsUsed >= MAX_ROUNDS) {
     pushLedger(run, "warn", `Round limit reached (${MAX_ROUNDS}) — remaining work belongs in a session.`);
   }
 
-  const canOffer = usable.length > 0 && run.roundsUsed < MAX_ROUNDS && !run.accrualPaused;
+  const canOffer = !!step
+    && run.roundsUsed < MAX_ROUNDS
+    && run.stepsRun < MAX_STEPS_TOTAL
+    && !run.accrualPaused;
   if (!canOffer) {
     wrapUp(run);
     return;
@@ -991,7 +1153,7 @@ function offerActions(run, actions) {
   run.status = "proposing";
   run.phase = "propose";
   setVerb(run, null);
-  emit(run, "actions", { round: run.roundsUsed + 1, items: usable, handoffs });
+  emit(run, "next_step", { round: run.roundsUsed + 1, step });
 
   clearTimeout(run.idleWarnTimer);
   clearTimeout(run.idleWrapTimer);
@@ -1014,8 +1176,13 @@ async function wrapUp(run) {
   finishRun(run, "done");
 }
 
-async function startRound(run, decisions, note = "") {
+/**
+ * Run one act round. `intent` is "do" (carry the step out) or "adjust" (perform
+ * nothing, re-recommend from the operator's correction).
+ */
+async function startRound(run, intent, note = "") {
   const project = run.project;
+  const step = run.result?.next_step || null;
   run.roundsUsed += 1;
   run.round = run.roundsUsed;
   run.status = "acting";
@@ -1023,26 +1190,22 @@ async function startRound(run, decisions, note = "") {
   clearTimeout(run.idleWarnTimer);
   clearTimeout(run.idleWrapTimer);
 
-  const approved = run.actions.filter((a) => decisions[a.id] === "do");
-  for (const a of run.actions) {
-    const state = decisions[a.id] === "do" ? "running" : "skipped";
-    run.actionStates[a.id] = { state, detail: null };
-    emit(run, "action_progress", { id: a.id, state, detail: null });
-    if (state === "skipped") pushLedger(run, "skip", `Skipped: ${a.label}`);
+  if (intent === "do") {
+    run.stepState = { state: "running", detail: null };
+    emit(run, "step_progress", run.stepState);
   }
-
-  if (note) pushLedger(run, "note", `Clarification: ${note}`);
+  if (note) pushLedger(run, "note", `Correction: ${note}`);
 
   const roundFile = `${run.runDir}/round-${run.round}.json`;
   const outPath = `${run.runDir}/round-${run.round}-result.json`;
   writeFileSync(roundFile, JSON.stringify({
-    schema: 1,
+    schema: 2,
     run_dir: run.runDir,
     out_path: outPath,
     round: run.round,
-    decisions,
+    intent,
+    next_step: step,
     operator_note: note || null,
-    actions: run.actions,
     accrued_minutes: run.accruedMinutes,
     rounds_remaining: MAX_ROUNDS - run.roundsUsed,
     project: {
@@ -1058,7 +1221,9 @@ async function startRound(run, decisions, note = "") {
     result: run.result,
   }, null, 2));
 
-  setVerb(run, approved.length ? `Working on: ${approved[0].label}` : "Wrapping up");
+  setVerb(run, intent === "do"
+    ? `Working on: ${(step?.text || "the approved step").slice(0, 60)}`
+    : "Rethinking the next step");
 
   const proc = spawnPhase(run, {
     prompt:
@@ -1068,13 +1233,20 @@ async function startRound(run, decisions, note = "") {
       // is what it is. Same shape as the inbox dispatcher's operator
       // correction block.
       (note
-        ? "## Operator Correction\n\nThe operator reviewed these proposals and "
-          + "provided the following correction. It outranks the plan below — apply "
-          + "it to every approved action, and say in each summary how it was "
-          + `applied:\n\n${note}\n\n`
+        ? "## Operator Correction\n\nThe operator read the recommendation and "
+          + "provided the following correction. It outranks everything below"
+          + (intent === "adjust"
+            ? " — perform nothing, and return a revised next step that does what "
+              + "the correction actually asks for"
+            : " — apply it to the approved step, and say in the summary how it "
+              + "was applied")
+          + `:\n\n${note}\n\n`
         : "") +
       "Invoked headlessly from the OpenDia dashboard Spark tab. There is no interactive user — " +
-      "never ask a question and never wait for input. Carry out only the approved actions, " +
+      "never ask a question and never wait for input. " +
+      (intent === "do"
+        ? "Carry out only the approved step, "
+        : "Perform nothing this round, ") +
       "write the result JSON to the out_path named in the round file, then stop.",
     deny: DENY_ACT,
     resume: true,
@@ -1094,37 +1266,33 @@ async function startRound(run, decisions, note = "") {
     if (!round.ok) {
       run.error = { message: `round ${run.round}: ${round.problems.join("; ")}`, raw_tail: rawTail(run) };
       emit(run, "error", run.error);
-      for (const a of approved) {
-        run.actionStates[a.id] = { state: "failed", detail: "no result reported" };
-        emit(run, "action_progress", { id: a.id, state: "failed", detail: "no result reported" });
+      if (intent === "do") {
+        run.stepState = { state: "failed", detail: "no result reported" };
+        emit(run, "step_progress", run.stepState);
       }
       await wrapUp(run);
       return;
     }
 
-    const data = escapeAngles(round.round);
-    applyRoundResult(run, data);
-    offerActions(run, data.next_actions || []);
+    applyRoundResult(run, round.round);
+    offerNextStep(run);
   });
 }
 
 function applyRoundResult(run, data) {
-  for (const c of data.completed || []) {
-    const state = ["done", "failed", "blocked"].includes(c.status) ? c.status : "done";
-    run.actionStates[c.id] = { state, detail: c.summary || null };
-    emit(run, "action_progress", { id: c.id, state, detail: c.summary || null });
-
-    const label = run.actions.find((a) => a.id === c.id)?.label || c.id;
-    pushLedger(run, state, `${state === "done" ? "" : `${state}: `}${c.summary || label}`);
-
-    run.completed.push(c);
-    run.actionsRun += 1;
+  const o = data.outcome;
+  if (o && o.status !== "none") {
+    run.stepState = { state: o.status, detail: o.summary || null };
+    emit(run, "step_progress", run.stepState);
+    pushLedger(run, o.status,
+      `${o.status === "done" ? "" : `${o.status}: `}${o.summary || "the step"}`);
+    run.outcomes.push(o);
+    run.stepsRun += 1;
 
     // Accrual: only completed work bills, and it stops climbing at the pause
     // threshold so a long chain becomes an explicit decision.
-    if (state === "done" && run.timer && !run.accrualPaused) {
-      const mins = Number.isFinite(c.minutes) ? Math.max(0, Math.round(c.minutes)) : 5;
-      run.accruedMinutes = Math.min(ACCRUAL_PAUSE_MIN, run.accruedMinutes + mins);
+    if (o.status === "done" && run.timer && !run.accrualPaused) {
+      run.accruedMinutes = Math.min(ACCRUAL_PAUSE_MIN, run.accruedMinutes + o.minutes);
       setEntryEstimate(run.timer.dailyFile, run.timer.marker, run.accruedMinutes);
       if (run.accruedMinutes >= ACCRUAL_PAUSE_MIN) {
         run.accrualPaused = true;
@@ -1141,20 +1309,45 @@ function applyRoundResult(run, data) {
     emit(run, "draft", draft);
   }
 
-  if (data.ball_moved) {
-    run.ballMoved = data.ball_moved;
-    emit(run, "ball_moved", { text: data.ball_moved });
-  }
-
-  if (data.recommendation_update && run.result) {
-    const u = data.recommendation_update;
+  // `ball_moved` IS the new "where it stands" — the round just changed the state
+  // of play, and that sentence is the update. It used to be carried as its own
+  // field as well, which put the same sentence on screen twice and printed it
+  // twice in the handoff brief. One fact, one place.
+  if (run.result) {
     run.result = {
       ...run.result,
-      headline: u.headline || run.result.headline,
-      next_step: u.next_step || run.result.next_step,
-      certitude: u.certitude || run.result.certitude,
+      where_it_stands: data.ball_moved || run.result.where_it_stands,
+      // A round returning no step means the ball left our court; keep it null
+      // rather than falling back to the step that was just carried out, which
+      // would re-offer finished work.
+      next_step: data.next_step,
+      certitude: data.certitude || run.result.certitude,
+      recent: [...(data.recent_add || []), ...(run.result.recent || [])].slice(0, 20),
+      card_next_step: data.card_next_step ?? null,
     };
+    applyCardNextStep(run, run.project);
+    persistResult(run);
     emit(run, "result", run.result);
+  }
+}
+
+/**
+ * Write the current recommendation back over result.json.
+ *
+ * Rounds used to update only the in-memory copy, which left two things wrong:
+ * a run recovered after a restart re-offered the step the *scan* produced,
+ * discarding the revisions the operator had already steered; and history listed
+ * every run by its opening guess rather than its conclusion. The file is the
+ * durable record of what a run decided, so it has to follow the decision.
+ *
+ * Best-effort: the recommendation on screen is already correct, and losing the
+ * disk copy is not worth failing a round that has done real work.
+ */
+function persistResult(run) {
+  try {
+    writeFileSync(`${run.runDir}/result.json`, JSON.stringify(run.result, null, 2));
+  } catch (err) {
+    console.error("spark: could not persist the updated result:", err.message);
   }
 }
 
@@ -1169,13 +1362,20 @@ function stopProc(run) {
 // sends it from Gmail. There is deliberately no send path on the server — a
 // dormant one behind requireAdmin is just a thing that gets re-wired later.
 
-/** Write a session brief so a handoff lands with the Spark findings intact. */
-function writeHandoff(project, run) {
+/**
+ * Write a session brief so a handoff lands with the Spark findings intact.
+ *
+ * `session` overrides the slug: the runroom builder resolves a free tmux name
+ * before spawning, and the brief has to land under that name rather than under
+ * whatever the card happens to point at right now.
+ */
+function writeHandoff(project, run, session = null) {
   const dir = `${HOME}/OpenDia/handoffs`;
   mkdirSync(dir, { recursive: true });
-  const slug = (project.tmux_session || `card-${project.id}`).replace(/[^\w.-]/g, "-");
+  const slug = (session || project.tmux_session || `card-${project.id}`).replace(/[^\w.-]/g, "-");
   const file = `${dir}/${slug}.md`;
   const r = run.result || {};
+  const step = r.next_step;
   const lines = [
     `# ${project.name} — Spark handoff`,
     ``,
@@ -1184,27 +1384,80 @@ function writeHandoff(project, run) {
     ``,
     `## Where things stand`,
     ``,
-    r.headline ? `**${r.headline}**` : "",
-    r.certitude ? `Certitude ${r.certitude.pct}% — ${r.certitude.reason || ""}` : "",
-    run.ballMoved ? `\nBall moved: ${run.ballMoved}` : "",
+    r.where_it_stands || "(not recorded)",
+    r.certitude ? `\nCertitude ${r.certitude.pct}% — ${r.certitude.reason || ""}` : "",
     ``,
     `## Next step`,
     ``,
-    r.next_step?.text || "(none recorded)",
-    r.next_step?.first_action ? `\nFirst action: \`${r.next_step.first_action}\`` : "",
+    step?.text || "(none recorded)",
+    step?.why ? `\nWhy: ${step.why}` : "",
+    step?.first_action ? `\nFirst action: \`${step.first_action}\`` : "",
+    step?.estimated_minutes ? `\nEstimated: ${step.estimated_minutes} minutes` : "",
     ``,
-    run.completed.length ? `## What Spark already did\n` : "",
-    ...run.completed.map((c) => `- [${c.status}] ${c.summary}${c.evidence ? ` (${c.evidence})` : ""}`),
-    (run.handoffs || []).length ? `\n## Left for this session\n` : "",
-    ...(run.handoffs || []).map((h) => `- ${h.what}${h.why ? `\n  Why: ${h.why}` : ""}`),
-    ``,
-    `## Full report`,
-    ``,
-    r.body_md || "",
+    (r.recent || []).length ? `## Recent activity\n` : "",
+    ...(r.recent || []).slice(0, 10).map((x) =>
+      `- ${x.date || "undated"}${x.front ? ` · ${x.front}` : ""} — ${x.text}`),
+    r.risk ? `\n## Risk\n\n${r.risk}` : "",
+    run.outcomes.length ? `\n## What Spark already did\n` : "",
+    ...run.outcomes.map((c) => `- [${c.status}] ${c.summary}${c.evidence ? ` (${c.evidence})` : ""}`),
+    // Archived v1 runs still carry their prose report; keep it rather than
+    // dropping detail the sweep actually produced.
+    r.body_md ? `\n## Full report\n\n${r.body_md}` : "",
     ``,
   ];
   writeFileSync(file, lines.filter((l) => l !== "").join("\n") + "\n");
   return file;
+}
+
+/**
+ * Hand the next step to a human: seed a runroom plan, open a session on it, and
+ * get Spark's timer out of the way.
+ *
+ * The ordering here is the whole function. The /runroom contract says room work
+ * bills to the timer the session already runs and never opens a second one — so
+ * Spark's entry must be closed, with its accrued minutes committed, BEFORE a
+ * session exists that could start one of its own. Spawn first and every runroom
+ * double-bills the card.
+ *
+ * The cost of that ordering is that a spawn failure leaves the run already
+ * wrapped up. That is the right way round: the report is on disk in history, the
+ * minutes are billed honestly, and retrying costs one click. The reverse failure
+ * — two open timers on one card — is the mess /timer-merge exists to clean up.
+ */
+async function openRunroom(project, run) {
+  const session = resolveFreeSession(project.tmux_session || project.name);
+  const brief = writeHandoff(project, run, session);
+  const plan = writeSeedPlan({ session, project, run });
+  pushLedger(run, "handoff", `Runroom seeded at ${plan}`);
+  pushLedger(run, "handoff", `Opening session "${session}" — this timer closes so the session owns the clock.`);
+
+  await wrapUp(run);
+
+  let final;
+  try {
+    final = spawnSession(session, brief);
+  } catch (err) {
+    throw new Error(
+      `the plan was written to ${plan} but the session did not start (${err.message}). ` +
+      `Open it by hand with: tmux new-session -s ${session}`
+    );
+  }
+
+  let planFile = plan;
+  if (final !== session) {
+    // Something took the name between the check and the spawn.
+    const moved = relocatePlan(session, final);
+    if (moved) planFile = moved;
+    else console.error(`spark: runroom plan for "${session}" is orphaned — the session spawned as "${final}"`);
+  }
+
+  try {
+    updateProject(project.id, { tmux_session: final });
+  } catch (err) {
+    console.error("spark: could not point the card at the runroom session:", err.message);
+  }
+
+  return { session: final, plan: planFile, brief };
 }
 
 // ── routes ─────────────────────────────────────────────────────────────────
@@ -1242,11 +1495,13 @@ export function mountSpark(app) {
     const project = loadProject(req, res);
     if (!project) return;
     const run = runs.get(String(project.id));
+    // No lastRun here: the panel's history list already loads the newest run,
+    // and reading one off disk on every mount was a fetch nothing rendered.
     res.json({
       run: publicRun(run),
-      lastRun: run?.result ? null : latestResultOnDisk(project.id),
       canStart: !!req.user?.is_admin,
       model: MODEL,
+      lowCertitude: LOW_CERTITUDE,
     });
   });
 
@@ -1272,7 +1527,11 @@ export function mountSpark(app) {
     }
   });
 
-  // Approve/skip the proposed actions individually, then run the approved set.
+  // One decision on one next step. `intent` says which:
+  //   do      — carry it out here (only a step routed "opendia" qualifies)
+  //   runroom — seed a plan, open a session, and hand the work over
+  //   adjust  — perform nothing; re-recommend from the operator's correction
+  //   stop    — close the run without doing anything
   app.post("/api/projects/:id/spark/decide", requireAdmin, async (req, res) => {
     const project = loadProject(req, res);
     if (!project) return;
@@ -1280,41 +1539,52 @@ export function mountSpark(app) {
     if (!run || run.finishedAt) return res.status(404).json({ error: "no active Spark run" });
     if (run.status !== "proposing") return res.status(409).json({ error: `run is ${run.status}, not awaiting a decision` });
 
-    const decisions = req.body?.decisions || {};
-    const known = new Set(run.actions.map((a) => a.id));
-    const unknown = Object.keys(decisions).filter((k) => !known.has(k));
-    if (unknown.length) return res.status(400).json({ error: `unknown action(s): ${unknown.join(", ")}` });
-
+    const intent = String(req.body?.intent || "").trim();
     const note = String(req.body?.note || "").trim().slice(0, 2000);
-    const approved = run.actions.filter((a) => decisions[a.id] === "do");
-    if (!approved.length && note) {
-      // Nothing approved but a correction supplied: that is not "stop", it is
-      // "none of these, do this instead". Run the round so the note lands.
-      startRound(run, decisions, note).catch(async (err) => {
+    const step = run.result?.next_step;
+    if (!["do", "runroom", "adjust", "stop"].includes(intent)) {
+      return res.status(400).json({ error: `unknown intent ${JSON.stringify(intent)}` });
+    }
+
+    if (intent === "stop") {
+      pushLedger(run, "skip", "Closed without acting on the recommendation.");
+      await wrapUp(run);
+      return res.json({ ok: true, started: false });
+    }
+
+    if (intent === "adjust") {
+      // The correction IS the instruction, so there is nothing to run without
+      // one. spark-act reads an empty approval plus a note as "none of this —
+      // do this instead", which is exactly this path.
+      if (!note) return res.status(400).json({ error: "an adjustment needs a note" });
+      startRound(run, "adjust", note).catch(async (err) => {
         run.error = { message: err.message };
         emit(run, "error", run.error);
         await wrapUp(run);
       });
-      return res.json({ ok: true, started: true, round: run.round, note: true });
-    }
-    if (!approved.length) {
-      // Skipping everything with nothing to add is a legitimate answer, and it
-      // ends the run.
-      for (const a of run.actions) {
-        run.actionStates[a.id] = { state: "skipped" };
-        emit(run, "action_progress", { id: a.id, state: "skipped", detail: null });
-      }
-      pushLedger(run, "skip", "All proposed actions skipped.");
-      await wrapUp(run);
-      return res.json({ ok: true, started: false });
-    }
-    // Belt and braces: offerActions already keeps handoffs off the buttons, so
-    // this only fires if one is approved by a hand-made request.
-    if (approved.some((a) => normaliseTier(a.tier) === TIER_HANDOFF)) {
-      return res.status(400).json({ error: "handoff actions go to a working session, not run here" });
+      return res.json({ ok: true, started: true, round: run.round });
     }
 
-    startRound(run, decisions, note).catch(async (err) => {
+    if (!step) return res.status(409).json({ error: "this run has no next step to act on" });
+
+    if (intent === "runroom") {
+      try {
+        const room = await openRunroom(project, run);
+        return res.json({ ok: true, started: false, ...room });
+      } catch (err) {
+        console.error("spark: runroom failed:", err.message);
+        return res.status(500).json({ error: `could not open the runroom: ${err.message}` });
+      }
+    }
+
+    // Belt and braces: the panel only shows "Do it" for an opendia step, so this
+    // fires on a hand-made request. Routing is fail-closed upstream, which makes
+    // this the second of two places that have to agree — deliberately.
+    if (step.route !== ROUTE_OPENDIA) {
+      return res.status(400).json({ error: "a step routed to a human goes to a runroom, not run here" });
+    }
+
+    startRound(run, "do", note).catch(async (err) => {
       run.error = { message: err.message };
       emit(run, "error", run.error);
       await wrapUp(run);
@@ -1358,13 +1628,7 @@ export function mountSpark(app) {
     if (!run || run.finishedAt) return res.status(404).json({ error: "no active Spark run" });
 
     if (run.status === "proposing" && run.result) {
-      for (const a of run.actions) {
-        if (run.actionStates[a.id]?.state === "pending") {
-          run.actionStates[a.id] = { state: "skipped" };
-          emit(run, "action_progress", { id: a.id, state: "skipped", detail: null });
-        }
-      }
-      pushLedger(run, "skip", "Closed without running the remaining proposals.");
+      pushLedger(run, "skip", "Closed without acting on the recommendation.");
       await wrapUp(run);
       return res.json({ ok: true, closed: "finished" });
     }
@@ -1402,9 +1666,12 @@ export function mountSpark(app) {
         runId: entry.runId,
         at: entry.at,
         status: "done",
-        headline: r.headline,
+        // The list needs one line to identify a run by. The next step is what a
+        // past Spark is actually remembered for; where_it_stands is the fallback
+        // for a run that produced no step at all.
+        headline: r.next_step?.text || r.where_it_stands || "(no recommendation)",
         certitude: r.certitude?.pct ?? null,
-        ball: r.ball || null,
+        route: r.next_step?.route || null,
       };
     }).filter(Boolean);
     res.json(items);

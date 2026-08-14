@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { marked } from "marked";
-import useTypewriter from "../hooks/useTypewriter.js";
+import { useEffect, useState } from "react";
 
 // Spark is deliberately not a terminal: sans-serif throughout, generous
 // whitespace, no cursor, no fixed-width columns. The one monospace element is
 // the first-action chip, because it is literally a command.
+//
+// The report reads top to bottom as one thought: how much to trust this, where
+// the project stands, what has been happening, and then the single decision.
+// Everything else — drafts, the run ledger, an archived run's prose report —
+// sits below the decision, because it is evidence for a choice already made.
 
 const FRONT_LABELS = {
   timers: "Work sessions",
@@ -28,6 +31,10 @@ const IDLE_VERBS = [
   "Drafting the recommendation",
 ];
 
+// What the sweep bills. The idle copy, the running counter and this all read
+// from one number so the panel tells one story about how long a Spark takes.
+const SWEEP_MINUTES = 15;
+
 function certitudeColor(pct) {
   if (pct >= 85) return "var(--timer-open)";
   if (pct >= 60) return "var(--pill-warn-color)";
@@ -44,6 +51,13 @@ function fmtElapsed(sec) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function fmtDay(date) {
+  if (!date) return "";
+  const d = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return date;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function FrontGlyph({ state }) {
@@ -126,134 +140,166 @@ function SparkCertitude({ certitude }) {
   );
 }
 
-function SparkWho({ rows }) {
-  if (!rows?.length) return null;
+// What has actually been happening, dated, newest first. This is the evidence
+// the recommendation rests on — it used to be buried inside a prose report.
+function SparkRecent({ recent }) {
+  const items = recent || [];
+  if (!items.length) return null;
+  const head = items.slice(0, 6);
+  const rest = items.slice(6);
+  const row = (x, i) => (
+    <li key={i} className="spark-recent-row">
+      <span className="spark-recent-date">{fmtDay(x.date) || "—"}</span>
+      {x.front && <span className="spark-recent-front">{FRONT_LABELS[x.front] || x.front}</span>}
+      <span className="spark-recent-text">{x.text}</span>
+    </li>
+  );
   return (
-    <div className="spark-who">
-      {rows.map((r, i) => (
-        <div className="spark-who-row" key={i}>
-          <div className="spark-who-main">
-            <span className="spark-who-name">{r.who}</span>
-            <span className="spark-who-does">{r.does}</span>
-          </div>
-          {r.when && <span className="spark-who-when">{r.when}</span>}
-          {r.blocked_by && <span className="spark-who-blocked">blocked by {r.blocked_by}</span>}
-        </div>
-      ))}
+    <div className="spark-recent">
+      <div className="spark-section-label">Recent activity</div>
+      <ul className="spark-recent-list">{head.map(row)}</ul>
+      {rest.length > 0 && (
+        <details className="spark-recent-more">
+          <summary>{rest.length} earlier</summary>
+          <ul className="spark-recent-list">{rest.map((x, i) => row(x, i + 6))}</ul>
+        </details>
+      )}
     </div>
   );
 }
 
-function SparkBody({ md, animate }) {
-  const html = useMemo(() => marked.parse(md || ""), [md]);
-  const { ref, done, skip } = useTypewriter({ html, animate });
-  return (
-    <div className="spark-body-wrap" onClick={skip} onKeyDown={skip}>
-      <div ref={ref} className="modal-notes-rendered spark-body" />
-      {!done && <div className="spark-skip-hint">click to skip</div>}
-    </div>
-  );
-}
-
-function SparkActions({ spark, showToast }) {
-  const [choices, setChoices] = useState({});
+/**
+ * The decision. One step, one route, three ways to answer.
+ *
+ * "Do it" and "Open a runroom" are mutually exclusive by construction — the
+ * route decides which appears, so there is never a choice about *how* to do the
+ * thing on top of the choice about *whether*. Below the certitude threshold the
+ * emphasis moves to Adjust: a step Spark is not confident in is one to correct,
+ * not one to point automation at.
+ */
+function SparkDecision({ spark, showToast, onGoToRunroom, isAdmin }) {
+  const [adjusting, setAdjusting] = useState(false);
   const [note, setNote] = useState("");
-  useEffect(() => { setChoices({}); setNote(""); }, [spark.actions]);
 
-  if (!spark.actions?.length) return null;
-  const chosen = Object.values(choices).filter((v) => v === "do").length;
-  const decided = Object.keys(choices).length;
-  const trimmed = note.trim();
-  // A correction on its own is a reason to run: "none of these, do this".
-  const canRun = decided === spark.actions.length && (chosen > 0 || trimmed);
+  // Keyed on the run, not on the step object: a reconnect hands back a fresh
+  // snapshot with new object identities, and keying on those wiped whatever the
+  // operator had typed.
+  useEffect(() => { setAdjusting(false); setNote(""); }, [spark.runId]);
 
-  async function run() {
-    const decisions = {};
-    for (const a of spark.actions) decisions[a.id] = choices[a.id] || "skip";
-    const res = await spark.decide(decisions, trimmed);
-    if (res?.error) showToast(res.error);
+  const step = spark.result?.next_step;
+  if (!step) return null;
+
+  const pct = spark.result?.certitude?.pct ?? 0;
+  const low = pct < (spark.lowCertitude ?? 60);
+  const canAct = isAdmin && !spark.busy;
+  const opendia = step.route === "opendia";
+
+  async function act(intent, text = "") {
+    const res = await spark.decide(intent, text);
+    if (res?.error) { showToast(res.error); return; }
+    if (intent === "runroom" && res.session) {
+      showToast(`Runroom open in ${res.session} · Spark timer closed`);
+      onGoToRunroom?.(res.session);
+    }
   }
 
   return (
-    <div className="spark-proposals">
-      <div className="spark-proposals-label">
-        Worth doing next
-        <span className="spark-proposals-round">round {spark.roundsUsed + 1} of {spark.roundsMax}</span>
+    <div className={`spark-decision${low ? " is-lowcert" : ""}`}>
+      <div className="spark-section-label">
+        Next step
+        {step.owner && <span className="spark-decision-owner">{step.owner}</span>}
+        {step.by_when && <span className="spark-decision-when">by {step.by_when}</span>}
       </div>
-      {spark.actions.map((a) => {
-        const pick = choices[a.id];
-        return (
-          <div key={a.id} className={`spark-action${pick ? ` picked-${pick}` : ""}`}>
-            <div className="spark-action-head">
-              <span className="spark-action-label">{a.label}</span>
-              <span className="spark-action-mins">+{a.estimated_minutes}m</span>
-            </div>
-            <p className="spark-action-what">{a.what}</p>
-            {a.why && <p className="spark-action-why">{a.why}</p>}
-            {a.preview && <code className="spark-action-preview">{a.preview}</code>}
-            <div className="spark-action-buttons">
-              <button
-                className={`spark-btn${pick === "do" ? " spark-btn-primary" : ""}`}
-                onClick={() => setChoices((c) => ({ ...c, [a.id]: "do" }))}
-              >
-                Do it
-              </button>
-              <button
-                className={`spark-btn${pick === "skip" ? " spark-btn-chosen" : ""}`}
-                onClick={() => setChoices((c) => ({ ...c, [a.id]: "skip" }))}
-              >
-                Skip
-              </button>
-            </div>
-          </div>
-        );
-      })}
-      {/* The proposals are usually right but one detail short, and without this
-          there was no way to say so — the run had to be taken or abandoned. */}
-      <label className="spark-note">
-        <span className="spark-note-label">Anything to correct or add? (optional)</span>
-        <textarea
-          className="spark-note-input"
-          rows={2}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="e.g. cc Nell on that reply, and use the shorter form of the address"
-        />
-      </label>
 
-      <div className="spark-proposals-run">
-        <button className="spark-btn spark-btn-primary" onClick={run}
-                disabled={spark.busy || !canRun}>
-          {chosen
-            ? `Run ${chosen} approved${trimmed ? " with your note" : ""}`
-            : trimmed ? "Send the correction" : "Skip all"}
+      <p className="spark-decision-text">{step.text}</p>
+      {step.why && <p className="spark-decision-why">{step.why}</p>}
+
+      <p className="spark-decision-cert" style={{ color: certitudeColor(pct) }}>
+        {pct}% certain
+        {spark.result?.certitude?.reason && (
+          <span className="spark-decision-cert-reason"> — {spark.result.certitude.reason}</span>
+        )}
+      </p>
+
+      {step.first_action && (
+        <button
+          className="spark-decision-action"
+          onClick={() => { navigator.clipboard?.writeText(step.first_action); showToast("Copied"); }}
+          title="Copy"
+        >
+          {step.first_action}
         </button>
-        {decided < spark.actions.length && (
-          <span className="spark-proposals-hint">
-            Choose for each — {spark.actions.length - decided} left
-          </span>
-        )}
-        {decided === spark.actions.length && !chosen && !trimmed && (
-          <span className="spark-proposals-hint">
-            Skipping everything ends the run — add a note to steer it instead.
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
+      )}
 
-function SparkHandoffs({ handoffs }) {
-  if (!handoffs?.length) return null;
-  return (
-    <div className="spark-handoffs">
-      <div className="spark-proposals-label">For a working session</div>
-      {handoffs.map((h, i) => (
-        <div className="spark-handoff" key={h.id || i}>
-          <span className="spark-action-label">{h.label}</span>
-          <p className="spark-action-what">{h.what}</p>
+      {low && (
+        <p className="spark-decision-lowcert">
+          Under {spark.lowCertitude ?? 60}% the evidence did not hold up. Correcting the
+          recommendation is usually the better move than acting on it.
+        </p>
+      )}
+
+      {adjusting ? (
+        <div className="spark-adjust">
+          <textarea
+            className="spark-adjust-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            autoFocus
+            placeholder="What is wrong with this, or what should happen instead? This outranks the recommendation."
+          />
+          <div className="spark-decision-buttons">
+            <button
+              className="spark-btn spark-btn-primary"
+              onClick={() => act("adjust", note.trim())}
+              disabled={!canAct || !note.trim()}
+            >
+              Send the correction
+            </button>
+            <button className="spark-btn" onClick={() => setAdjusting(false)} disabled={spark.busy}>
+              Cancel
+            </button>
+          </div>
         </div>
-      ))}
+      ) : (
+        <div className="spark-decision-buttons">
+          {opendia ? (
+            <button
+              className={`spark-btn${low ? "" : " spark-btn-primary"}`}
+              onClick={() => act("do")}
+              disabled={!canAct}
+              title={isAdmin ? "OpenDia carries this out and bills it to this card's timer" : "Spark runs are admin-only"}
+            >
+              Do it
+              {step.estimated_minutes ? <span className="spark-btn-mins">+{step.estimated_minutes}m</span> : null}
+            </button>
+          ) : (
+            <button
+              className={`spark-btn${low ? "" : " spark-btn-primary"}`}
+              onClick={() => act("runroom")}
+              disabled={!canAct}
+              title={isAdmin ? "Seeds a plan, opens a working session, and closes this Spark's timer" : "Spark runs are admin-only"}
+            >
+              Open a runroom
+              {step.estimated_minutes ? <span className="spark-btn-mins">~{step.estimated_minutes}m</span> : null}
+            </button>
+          )}
+          <button
+            className={`spark-btn${low ? " spark-btn-primary" : ""}`}
+            onClick={() => setAdjusting(true)}
+            disabled={!canAct}
+          >
+            Adjust
+          </button>
+          <button className="spark-btn spark-btn-quiet" onClick={() => act("stop")} disabled={!canAct}>
+            Not now
+          </button>
+        </div>
+      )}
+
+      {spark.roundsUsed > 0 && (
+        <p className="spark-decision-round">round {spark.roundsUsed} of {spark.roundsMax}</p>
+      )}
     </div>
   );
 }
@@ -277,7 +323,7 @@ function SparkDraft({ draft }) {
 
 const LEDGER_GLYPH = {
   done: "✓", failed: "✕", blocked: "⚠", skip: "⤳",
-  timer: "◷", warn: "⚠", sent: "→", handoff: "⇥",
+  timer: "◷", warn: "⚠", sent: "→", handoff: "⇥", note: "✎", none: "·",
 };
 
 function SparkLedger({ ledger }) {
@@ -295,66 +341,45 @@ function SparkLedger({ ledger }) {
 }
 
 // Past runs are never pruned — every report stays on disk and can be reopened.
-function SparkHistory({ spark }) {
-  const [open, setOpen] = useState(false);
+function SparkHistory({ spark, open, onToggle }) {
   useEffect(() => { spark.loadHistory(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = spark.history || [];
   if (!items.length) return null;
-  // The headline card is the last run that actually produced a report; an
-  // interrupted run still appears, but down in the list where it belongs.
-  const newest = items.find((h) => h.status !== "interrupted") || items[0];
-  const older = items.filter((h) => h !== newest);
+  const shown = open ? items : items.slice(0, 1);
 
   return (
     <div className="spark-history">
-      <button
-        className={`spark-last-run${newest.status === "interrupted" ? " is-interrupted" : ""}`}
-        onClick={() => newest.status !== "interrupted" && spark.showRun(newest.runId)}
-        title={newest.status === "interrupted" ? (newest.reason || "No report was produced") : "Open this report"}
-      >
-        <span className="spark-last-run-meta">
-          Last spark {new Date(newest.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-          {newest.certitude != null ? ` · ${newest.certitude}%` : ""}
-        </span>
-        <span className="spark-last-run-headline">{newest.headline}</span>
-        {newest.status === "interrupted" && newest.reason && (
-          <span className="spark-last-run-reason">{newest.reason}</span>
-        )}
-      </button>
-
-      {older.length > 0 && (
-        <>
-          <button className="spark-history-toggle" onClick={() => setOpen((v) => !v)}>
-            {open ? "Hide" : `${older.length} earlier spark${older.length > 1 ? "s" : ""}`}
-          </button>
-          {open && (
-            <ul className="spark-history-list">
-              {older.map((h) => (
-                <li key={h.runId}>
-                  <button
-                    onClick={() => h.status !== "interrupted" && spark.showRun(h.runId)}
-                    className={h.status === "interrupted" ? "is-interrupted" : ""}
-                    title={h.status === "interrupted" ? (h.reason || "No report was produced") : undefined}
-                  >
-                    <span className="spark-history-when">
-                      {new Date(h.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                    </span>
-                    {h.certitude != null && <span className="spark-history-pct">{h.certitude}%</span>}
-                    <span className="spark-history-headline">{h.headline}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+      {shown.map((h) => (
+        <button
+          key={h.runId}
+          className={`spark-last-run${h.status === "interrupted" ? " is-interrupted" : ""}`}
+          onClick={() => h.status !== "interrupted" && spark.showRun(h.runId)}
+          title={h.status === "interrupted" ? (h.reason || "No report was produced") : "Open this report"}
+        >
+          <span className="spark-last-run-meta">
+            {new Date(h.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            {h.certitude != null ? ` · ${h.certitude}%` : ""}
+            {h.route ? ` · ${h.route}` : ""}
+          </span>
+          <span className="spark-last-run-headline">{h.headline}</span>
+          {h.status === "interrupted" && h.reason && (
+            <span className="spark-last-run-reason">{h.reason}</span>
           )}
-        </>
+        </button>
+      ))}
+      {items.length > 1 && (
+        <button className="spark-history-toggle" onClick={onToggle}>
+          {open ? "Hide" : `${items.length - 1} earlier spark${items.length > 2 ? "s" : ""}`}
+        </button>
       )}
     </div>
   );
 }
 
-export default function SparkPanel({ spark, project, onUpdate, showToast, onGoToTerminal, isAdmin }) {
+export default function SparkPanel({ spark, project, showToast, onGoToTerminal, onGoToRunroom, isAdmin }) {
   const [now, setNow] = useState(Date.now());
+  const [historyOpen, setHistoryOpen] = useState(false);
   const running = spark.status === "scanning" || spark.status === "acting";
 
   const ticking = running || spark.status === "proposing";
@@ -373,23 +398,18 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
     if (res?.error) showToast(res.error);
   }
 
-  function applyNextStep() {
-    const value = spark.result?.proposed_next_step?.value;
-    if (!value) return;
-    onUpdate(project.id, { next_step: value });
-    showToast("Next step applied to the card");
-  }
-
   function copyReport() {
     const r = spark.result;
     if (!r) return;
     const text = [
-      r.headline,
+      r.where_it_stands,
       "",
-      `Next step (${r.certitude?.pct}% certain): ${r.next_step?.text}`,
+      `Next step (${r.certitude?.pct}% certain, ${r.next_step?.route}): ${r.next_step?.text}`,
+      r.next_step?.why || "",
       r.next_step?.first_action ? `First action: ${r.next_step.first_action}` : "",
-      "",
-      r.body_md,
+      (r.recent || []).length ? "\nRecent:" : "",
+      ...(r.recent || []).map((x) => `- ${x.date || "undated"} — ${x.text}`),
+      r.risk ? `\nRisk: ${r.risk}` : "",
     ].filter(Boolean).join("\n");
     navigator.clipboard?.writeText(text);
     showToast("Report copied");
@@ -405,15 +425,15 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
       <div className="spark-panel">
         <div className="spark-stage spark-idle">
           <p className="spark-idle-copy">
-            A 15-minute refresh across every message front for this card — email, Google
-            Voice, Google Chat, Notion, work sessions and artifacts — ending in one next
-            step and a confidence number.
+            A {SWEEP_MINUTES}-minute refresh across every message front for this card — email,
+            Google Voice, Google Chat, Notion, work sessions and artifacts — ending in one
+            next step, a confidence number, and a way to get it done.
           </p>
           <button className="spark-go" onClick={handleGo} disabled={spark.busy || !isAdmin}
                   title={isAdmin ? undefined : "Spark runs are admin-only"}>
             {spark.busy ? "Starting…" : "Go"}
           </button>
-          <SparkHistory spark={spark} />
+          <SparkHistory spark={spark} open={historyOpen} onToggle={() => setHistoryOpen((v) => !v)} />
         </div>
       </div>
     );
@@ -474,11 +494,6 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
     if (project.tmux_session) onGoToTerminal();
   }
 
-  async function closeSpark() {
-    await spark.cancel();
-    showToast("Spark timer closed");
-  }
-
   const holdingTimer = ["proposing", "acting"].includes(spark.status) && spark.timerStarted;
 
   // ── running (scan only — an act round renders under the result) ──────────
@@ -489,11 +504,10 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
           <SparkThinking verb={spark.verb} />
           <SparkFronts fronts={spark.fronts} order={spark.frontOrder} />
           <div className="spark-runfoot">
-            {/* ~5 min is how long a sweep actually takes (observed 2-3), not the
-                15-minute estimate it bills — this counter answers "how long am
-                I waiting", which is a different question from what it costs. */}
-            <span className={`spark-elapsed${elapsed > 600 ? " over" : ""}`}>
-              {fmtElapsed(elapsed)} <span className="spark-elapsed-of">of ~5 min</span>
+            {/* The counter answers "how long am I waiting"; the estimate beside
+                it is what the entry bills. Same number, stated once. */}
+            <span className={`spark-elapsed${elapsed > SWEEP_MINUTES * 60 ? " over" : ""}`}>
+              {fmtElapsed(elapsed)} <span className="spark-elapsed-of">of ~{SWEEP_MINUTES} min</span>
             </span>
             {spark.timerNote === "existing_timer" && (
               <span className="spark-accrual">Accruing to the running timer</span>
@@ -510,8 +524,7 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
   if (!r) return null;
 
   const frontsChecked = (r.fronts || []).filter((f) => f.state === "checked" || f.state === "done").length;
-  const proposed = r.proposed_next_step?.value;
-  const canApply = proposed && proposed !== project.next_step;
+  const frontTrouble = (r.fronts || []).filter((f) => f.state === "unavailable").map((f) => f.front);
 
   const wrapsInMin = spark.idleWrapAt
     ? Math.max(0, Math.round((spark.idleWrapAt - now) / 60000))
@@ -535,35 +548,12 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
                 ? ` — it closes itself in ${wrapsInMin} min if nothing is decided.`
                 : "."}
             </span>
-            <button className="spark-btn" onClick={closeSpark} disabled={spark.busy}>
-              Done — close timer
-            </button>
           </div>
         )}
 
         <SparkCertitude certitude={r.certitude} />
 
-        <h3 className="spark-headline">{r.headline}</h3>
-
-        <div className="spark-nextstep">
-          <div className="spark-nextstep-label">
-            Next step
-            {r.next_step?.owner && <span className="spark-nextstep-owner">{r.next_step.owner}</span>}
-            {r.next_step?.by_when && <span className="spark-nextstep-when">by {r.next_step.by_when}</span>}
-          </div>
-          <p className="spark-nextstep-text">{r.next_step?.text}</p>
-          {r.next_step?.first_action && (
-            <button
-              className="spark-nextstep-action"
-              onClick={() => { navigator.clipboard?.writeText(r.next_step.first_action); showToast("Copied"); }}
-              title="Copy"
-            >
-              {r.next_step.first_action}
-            </button>
-          )}
-        </div>
-
-        <SparkWho rows={r.who_does_what} />
+        {r.where_it_stands && <p className="spark-stands">{r.where_it_stands}</p>}
 
         {r.risk && (
           <div className="spark-risk">
@@ -572,39 +562,68 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
           </div>
         )}
 
-        <SparkFronts fronts={spark.fronts} order={spark.frontOrder} />
+        <SparkRecent recent={r.recent} />
 
-        <SparkBody md={r.body_md} animate={spark.liveResult} />
-
-        {spark.ballMoved && (
-          <p className="spark-ballmoved"><span>Ball moved</span>{spark.ballMoved}</p>
+        {spark.status === "proposing" && (
+          <SparkDecision
+            spark={spark}
+            showToast={showToast}
+            onGoToRunroom={onGoToRunroom}
+            isAdmin={isAdmin}
+          />
         )}
-
-        <SparkLedger ledger={spark.ledger} />
 
         {spark.status === "acting" && (
           <div className="spark-acting">
             <SparkThinking verb={spark.verb} />
+            {spark.stepState?.detail && <p className="spark-acting-detail">{spark.stepState.detail}</p>}
           </div>
         )}
 
-        {spark.drafts.map((d) => (
-          <SparkDraft key={d.id} draft={d} />
-        ))}
+        {/* A finished run still shows what it recommended, without the buttons. */}
+        {!["proposing", "acting"].includes(spark.status) && r.next_step && (
+          <div className="spark-decision is-closed">
+            <div className="spark-section-label">
+              Next step
+              {r.next_step.owner && <span className="spark-decision-owner">{r.next_step.owner}</span>}
+            </div>
+            <p className="spark-decision-text">{r.next_step.text}</p>
+            {r.next_step.why && <p className="spark-decision-why">{r.next_step.why}</p>}
+          </div>
+        )}
 
-        {spark.status === "proposing" && <SparkActions spark={spark} showToast={showToast} />}
-        {spark.status === "proposing" && <SparkHandoffs handoffs={spark.handoffs} />}
+        {spark.drafts.map((d) => <SparkDraft key={d.id} draft={d} />)}
+
+        <SparkLedger ledger={spark.ledger} />
+
+        {/* An error that arrives after a result used to be invisible: the error
+            branch above requires !result, so this is the only place it shows. */}
+        {spark.error && (
+          <p className="spark-error-msg spark-error-inline">{spark.error.message}</p>
+        )}
 
         {spark.accrualPaused && (
           <p className="spark-accrual-pause">
             This Spark has accrued 60 minutes. Further work belongs under a fresh timer —
-            hand off to a session to continue.
+            open a runroom to continue.
           </p>
+        )}
+
+        {/* Archived schema-1 runs carry a prose report the current schema does
+            not produce. Keep it rather than dropping detail the sweep did. */}
+        {r.body_md && (
+          <details className="spark-fullreport">
+            <summary>Full report</summary>
+            <pre>{r.body_md}</pre>
+          </details>
         )}
 
         <div className="spark-footer">
           <div className="spark-chips">
-            <span className="spark-chip">{frontsChecked} of 6 fronts</span>
+            <span className="spark-chip">
+              {frontsChecked} of {spark.frontOrder.length} fronts
+              {frontTrouble.length ? ` · ${frontTrouble.join(", ")} unread` : ""}
+            </span>
             {spark.elapsedSec ? <span className="spark-chip">{fmtElapsed(spark.elapsedSec)}</span> : null}
             {spark.accruedMinutes ? <span className="spark-chip">{spark.accruedMinutes}m billed</span> : null}
             {spark.costUsd != null && <span className="spark-chip">${spark.costUsd.toFixed(2)}</span>}
@@ -616,17 +635,9 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
             )}
           </div>
           <div className="spark-actions-row">
-            {canApply && (
-              <button className="spark-btn spark-btn-primary" onClick={applyNextStep}>
-                Apply next step
-              </button>
-            )}
             <button className="spark-btn" onClick={copyReport}>Copy report</button>
-            {["proposing", "acting"].includes(spark.status) ? (
-              <button className="spark-btn" onClick={doHandoff} disabled={spark.busy || !isAdmin}>
-                Hand off to session
-              </button>
-            ) : (
+            <button className="spark-btn" onClick={() => setHistoryOpen((v) => !v)}>History</button>
+            {!["proposing", "acting"].includes(spark.status) && (
               <button className="spark-btn" onClick={handleGo} disabled={spark.busy || !isAdmin}>Run again</button>
             )}
             {project.tmux_session && (
@@ -641,6 +652,10 @@ export default function SparkPanel({ spark, project, onUpdate, showToast, onGoTo
             )}
           </div>
         </div>
+
+        {historyOpen && (
+          <SparkHistory spark={spark} open onToggle={() => setHistoryOpen(false)} />
+        )}
       </div>
     </div>
   );

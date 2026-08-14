@@ -77,7 +77,7 @@ const INBOX_STATUS_DOT = {
   dismissed: "#475569",
 };
 
-export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab }) {
+export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab, onGoToRunroom }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
@@ -503,9 +503,9 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
           <SparkPanel
             spark={spark}
             project={project}
-            onUpdate={onUpdate}
             showToast={showToast}
             onGoToTerminal={() => setTab("terminal")}
+            onGoToRunroom={onGoToRunroom}
             isAdmin={isAdmin}
           />
         )}

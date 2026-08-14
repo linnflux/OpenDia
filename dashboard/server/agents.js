@@ -297,7 +297,10 @@ async function runHeartbeat(agent, state) {
     state.cardsDone += 1;
     ran += 1;
 
-    const actions = sparkRun.result?.actions?.length || 0;
+    // A scan produces one next step, not a menu, so "awaiting a decision" is a
+    // yes/no per card rather than a count of proposals.
+    const step = sparkRun.result?.next_step || null;
+    const awaiting = step ? 1 : 0;
     details.push({
       project_id: card.id,
       name: card.name,
@@ -305,8 +308,9 @@ async function runHeartbeat(agent, state) {
       status: sparkRun.error ? "error" : sparkRun.status,
       tokens,
       cost_usd: sparkRun.costUsd || 0,
-      next_step: sparkRun.result?.next_step || null,
-      actions,
+      next_step: step,
+      route: step?.route || null,
+      awaiting,
     });
     updateAgentRun(state.runId, {
       tokensUsed: state.tokens,
@@ -314,7 +318,8 @@ async function runHeartbeat(agent, state) {
       detail: JSON.stringify(details),
     });
     pushLog(state, "info",
-      `${card.name}: ${sparkRun.error ? "error" : "scanned"} — ${tokens} tokens, ${actions} proposal(s).`);
+      `${card.name}: ${sparkRun.error ? "error" : "scanned"} — ${tokens} tokens` +
+      (step ? `, next step awaiting a decision (${step.route}).` : ", no next step."));
     state.currentProject = null;
     emit(state, "progress", publicLive(state));
 
@@ -325,9 +330,9 @@ async function runHeartbeat(agent, state) {
     }
   }
 
-  const proposals = details.reduce((n, d) => n + (d.actions || 0), 0);
+  const proposals = details.reduce((n, d) => n + (d.awaiting || 0), 0);
   const summary =
-    `Swept ${state.cardsDone}/${cards.length} card(s), ${proposals} proposal(s) pending` +
+    `Swept ${state.cardsDone}/${cards.length} card(s), ${proposals} next step(s) awaiting a decision` +
     (finalStatus === "budget_exhausted" ? " — token limit hit" : "") +
     (finalStatus === "error" ? " — stopped early" : "") + ".";
 
@@ -348,7 +353,7 @@ async function runHeartbeat(agent, state) {
     const cardLinks = base
       ? details
           .filter((d) => d.spark_run_id)
-          .map((d) => `<${base}/?project=${d.project_id}&tab=spark|${d.name}>${d.actions ? ` (${d.actions})` : ""}`)
+          .map((d) => `<${base}/?project=${d.project_id}&tab=spark|${d.name}>${d.route ? ` (${d.route})` : ""}`)
           .join(", ")
       : "";
     await notifyChat(agent.chat_webhook_url,

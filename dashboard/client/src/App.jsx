@@ -694,6 +694,10 @@ export default function App() {
           onInboxItemClick={handleInboxItemClick}
           isAdmin={!!me?.is_admin}
           initialTab={deepLinkTab || undefined}
+          // Spark opens a runroom in a tmux session; the room itself is a
+          // top-level view, so the card gets out of the way rather than
+          // stacking a second surface on top of it.
+          onGoToRunroom={() => { handleModalClose(); setView("runrooms"); }}
         />
       )}
       {selectedInboxItem && (

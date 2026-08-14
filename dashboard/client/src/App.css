@@ -5098,25 +5098,9 @@ html.vt-no-target::view-transition-old(card-morph) {
   max-width: 62ch;
 }
 
-/* ── recommendation ── */
+/* ── where it stands ── */
 
-.spark-headline {
-  margin: 0 0 1rem;
-  font-size: 1.14rem;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--text-heading);
-  max-width: 56ch;
-}
-
-.spark-nextstep {
-  padding: 0.9rem 1.05rem;
-  margin-bottom: 1.1rem;
-  background: var(--next-step-modal-bg);
-  border: 1px solid var(--next-step-modal-border);
-  border-radius: var(--radius-md);
-}
-.spark-nextstep-label {
+.spark-section-label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -5124,9 +5108,69 @@ html.vt-no-target::view-transition-old(card-morph) {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-faint);
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.45rem;
 }
-.spark-nextstep-owner {
+
+.spark-stands {
+  margin: 0 0 1.25rem;
+  max-width: 62ch;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* ── recent activity ── */
+
+.spark-recent { margin-bottom: 1.35rem; }
+.spark-recent-list { list-style: none; margin: 0; padding: 0; }
+.spark-recent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding: 0.22rem 0;
+  font-size: 0.81rem;
+  line-height: 1.5;
+}
+.spark-recent-date {
+  flex: 0 0 3.5rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.spark-recent-front {
+  flex: 0 0 auto;
+  padding: 0.02rem 0.4rem;
+  font-size: 0.66rem;
+  border-radius: var(--radius-pill);
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-faint);
+}
+.spark-recent-text { color: var(--text-secondary); min-width: 0; }
+.spark-recent-more { margin-top: 0.3rem; }
+.spark-recent-more > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  padding: 0.15rem 0;
+}
+.spark-recent-more > summary:hover { color: var(--text-secondary); }
+
+/* ── the decision ──
+   One step, one route, three answers. The step text is the largest prose on the
+   page on purpose: everything above it is context for this sentence. */
+
+.spark-decision {
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+  background: var(--next-step-modal-bg);
+  border: 1px solid var(--next-step-modal-border);
+  border-radius: var(--radius-md);
+}
+.spark-decision.is-lowcert { border-color: var(--pill-warn-border, var(--border-hover)); }
+/* A finished run keeps its recommendation on screen, minus the buttons. */
+.spark-decision.is-closed { background: var(--bg-recessed); opacity: 0.85; }
+
+.spark-decision-owner {
   padding: 0.05rem 0.45rem;
   border-radius: var(--radius-pill);
   background: var(--pill-active-bg);
@@ -5136,15 +5180,34 @@ html.vt-no-target::view-transition-old(card-morph) {
   text-transform: none;
   font-size: 0.7rem;
 }
-.spark-nextstep-when { letter-spacing: 0; text-transform: none; }
-.spark-nextstep-text {
-  margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.55;
+.spark-decision-when { letter-spacing: 0; text-transform: none; }
+
+.spark-decision-text {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.45;
   color: var(--next-step-modal-color);
+  max-width: 56ch;
 }
-.spark-nextstep-action {
-  margin-top: 0.65rem;
+.spark-decision-why {
+  margin: 0 0 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+.spark-decision-cert {
+  margin: 0 0 0.7rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.spark-decision-cert-reason { font-weight: 400; color: var(--text-muted); }
+
+.spark-decision-action {
+  display: block;
+  margin-bottom: 0.8rem;
   padding: 0.3rem 0.6rem;
   font-family: var(--font-mono);
   font-size: 0.76rem;
@@ -5158,37 +5221,54 @@ html.vt-no-target::view-transition-old(card-morph) {
   overflow-x: auto;
   white-space: nowrap;
 }
-.spark-nextstep-action:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.spark-decision-action:hover { border-color: var(--border-hover); color: var(--text-primary); }
 
-/* ── who does what ── */
-
-.spark-who { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.1rem; }
-.spark-who-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  font-size: 0.84rem;
-}
-.spark-who-main { display: flex; align-items: baseline; gap: 0.5rem; flex: 1; min-width: 0; }
-.spark-who-name { font-weight: 600; color: var(--text-primary); flex: 0 0 auto; }
-.spark-who-does { color: var(--text-secondary); line-height: 1.5; }
-.spark-who-when {
-  margin-left: auto;
-  flex: 0 0 auto;
-  padding: 0.05rem 0.5rem;
-  font-size: 0.7rem;
-  border-radius: var(--radius-pill);
-  background: var(--pill-active-bg);
-  color: var(--pill-active-color);
-  border: 1px solid var(--pill-active-border);
-}
-.spark-who-blocked {
-  flex-basis: 100%;
-  padding-left: 0.2rem;
-  font-size: 0.75rem;
+.spark-decision-lowcert {
+  margin: 0 0 0.8rem;
+  font-size: 0.76rem;
+  line-height: 1.55;
   color: var(--pill-warn-color);
+  max-width: 62ch;
 }
+
+.spark-decision-buttons { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+.spark-btn-mins {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.spark-btn-quiet { opacity: 0.6; }
+.spark-btn-quiet:hover { opacity: 1; }
+
+.spark-decision-round {
+  margin: 0.7rem 0 0;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+/* ── adjust ──
+   The correction outranks the recommendation, so it gets the whole box rather
+   than a footnote under a list of choices. */
+
+.spark-adjust { display: flex; flex-direction: column; gap: 0.6rem; }
+.spark-adjust-note {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+.spark-adjust-note:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.spark-adjust-note::placeholder { color: var(--text-faint); }
 
 .spark-risk {
   display: flex;
@@ -5207,21 +5287,37 @@ html.vt-no-target::view-transition-old(card-morph) {
   padding-top: 0.15rem;
 }
 
-/* ── report body ── */
+/* ── archived prose report ──
+   Only schema-1 runs carry body_md. Kept so an old report loses nothing, folded
+   away so it never competes with the decision above it. */
 
-.spark-body-wrap { position: relative; margin-bottom: 1.25rem; }
-.spark-body {
-  max-width: 62ch;
-  line-height: 1.65;
-  font-family: var(--font-sans);
-}
-.spark-skip-hint {
-  position: absolute;
-  right: 0;
-  bottom: -1.1rem;
-  font-size: 0.68rem;
+.spark-fullreport { margin-bottom: 1.25rem; }
+.spark-fullreport > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
   color: var(--text-faint);
-  pointer-events: none;
+  padding: 0.15rem 0;
+}
+.spark-fullreport > summary:hover { color: var(--text-secondary); }
+.spark-fullreport pre {
+  margin: 0.5rem 0 0;
+  max-width: 62ch;
+  white-space: pre-wrap;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.spark-error-inline {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+}
+
+.spark-acting-detail {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 /* ── footer ── */
@@ -5311,71 +5407,7 @@ html.vt-no-target::view-transition-old(card-morph) {
   .spark-certitude-fill { transition: none; }
 }
 
-/* ── Spark: proposals, drafts, ledger ────────────────────────────────────── */
-
-.spark-proposals, .spark-handoffs { margin-top: 1.4rem; }
-
-.spark-proposals-label {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  margin-bottom: 0.7rem;
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.spark-proposals-round { margin-left: auto; letter-spacing: 0; text-transform: none; }
-
-.spark-action {
-  padding: 0.8rem 0.95rem;
-  margin-bottom: 0.6rem;
-  background: var(--bg-recessed);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  transition: border-color 0.15s, opacity 0.15s;
-}
-.spark-action.picked-do { border-color: var(--accent); }
-.spark-action.picked-skip { opacity: 0.5; }
-
-.spark-action-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
-.spark-action-label { font-size: 0.86rem; font-weight: 600; color: var(--text-primary); }
-.spark-action-mins {
-  margin-left: auto;
-  padding: 0.05rem 0.45rem;
-  font-size: 0.68rem;
-  border-radius: var(--radius-pill);
-  background: var(--pill-active-bg);
-  color: var(--pill-active-color);
-  border: 1px solid var(--pill-active-border);
-}
-.spark-action-what { margin: 0 0 0.25rem; font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary); }
-.spark-action-why { margin: 0; font-size: 0.76rem; line-height: 1.5; color: var(--text-muted); }
-.spark-action-preview {
-  display: block;
-  margin-top: 0.45rem;
-  padding: 0.3rem 0.5rem;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  background: var(--kbd-bg);
-  border-radius: var(--radius-sm);
-  overflow-x: auto;
-  white-space: pre;
-}
-.spark-action-buttons { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
-.spark-btn-chosen { border-color: var(--border-hover); color: var(--text-primary); background: var(--bg-hover); }
-
-.spark-proposals-run { display: flex; align-items: center; gap: 0.7rem; margin-top: 0.8rem; }
-.spark-proposals-hint { font-size: 0.72rem; color: var(--text-faint); }
-
-.spark-handoff {
-  padding: 0.7rem 0.9rem;
-  margin-bottom: 0.5rem;
-  border-left: 2px solid var(--pill-warn-color);
-  background: var(--bg-recessed);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-}
+/* ── Spark: drafts, ledger ───────────────────────────────────────────────── */
 
 /* ── drafts ── */
 
@@ -5425,23 +5457,6 @@ html.vt-no-target::view-transition-old(card-morph) {
 .spark-ledger-row.is-blocked .spark-ledger-glyph { color: var(--pill-warn-color); }
 
 .spark-acting { margin-top: 1rem; }
-
-.spark-ballmoved {
-  display: flex;
-  gap: 0.6rem;
-  margin: 1rem 0 0;
-  font-size: 0.82rem;
-  line-height: 1.55;
-  color: var(--text-secondary);
-}
-.spark-ballmoved span {
-  flex: 0 0 auto;
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  padding-top: 0.15rem;
-}
 
 .spark-accrual-pause {
   margin: 1.1rem 0 0;
@@ -5499,40 +5514,6 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .spark-history-toggle:hover { color: var(--text-secondary); }
 
-.spark-history-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  max-width: 46ch;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.spark-history-list button {
-  display: flex;
-  align-items: baseline;
-  gap: 0.55rem;
-  width: 100%;
-  padding: 0.35rem 0.55rem;
-  text-align: left;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-family: var(--font-sans);
-}
-.spark-history-list button:hover { background: var(--bg-hover); border-color: var(--border-subtle); }
-.spark-history-when { flex: 0 0 auto; font-size: 0.7rem; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.spark-history-pct { flex: 0 0 auto; font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.spark-history-headline {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .spark-interrupted-note {
   margin: 0;
   max-width: 56ch;
@@ -5541,52 +5522,10 @@ html.vt-no-target::view-transition-old(card-morph) {
   color: var(--text-muted);
 }
 
-/* A run with no report is listed but not openable — dimmed, default cursor. */
-.spark-history-list button.is-interrupted {
-  opacity: 0.6;
-  cursor: default;
-}
-.spark-history-list button.is-interrupted:hover {
-  background: none;
-  border-color: transparent;
-}
-
 /* Nothing to open, so it must not invite a click. */
 .spark-last-run.is-interrupted { cursor: default; opacity: 0.75; }
 .spark-last-run.is-interrupted:hover { border-color: var(--border-subtle); }
 .spark-last-run-reason { font-size: 0.7rem; color: var(--text-faint); }
-
-/* Operator clarification on a proposal round — same idea as the inbox
-   dispatcher's operator notes: a place to correct the plan before it runs. */
-.spark-note {
-  display: block;
-  margin: 0.9rem 0 0.2rem;
-}
-.spark-note-label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.spark-note-input {
-  width: 100%;
-  padding: 0.5rem 0.65rem;
-  font-family: var(--font-sans);
-  font-size: 0.82rem;
-  line-height: 1.5;
-  color: var(--text-primary);
-  background: var(--bg-input);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  resize: vertical;
-}
-.spark-note-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.spark-note-input::placeholder { color: var(--text-faint); }
 
 /* ── Runrooms ──────────────────────────────────────────────────────────────
    A plan walked step by step, bound to a live session. Read-only in build

@@ -5,17 +5,29 @@ state, and its **Terminal** tab mirrors a tmux session. Neither answers the
 question actually being asked when a card is reopened after a gap: *what
 changed, whose court is the ball in, and what is the next step?*
 
-**Spark** is a third tab that sweeps every message front for the card, reports
-one next step with a self-rated certitude number, and then offers to do the
-next two or three things — one approval at a time, without dropping into a
-session. Work it performs accrues to the card's timer.
+**Spark** is a third tab that sweeps every message front for the card and
+answers exactly that, in four parts: where the project stands, what has happened
+lately, **one** next step, and how much to trust it. Then it offers to get that
+step done — carrying it out here, or opening a runroom for a human. Work it
+performs accrues to the card's timer.
+
+One step, not a menu. An earlier version proposed up to three tiered actions,
+which left the operator doing the deciding Spark was supposed to do. With a
+single recommendation there is nothing to rank, and the only open question is
+who carries it out — which is one field, not a per-action tier.
 
 ```
   scanning ──▶ proposing ──▶ acting ──▶ proposing ──▶ … ──▶ wrapping ──▶ done
                   │  ▲                     │                    ▲
-                  │  └─────────────────────┘                    │
-                  └── all skipped / nothing to do ──────────────┘
+                  │  └── do / adjust ──────┘                    │
+                  └── not now / runroom / nothing left ─────────┘
 ```
+
+The report also **writes its recommendation to the card**. `card_next_step` goes
+straight into `projects.next_step` when the scan finishes, and again after every
+round. That used to require a human clicking Apply at the bottom of a long
+scroll, which meant a report that named the right next step routinely failed to
+put it anywhere anyone would see it.
 
 ## What it checks
 
@@ -46,39 +58,77 @@ from the card alone), and at least 15 points come off for every front that
 could not be read. Without an anchor like that, a model returns 80 for
 everything.
 
-## Actions and tiers
+## The decision: one step, one route
 
-Each round proposes at most three actions. Each is approved or skipped
-individually, and only the approved ones run.
+The step carries a `route`, **named rather than numbered** — the model has to
+emit the field from a routine it read once, and `"human"` is self-describing
+where `3` was a mapping it had to recall. Anything unrecognised resolves to
+`"human"`, since guessing toward `"opendia"` would point automation at work that
+should have had a person in front of it.
 
-There are two tiers, and they are **named rather than numbered** — the model
-has to emit the field from a routine it read once, and `"handoff"` is
-self-describing where `3` was a mapping it had to recall. An unrecognised value
-resolves to `"handoff"`, since guessing toward "performed" would be the
-dangerous direction.
+- **`"opendia"` — the dashboard does it on approval.** Card updates, Notion
+  updates, creating a Gmail **draft**, writing a handoff brief, opening a Room,
+  read-only diagnostics, appending to the daily log.
+- **`"human"` — becomes a runroom.** Anything over SSH or on a server, any write
+  to a live client system, calendar events, anything financial or AR-related,
+  git commits or pushes, and anything needing a judgement call.
 
-- **`"performed"` — done on approval.** Card updates, Notion updates, creating
-  a Gmail **draft**, writing a handoff brief, opening a Room, read-only
-  diagnostics, appending to the daily log.
-- **`"handoff"` — never performed.** Anything over SSH or on a server, any
-  write to a live client system, calendar events, anything financial or
-  AR-related, and git commits or pushes. These become a **handoff** to a
-  working session.
+The route decides which button appears, so the panel never offers a choice about
+*how* on top of the choice about *whether*:
 
-Sending email is not a tier. Spark's outbound responsibility ends at the Gmail
+| Button | When | What happens |
+|---|---|---|
+| **Do it** | `route: "opendia"` | An act round carries the step out; its minutes accrue to the timer. |
+| **Open a runroom** | `route: "human"` | §Runrooms below. |
+| **Adjust** | always | Nothing is performed. The typed correction outranks the recommendation, and a revised step comes back. |
+| **Not now** | always | Closes the run, billing what it accrued. |
+
+**Certitude changes the emphasis.** Below 60 — where the rubric says fronts
+disagreed or a decisive one could not be read — the panel demotes the acting
+button and makes **Adjust** primary, because a step Spark is not confident in is
+one to correct rather than point automation at. It is a visual gate, not a lock;
+the server ships the threshold so both surfaces agree on one number.
+
+Sending email is not a route. Spark's outbound responsibility ends at the Gmail
 draft; the pane renders recipient, subject and body only as a read-back, and a
 human sends from Gmail. An earlier version had a middle tier for exactly that
 and it was removed rather than kept.
 
-Runs archived before the rename carry integer tiers (`1`, `2`, `3`). They are
-coerced on read — `1` to performed, `2` and `3` to handoff — so old reports
-still render correctly.
+Runs archived before schema 2 carry per-action tiers (`performed`/`handoff`, or
+integers `1`/`2`/`3` from before that). They are coerced on read — `performed`
+and `1` to `opendia`, everything else to `human` — so old reports still render.
 
-Handoff is always the last thing a run does: it writes a brief to
-`~/OpenDia/handoffs/`, then closes the Spark timer so `/od-go` in that session
-starts clean.
+## Runrooms
 
-## How the tiers are actually held
+A `human` step is not a dead end. **Open a runroom** seeds a plan, opens a
+session on it, and gets out of the way:
+
+1. Resolve a free tmux session name (the card's, or a slug of its name, with
+   dispatch_spawn.sh's `-2, -3` collision convention).
+2. Write the handoff brief to `~/OpenDia/handoffs/<session>.md`.
+3. Write `~/OpenDia/runrooms/<session>/plan.json` with the step as step 1,
+   archiving any existing plan first.
+4. **Close the Spark timer**, committing its accrued minutes.
+5. Spawn the session via `scripts/dispatch_spawn.sh` (opusplan, plan mode).
+6. Point the card's `tmux_session` at it.
+
+**Step 4 comes before step 5 and that ordering is the whole function.** The
+`/runroom` contract says room work bills to the timer the session already runs
+and never opens a second one, so Spark's entry has to be closed before a session
+exists that could start one of its own. Spawn first and every runroom
+double-bills the card. The cost of that ordering is that a spawn failure leaves
+the run already wrapped up — which is the right way round: the report is on disk
+in history, the minutes are billed honestly, and retrying costs one click.
+
+The name is resolved *before* anything is written because the plan lives in a
+directory named after the session. If something claims the name between the
+check and the spawn, `relocatePlan` moves the plan to the name the spawn
+actually took, and refuses if that would overwrite a live plan.
+
+`runrooms.js` stays read-only — the writer lives in its own
+`dashboard/server/runroom_build.js`.
+
+## How the routes are actually held
 
 Prompt instructions are not enforcement. Two mechanisms, both verified against
 the CLI on this machine:
@@ -99,16 +149,24 @@ the dashboard. `gmail_send` is denied in both phases, the guard hook blocks the
 shell equivalents, and there is no send route on the server. The only outbound
 artifact Spark produces is a Gmail draft.
 
-Report text is derived from client email and chat and is rendered as markdown,
-so every string is `<`-escaped server-side before it leaves the API — markdown
-still works, HTML cannot.
+Report text is derived from client email and chat, so it is treated as data
+throughout. It is **not** escaped server-side: the panel renders every field as
+a JSX text node, which React escapes, while the report's other consumers are all
+plain text — the handoff brief, the runroom plan's detail pane, the timer notes,
+and `next_step` on its way into SQLite. Escaping at the source corrupted every
+one of those (a brief once read `~/OpenDia/runrooms/&lt;session>/plan.json`).
+Escape at the render boundary, not at the source; if a future surface renders a
+report as HTML, that surface escapes it.
 
 ## Timers
 
 A Spark opens a timer on the card at a **15-minute estimate** — the cost of a
-human diving back in to refresh themselves — and each completed action adds its
+human diving back in to refresh themselves — and each step carried out adds its
 own minutes, up to a 60-minute pause where continuing becomes an explicit
-decision. `estimated_minutes` is what bills, per the usual convention.
+decision. `estimated_minutes` is what bills, per the usual convention, and
+`setEntryEstimate` rewrites it in **both** the markdown entry and the state
+file, so a run recovered after a restart does not fall back to the base estimate
+and lose what it accrued.
 
 Two details that matter:
 
@@ -133,7 +191,7 @@ goes to the existing entry instead.
 | `SPARK_LOG_NOTION` | `true` | append the timer to the linked Notion task |
 
 Runs cost roughly $0.90-1.00 each on Opus. Hard limits: 4 rounds, 8 executed
-actions, 20 minutes per invocation, and a 30-minute idle wrap so a walked-away
+steps, 20 minutes per invocation, and a 30-minute idle wrap so a walked-away
 decision never leaves a timer open.
 
 ## Closing a run, and never being stranded
@@ -179,21 +237,26 @@ how far it got.
 
 Every run is kept forever under `~/OpenDia/spark/<card>/<run>/` — the brief,
 the raw stream, the round files, and `result.json`. The idle pane shows the
-most recent report and lists the earlier ones; any of them can be reopened,
-and a replayed report never re-runs the typewriter.
+most recent report and lists the earlier ones; any of them can be reopened, and
+the footer's **History** button reaches the same list from a finished run.
+
+`result.json` is rewritten after every round, so a run's file records what it
+**concluded** rather than what it first guessed — which is also what recovery
+re-offers after a restart. The round files are read back at the same time, so a
+recovered run does not get four fresh rounds on top of the ones already spent,
+and its timer notes keep the bullet for every step actually carried out.
 
 ## Known limitations
 
 - **Typing in the Terminal tab requires Take Control**, which opens a
   30-minute timer. That is a heavy door for a short follow-up question about a
   recommendation.
-- The email **draft** path has not yet run end to end; no run has proposed a
-  draft on a card used for testing, so `gmail_create_draft` firing from the act
-  phase is unproven. (The send half of this is no longer a limitation — it was
-  removed rather than tested.)
 - The non-admin gate is untested from a real non-admin identity — loopback is
   unconditionally admin, so it can only be exercised through Tailscale
   identity headers.
+- A spawned runroom session is handed the brief but does not yet adopt the
+  seeded `plan.json` on its own; the plan renders for the operator, and the
+  session picks it up when told to.
 
 ## Layout
 
@@ -204,8 +267,9 @@ and a replayed report never re-runs the typewriter.
 | `scripts/chat_helper.py` | read-only Google Chat client (headless) |
 | `scripts/spark_guard.py` | PreToolUse guard hook |
 | `dashboard/client/src/components/SparkPanel.jsx` | the pane |
+| `dashboard/server/runroom_build.js` | the only writer of a runroom plan |
+| `scripts/dispatch_spawn.sh` | spawns the tmux session a runroom binds to |
 | `dashboard/client/src/hooks/useSparkRun.js` | run state, owned by `CardModal` so it survives tab switches |
-| `dashboard/client/src/hooks/useTypewriter.js` | the accelerating reveal |
 | `~/.claude/commands/spark.md`, `spark-act.md` | the routines (outside this repo — they reference operator-private material) |
 
 Transport is SSE, not a WebSocket: `terminal.js`'s upgrade handler destroys

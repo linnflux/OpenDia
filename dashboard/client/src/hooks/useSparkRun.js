@@ -15,25 +15,31 @@ const RUNNING = new Set(["scanning", "acting", "proposing", "wrapping"]);
 // The server pings every 20s; give it two beats plus slack before calling it.
 const STALE_MS = 50_000;
 
+// Everything a report puts on screen. Kept as one group so returning to idle,
+// or opening a past run, can clear the previous run's leftovers in one place —
+// a past report used to render with the live run's ledger and drafts still
+// underneath it.
+function emptyReport() {
+  return {
+    result: null,
+    fronts: null,
+    ledger: [],
+    drafts: [],
+    stepState: null,
+    error: null,
+  };
+}
+
 function emptyState() {
   return {
     // idle | scanning | proposing | acting | wrapping | done | error | cancelled
     status: "idle",
     runId: null,
-    fronts: null,
     verb: null,
-    ledger: [],
-    actions: [],
-    actionStates: {},
-    handoffs: [],
-    drafts: [],
-    completed: [],
-    ballMoved: null,
+    ...emptyReport(),
     round: 0,
     roundsUsed: 0,
     roundsMax: 4,
-    result: null,
-    error: null,
     accruedMinutes: 0,
     accrualPaused: false,
     idleWrapAt: null,
@@ -41,6 +47,7 @@ function emptyState() {
     timerNote: null,
     costUsd: null,
     model: null,
+    lowCertitude: 60,
     startedAt: null,
     elapsedSec: 0,
     viewingPast: null,   // ISO date when showing a past run rather than a live one
@@ -49,13 +56,9 @@ function emptyState() {
 
 export default function useSparkRun(projectId) {
   const [state, setState] = useState(emptyState);
-  const [lastRun, setLastRun] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  // True only for a result that arrived live in this session — a replayed
-  // result must not re-run the typewriter.
-  const [liveResult, setLiveResult] = useState(false);
   const esRef = useRef(null);
   const staleRef = useRef(null);
 
@@ -70,12 +73,8 @@ export default function useSparkRun(projectId) {
       ledger: run.ledger ?? s.ledger,
       result: run.result ?? s.result,
       error: run.error ?? s.error,
-      actions: run.actions ?? s.actions,
-      actionStates: run.actionStates ?? s.actionStates,
-      handoffs: run.handoffs ?? s.handoffs,
+      stepState: run.stepState ?? s.stepState,
       drafts: run.drafts ?? s.drafts,
-      completed: run.completed ?? s.completed,
-      ballMoved: run.ballMoved ?? s.ballMoved,
       round: run.round ?? s.round,
       roundsUsed: run.roundsUsed ?? s.roundsUsed,
       roundsMax: run.roundsMax ?? s.roundsMax,
@@ -86,6 +85,7 @@ export default function useSparkRun(projectId) {
       timerNote: run.timerNote ?? s.timerNote,
       costUsd: run.costUsd ?? s.costUsd,
       model: run.model ?? s.model,
+      lowCertitude: run.lowCertitude ?? s.lowCertitude,
       startedAt: run.startedAt ?? s.startedAt,
       elapsedSec: run.elapsedSec ?? s.elapsedSec,
     }));
@@ -152,26 +152,24 @@ export default function useSparkRun(projectId) {
       accruedMinutes: d.accrued ?? s.accruedMinutes,
     })));
     on("ledger", (d) => setState((s) => ({ ...s, ledger: [...s.ledger, d] })));
-    on("actions", (d) => setState((s) => ({
+    on("next_step", (d) => setState((s) => ({
       ...s,
       status: "proposing",
-      actions: d.items || [],
-      handoffs: d.handoffs || [],
-      actionStates: Object.fromEntries((d.items || []).map((a) => [a.id, { state: "pending" }])),
+      round: d.round ?? s.round,
+      stepState: null,
+      result: s.result ? { ...s.result, next_step: d.step } : s.result,
     })));
-    on("action_progress", (d) => setState((s) => ({
-      ...s,
-      actionStates: { ...s.actionStates, [d.id]: { state: d.state, detail: d.detail } },
-    })));
+    on("step_progress", (d) => setState((s) => ({ ...s, stepState: d })));
     on("draft", (d) => setState((s) => ({
       ...s,
       drafts: s.drafts.some((x) => x.id === d.id)
         ? s.drafts.map((x) => (x.id === d.id ? d : x))
         : [...s.drafts, d],
     })));
-    on("ball_moved", (d) => setState((s) => ({ ...s, ballMoved: d.text })));
-    on("result", (d) => { setLiveResult(true); setState((s) => ({ ...s, result: d })); });
-    on("error", (d) => setState((s) => ({ ...s, error: d, status: "error" })));
+    on("result", (d) => setState((s) => ({ ...s, result: d })));
+    // An error after a result is still an error. The panel keeps showing the
+    // report and surfaces this alongside it rather than swallowing it.
+    on("error", (d) => setState((s) => ({ ...s, error: d, status: s.result ? s.status : "error" })));
     on("end", (d) => {
       setState((s) => ({
         ...s,
@@ -200,16 +198,13 @@ export default function useSparkRun(projectId) {
   useEffect(() => {
     let cancelled = false;
     setState(emptyState());
-    setLastRun(null);
     setHistory([]);
-    setLiveResult(false);
     setLoading(true);
     fetch(`/api/projects/${projectId}/spark`)
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
-        setLastRun(d.lastRun || null);
-        setState((s) => ({ ...s, model: d.model || s.model, canStart: d.canStart }));
+        setState((s) => ({ ...s, model: d.model || s.model, lowCertitude: d.lowCertitude ?? s.lowCertitude }));
         if (d.run) {
           applyRun(d.run);
           if (!d.run.finishedAt) openStream();
@@ -226,8 +221,10 @@ export default function useSparkRun(projectId) {
       const res = await fetch(`/api/projects/${projectId}/spark`, { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) return { error: body.error || `HTTP ${res.status}` };
-      setState({ ...emptyState(), status: "scanning", runId: body.runId, startedAt: Date.now() });
-      setLiveResult(false);
+      setState((s) => ({
+        ...emptyState(), model: s.model, lowCertitude: s.lowCertitude,
+        status: "scanning", runId: body.runId, startedAt: Date.now(),
+      }));
       openStream();
       return { ok: true };
     } catch (err) {
@@ -244,18 +241,20 @@ export default function useSparkRun(projectId) {
     } catch {} finally { setBusy(false); }
   }, [projectId]);
 
-  const decide = useCallback(async (decisions, note = "") => {
+  /** One decision on the one next step: "do" | "runroom" | "adjust" | "stop".
+   *  Returns the server's body so the caller can navigate to a new runroom. */
+  const decide = useCallback(async (intent, note = "") => {
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/spark/decide`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisions, note }),
+        body: JSON.stringify({ intent, note }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) return { error: body.error || `HTTP ${res.status}` };
       setState((s) => ({ ...s, status: body.started ? "acting" : "wrapping" }));
-      return { ok: true };
+      return { ok: true, ...body };
     } catch (err) {
       return { error: err.message };
     } finally { setBusy(false); }
@@ -273,12 +272,6 @@ export default function useSparkRun(projectId) {
     } finally { setBusy(false); }
   }, [projectId]);
 
-  const showLastRun = useCallback(() => {
-    if (!lastRun?.result) return;
-    setLiveResult(false);
-    setState((s) => ({ ...s, status: "done", result: lastRun.result, viewingPast: lastRun.at }));
-  }, [lastRun]);
-
   const loadHistory = useCallback(async () => {
     try {
       const r = await fetch(`/api/projects/${projectId}/spark/history`);
@@ -289,34 +282,32 @@ export default function useSparkRun(projectId) {
   }, [projectId]);
 
   // Past runs are kept on disk forever, so an old report can always be reopened.
+  // Everything the live run put on screen is cleared first: a past report has no
+  // ledger, no drafts and no fronts of its own, and leaving the previous run's
+  // showing under it made the archive look like it had just happened.
   const showRun = useCallback(async (runId) => {
     try {
       const r = await fetch(`/api/projects/${projectId}/spark/history/${runId}`);
       if (!r.ok) return;
       const d = await r.json();
-      setLiveResult(false);
-      setState((s) => ({ ...s, status: "done", result: d.result, viewingPast: d.at }));
+      setState((s) => ({ ...s, ...emptyReport(), status: "done", result: d.result, viewingPast: d.at }));
     } catch {}
   }, [projectId]);
 
   const backToIdle = useCallback(() => {
-    setState((s) => ({ ...s, status: "idle", result: null, viewingPast: null }));
+    setState((s) => ({ ...s, ...emptyReport(), status: "idle", viewingPast: null }));
   }, []);
 
   return {
     ...state,
-    fronts: state.fronts,
     frontOrder: FRONT_ORDER,
-    lastRun,
     history,
     loading,
     busy,
-    liveResult,
     start,
     cancel,
     decide,
     handoff,
-    showLastRun,
     loadHistory,
     showRun,
     backToIdle,

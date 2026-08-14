@@ -12,7 +12,8 @@ stderr to deny (the model sees the reason and moves on).
 
 Two rules, both deliberately blunt:
   * Bash commands matching an outbound/remote/destructive pattern are denied.
-    Spark drafts; a human clicks send. Spark reports; a session does the work.
+    Spark drafts; a human sends from Gmail. Spark recommends; a runroom session
+    does the work that belongs on a server.
   * Write/Edit outside the run directory (and the handoffs directory) is denied,
     so a run cannot rewrite the repo it is reporting on.
 
@@ -66,9 +67,10 @@ def denied_reason(tool_name: str, tool_input: dict, run_dir: Path, allow_dirs: l
             if re.search(pattern, command, re.IGNORECASE):
                 return (
                     f"Spark may not run a command that {label}. "
-                    "Propose it as an action for a human to approve instead — "
-                    'tier "handoff" for anything on a server or in git. Sending '
-                    "mail is not proposable at all: leave a Gmail draft instead."
+                    "Recommend it as the next step instead, routed \"human\" — "
+                    "anything on a server or in git becomes a runroom and a "
+                    "working session. Sending mail is not recommendable at all: "
+                    "leave a Gmail draft instead."
                 )
         return None
 
