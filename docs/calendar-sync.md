@@ -9,7 +9,7 @@ manual steps.
 
 | Component | What | Runs |
 |---|---|---|
-| `scripts/calendar_sync.py` | The whole sync + slot scheduler + watch-channel renewal | cron `*/10 6-22 * * *` → `logs/calendar-sync.log`; on Google webhook pings; on `POST /api/calendar/sync`; and automatically after OpenDia-side writes (due-date bump, deadline status change, card next_step/status PATCH, /od-stop, /od-new, /notion-now). Only direct Notion-UI edits wait for the poll. |
+| `scripts/calendar_sync.py` | The whole sync + slot scheduler + watch-channel renewal | cron `*/10 6-22 * * *` → `logs/calendar-sync.log`; on Google webhook pings; on `POST /api/calendar/sync`; and automatically after OpenDia-side writes (due-date bump, deadline status change, card next_step/status PATCH, Spark/ODA next-step writes, /od-stop, /od-new, /notion-now). Only direct Notion-UI edits wait for the poll. |
 | Google watch channel | Push notification on any calendar change → instant sync | 7-day TTL, auto-renewed by any sync run within 12h of expiry |
 | `POST /api/calendar/webhook` (dashboard) | Receives Google pings (public route, token-validated), coalesces sync runs | always (dashboard service) |
 | `cloudflared-opendia` (user systemd) | Cloudflare Tunnel exposing ONLY the webhook path publicly | always; `Restart=always`; linger enabled so it survives reboot without login |

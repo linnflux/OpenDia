@@ -41,6 +41,7 @@ import { getTimerEntriesForProject } from "./timers.js";
 import { fetchNotionPage, searchNotionForProject, appendTimerLog } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
 import { requireAdmin } from "./auth.js";
+import { PORT } from "./config.js";
 import {
   etNow, durationStr, minutesBetween, listRunningTimers,
   findTimerForSession, startTimerForProject, closeTimerEntry, setEntryEstimate
@@ -1110,6 +1111,10 @@ function applyCardNextStep(run, project) {
     updateProject(project.id, { next_step: value });
     project.next_step = value;
     pushLedger(run, "done", `Card next step set to "${value}".`);
+    // The calendar trigger lives on the Express PATCH route; this raw
+    // updateProject bypasses it, so poke the debounced runner directly —
+    // otherwise a dated next step waits up to 10 minutes for the cron poll.
+    fetch(`http://127.0.0.1:${PORT}/api/calendar/sync`, { method: "POST" }).catch(() => {});
   } catch (err) {
     pushLedger(run, "warn", `Could not write the next step to the card: ${err.message}`);
   }
