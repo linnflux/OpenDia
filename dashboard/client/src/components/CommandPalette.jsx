@@ -105,7 +105,7 @@ async function storeBackground(file) {
 // Destinations come from NAV_ITEMS, the same array the sidebar renders, so the
 // palette can never fall out of sync with the visible navigation. Only the
 // palette-specific commands (theme, refresh, wallpaper) are listed here.
-function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onNavigate, isAdmin }) {
+function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onNavigate, isAdmin, defaultBgs, onSelectDefaultBg }) {
   return [
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", action: onRefresh },
     { id: "theme-select", icon: "\u25D0", label: "Select Theme\u2026", action: onOpenThemeModal },
@@ -118,6 +118,15 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onO
         action: () => onNavigate(item.key),
       })),
     { id: "upload-bg", icon: "\u{1F5BC}", label: "Upload Background Image", action: onUploadBg },
+    // Bundled starter pack (public/wallpapers/manifest.json). One action per
+    // wallpaper so they are searchable like everything else in the palette;
+    // absent manifest = no entries = the feature simply isn't there.
+    ...defaultBgs.map((w) => ({
+      id: `default-bg-${w.file}`,
+      icon: "\u{1F304}",
+      label: `Background: ${w.label}`,
+      action: () => onSelectDefaultBg(w),
+    })),
     ...(hasBg
       ? [
           { id: "reposition-bg", icon: "\u2316", label: "Reposition Background Image", action: onReposition },
@@ -136,6 +145,32 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
   const [bgPosition, setBgPosition] = useState(() => localStorage.getItem(BG_POSITION_KEY) || "center");
   const [repositionMode, setRepositionMode] = useState(false);
   const origPosRef = useRef(null);
+  // The bundled starter pack. 404 (pack never generated) → empty list.
+  const [defaultBgs, setDefaultBgs] = useState([]);
+  useEffect(() => {
+    fetch("/wallpapers/manifest.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDefaultBgs(d?.wallpapers || []))
+      .catch(() => {});
+  }, []);
+
+  async function handleSelectDefaultBg(w) {
+    onClose();
+    try {
+      const r = await fetch(`/wallpapers/${encodeURIComponent(w.file)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      // Same store ladder as an upload — bundled files are pre-sized to the
+      // ladder's top edge, so this normally stores directly.
+      const result = await storeBackground(blob);
+      if (!result) { onNotify?.("That wallpaper didn't fit browser storage"); return; }
+      setBgImage(result.dataUrl);
+      onNotify?.(`Background set — ${w.label}`);
+    } catch (err) {
+      console.error("default background failed:", err);
+      onNotify?.("Couldn't load that wallpaper");
+    }
+  }
 
   // Apply background image to body
   useEffect(() => {
@@ -231,8 +266,10 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
       onOpenThemeModal: () => { onOpenThemeModal(); onClose(); },
       onNavigate: (key) => { onNavigate?.(key); onClose(); },
       isAdmin,
+      defaultBgs,
+      onSelectDefaultBg: handleSelectDefaultBg,
     }),
-    [bgImage, bgPosition, onRefresh, onClose, onOpenThemeModal, onNavigate, isAdmin]
+    [bgImage, bgPosition, onRefresh, onClose, onOpenThemeModal, onNavigate, isAdmin, defaultBgs]
   );
 
   const filteredActions = useMemo(() => {
