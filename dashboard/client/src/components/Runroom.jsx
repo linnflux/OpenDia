@@ -528,8 +528,8 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
           {!finished && plan.gate?.planMode && (
             <div className="runroom-planmode">
               ⏸ The session is in <strong>plan mode</strong> — steps here are frozen until its plan
-              is approved. Approve the plan in the terminal (or shift+tab out of plan mode) and
-              updates will resume.
+              is approved. Answer its questions, or send &ldquo;wrap up and present your plan&rdquo; —
+              the approval buttons will appear right here when it does.
             </div>
           )}
           {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} />}
