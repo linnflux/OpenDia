@@ -666,11 +666,32 @@ export function ensureAgentsTables() {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, started_at DESC);
   `);
+  // Migrate: query rosters + chat modes (added after the original agents schema).
+  const cols = db.pragma("table_info(agents)").map((r) => r.name);
+  if (!cols.includes("roster_mode")) {
+    db.exec("ALTER TABLE agents ADD COLUMN roster_mode TEXT NOT NULL DEFAULT 'static'");
+  }
+  if (!cols.includes("query_status")) {
+    db.exec("ALTER TABLE agents ADD COLUMN query_status TEXT");
+  }
+  if (!cols.includes("query_next_step")) {
+    db.exec("ALTER TABLE agents ADD COLUMN query_next_step TEXT NOT NULL DEFAULT 'any'");
+  }
+  if (!cols.includes("max_cards_per_heartbeat")) {
+    db.exec("ALTER TABLE agents ADD COLUMN max_cards_per_heartbeat INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!cols.includes("chat_mode")) {
+    db.exec("ALTER TABLE agents ADD COLUMN chat_mode TEXT NOT NULL DEFAULT 'per_heartbeat'");
+  }
+  if (!cols.includes("last_digest_at")) {
+    db.exec("ALTER TABLE agents ADD COLUMN last_digest_at TEXT");
+  }
 }
 
 const AGENT_UPDATABLE_FIELDS = new Set([
   "name", "enabled", "model", "schedule_days", "schedule_start", "schedule_end",
   "heartbeat_minutes", "heartbeat_token_limit", "run_budget_usd", "chat_webhook_url",
+  "roster_mode", "query_status", "query_next_step", "max_cards_per_heartbeat", "chat_mode",
 ]);
 
 export function getAllAgents() {
@@ -728,6 +749,36 @@ export function getAgentProjects(agentId) {
     WHERE ap.agent_id = ?
     ORDER BY ap.assigned_at ASC
   `).all(agentId);
+}
+
+// Query-roster source: same row shape as getAgentProjects so the executor and
+// UI treat both modes identically. Date filtering happens in JS (agents.js) —
+// the next_step date lives inside a text prefix, not a real column.
+export function getProjectsByStatuses(statuses) {
+  if (!statuses?.length) return [];
+  const placeholders = statuses.map(() => "?").join(",");
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.status, p.next_step, p.tmux_session, p.notion_id, p.updated_at,
+           c.name AS company_name, c.short_name AS company_short, d.name AS division
+    FROM projects p
+    LEFT JOIN companies c ON p.company_id = c.id
+    LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE p.status IN (${placeholders})
+    ORDER BY p.updated_at ASC
+  `).all(...statuses);
+}
+
+// Digest bookkeeping — not admin-editable, bypasses the allowlist on purpose.
+export function markAgentDigest(id) {
+  getDb().prepare("UPDATE agents SET last_digest_at = datetime('now') WHERE id = ?").run(id);
+}
+
+export function getAgentRunsSince(agentId, sinceUtc) {
+  return getDb().prepare(`
+    SELECT * FROM agent_runs
+    WHERE agent_id = ? AND finished_at IS NOT NULL AND finished_at > COALESCE(?, '')
+    ORDER BY started_at ASC
+  `).all(agentId, sinceUtc);
 }
 
 export function assignAgentProject(agentId, projectId) {

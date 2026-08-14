@@ -19,14 +19,14 @@
 //     the limit mid-heartbeat stops further cards until the next heartbeat.
 
 import { randomUUID } from "crypto";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from "fs";
 
 import { requireAdmin } from "./auth.js";
 import {
   getAllAgents, getAgentById, createAgent, updateAgent, markAgentHeartbeat,
   getAgentProjects, assignAgentProject, unassignAgentProject,
   insertAgentRun, updateAgentRun, getAgentRuns, interruptStaleAgentRuns,
-  getProjectById,
+  getProjectById, getProjectsByStatuses, markAgentDigest, getAgentRunsSince,
 } from "./db.js";
 import { startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT } from "./spark.js";
 import { etNow } from "./timerfile.js";
@@ -165,6 +165,55 @@ function publicLive(state) {
   };
 }
 
+// ── roster resolution ──────────────────────────────────────────────────────
+
+const NEXT_STEP_DATE_RE = /^\s*(\d{4}-\d{2}-\d{2})/;
+const RESCAN_GUARD_MS = 24 * 60 * 60 * 1000;
+
+// Newest spark run dir mtime for a card — the durable "last scanned" signal.
+function lastSparkAt(projectId) {
+  try {
+    const dir = `${HOME}/OpenDia/spark/${projectId}`;
+    let newest = 0;
+    for (const name of readdirSync(dir)) {
+      const t = statSync(`${dir}/${name}`).mtimeMs;
+      if (t > newest) newest = t;
+    }
+    return newest;
+  } catch { return 0; }
+}
+
+// An agent's card list. Static mode reads the hand-picked join table; query
+// mode recomputes from the board every call, which makes the roster
+// self-draining: a scan that writes a future-dated next step removes the card
+// from a 'stale' query, and the card re-enters when that date passes. The 24h
+// guard stops a card whose scan produced no date from looping every heartbeat.
+function rosterFor(agent) {
+  if (agent.roster_mode !== "query") return getAgentProjects(agent.id);
+  const statuses = String(agent.query_status || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  let rows = getProjectsByStatuses(statuses);
+  if (agent.query_next_step === "stale") {
+    const now = etNow();
+    const today = `${now.YYYY}-${now.MM}-${now.DD}`;
+    rows = rows.filter((r) => {
+      const m = NEXT_STEP_DATE_RE.exec(r.next_step || "");
+      return !m || m[1] < today;
+    });
+  }
+  const guardBefore = Date.now() - RESCAN_GUARD_MS;
+  rows = rows.filter((r) => lastSparkAt(r.id) < guardBefore);
+  // Stalest first: undated ("" sorts lowest), then oldest date, then oldest
+  // card touch.
+  rows.sort((a, b) => {
+    const da = NEXT_STEP_DATE_RE.exec(a.next_step || "")?.[1] || "";
+    const dbb = NEXT_STEP_DATE_RE.exec(b.next_step || "")?.[1] || "";
+    if (da !== dbb) return da < dbb ? -1 : 1;
+    return (a.updated_at || "").localeCompare(b.updated_at || "");
+  });
+  return rows;
+}
+
 // ── heartbeat executor ─────────────────────────────────────────────────────
 
 function tokensFromUsage(usage) {
@@ -220,18 +269,30 @@ function startHeartbeat(agent, trigger) {
 }
 
 async function runHeartbeat(agent, state) {
-  const assigned = getAgentProjects(agent.id);
+  const assigned = rosterFor(agent);
   const touchHeartbeat = state.trigger !== "manual";
   if (assigned.length === 0) {
-    updateAgentRun(state.runId, { status: "done", summary: "No projects assigned.", finished: true });
+    const emptyMsg = agent.roster_mode === "query"
+      ? "No cards match the roster query." : "No projects assigned.";
+    updateAgentRun(state.runId, { status: "done", summary: emptyMsg, finished: true });
     markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
     finishHeartbeat(agent, state, "done");
     return;
   }
 
-  // Rotate so a budget-exhausted heartbeat resumes where it left off.
-  const cursor = agent.rotation_cursor % assigned.length;
-  const cards = [...assigned.slice(cursor), ...assigned.slice(0, cursor)];
+  // Static rosters rotate so a budget-exhausted heartbeat resumes where it
+  // left off; a query roster is already ordered stalest-first and self-drains,
+  // so rotation would only scramble it.
+  let cards;
+  if (agent.roster_mode === "query") {
+    cards = assigned;
+  } else {
+    const cursor = agent.rotation_cursor % assigned.length;
+    cards = [...assigned.slice(cursor), ...assigned.slice(0, cursor)];
+  }
+  if (agent.max_cards_per_heartbeat > 0) {
+    cards = cards.slice(0, agent.max_cards_per_heartbeat);
+  }
   state.cardsTotal = cards.length;
   pushLog(state, "info", `Heartbeat started — ${cards.length} card(s), token limit ${agent.heartbeat_token_limit}.`);
 
@@ -344,9 +405,13 @@ async function runHeartbeat(agent, state) {
     detail: JSON.stringify(details),
     finished: true,
   });
-  markAgentHeartbeat(agent.id, (agent.rotation_cursor + ran) % assigned.length, { touchHeartbeat });
+  const nextCursor = agent.roster_mode === "query"
+    ? agent.rotation_cursor
+    : (agent.rotation_cursor + ran) % assigned.length;
+  markAgentHeartbeat(agent.id, nextCursor, { touchHeartbeat });
 
-  if (proposals > 0 || finalStatus !== "done") {
+  const notifyNow = agent.chat_mode !== "quiet" && agent.chat_mode !== "digest";
+  if (notifyNow && (proposals > 0 || finalStatus !== "done")) {
     // Per-card deep links straight to the Spark tab, where approval lives.
     // Google Chat webhook text renders <url|label> as a link.
     const base = (process.env.DASHBOARD_PUBLIC_URL || "").replace(/\/$/, "");
@@ -373,6 +438,40 @@ function finishHeartbeat(agent, state, status, summary = "") {
 
 // ── tick ───────────────────────────────────────────────────────────────────
 
+// Digest mode: one Chat message after the window closes, covering every run
+// since the last digest. Fires on the first tick that finds the agent idle and
+// outside its window with undigested runs; the stamp lands before the send so
+// a slow webhook can never double-post.
+function sendDigest(agent) {
+  const runs = getAgentRunsSince(agent.id, agent.last_digest_at)
+    .filter((r) => r.trigger !== "status");
+  if (runs.length === 0) return;
+  markAgentDigest(agent.id);
+
+  let swept = 0, awaiting = 0;
+  const cardLines = [];
+  for (const run of runs) {
+    let detail = [];
+    try { detail = JSON.parse(run.detail || "[]"); } catch {}
+    for (const d of detail) {
+      if (!d.spark_run_id) continue;
+      swept += 1;
+      awaiting += d.awaiting || 0;
+      cardLines.push({ id: d.project_id, name: d.name, route: d.route });
+    }
+  }
+  const base = (process.env.DASHBOARD_PUBLIC_URL || "").replace(/\/$/, "");
+  const links = cardLines.slice(0, 10).map((c) =>
+    base ? `<${base}/?project=${c.id}&tab=spark|${c.name}>${c.route ? ` (${c.route})` : ""}` : c.name
+  ).join(", ");
+  const more = cardLines.length > 10 ? ` +${cardLines.length - 10} more` : "";
+  notifyChat(agent.chat_webhook_url,
+    `${agent.name} — window digest: ${swept} card(s) swept across ${runs.length} heartbeat(s), ` +
+    `${awaiting} next step(s) awaiting a decision.` +
+    (cardLines.length ? `\nReviewed: ${links}${more}` : "")
+  ).catch(() => {});
+}
+
 function tick() {
   const checked = [];
   const started = [];
@@ -381,7 +480,11 @@ function tick() {
     checked.push(agent.slug);
     if (!agent.enabled) { skipped.push({ slug: agent.slug, reason: "disabled" }); continue; }
     if (live.has(agent.id)) { skipped.push({ slug: agent.slug, reason: "running" }); continue; }
-    if (!inScheduleWindow(agent)) { skipped.push({ slug: agent.slug, reason: "off-schedule" }); continue; }
+    if (!inScheduleWindow(agent)) {
+      if (agent.chat_mode === "digest") sendDigest(agent);
+      skipped.push({ slug: agent.slug, reason: "off-schedule" });
+      continue;
+    }
     if (minutesSinceLastHeartbeat(agent) < agent.heartbeat_minutes) {
       skipped.push({ slug: agent.slug, reason: "not-due" });
       continue;
@@ -396,7 +499,7 @@ function tick() {
 
 async function requestStatus(agent) {
   const runs = getAgentRuns(agent.id, 5);
-  const projects = getAgentProjects(agent.id);
+  const projects = rosterFor(agent);
   const memory = readAgentFile(agent.slug, "memory.md").split("\n").slice(-20).join("\n");
 
   const fallback =
@@ -430,7 +533,7 @@ async function requestStatus(agent) {
 // ── routes ─────────────────────────────────────────────────────────────────
 
 function listRow(agent) {
-  const projects = getAgentProjects(agent.id);
+  const projects = rosterFor(agent);
   const state = live.get(agent.id);
   const runs = getAgentRuns(agent.id, 1);
   return {
@@ -477,7 +580,7 @@ export function mountAgents(app) {
     const memoryMd = readAgentFile(agent.slug, "memory.md");
     res.json({
       ...listRow(agent),
-      projects: getAgentProjects(agent.id),
+      projects: rosterFor(agent),
       agent_md: readAgentFile(agent.slug, "agent.md"),
       memory_md: memoryMd,
       memory_lines: memoryMd ? memoryMd.split("\n").length : 0,
@@ -492,6 +595,15 @@ export function mountAgents(app) {
     const fields = { ...req.body };
     if (fields.model !== undefined && !VALID_MODELS.has(fields.model)) {
       return res.status(400).json({ error: `model must be one of: ${[...VALID_MODELS].join(", ")}` });
+    }
+    if (fields.roster_mode !== undefined && !["static", "query"].includes(fields.roster_mode)) {
+      return res.status(400).json({ error: "roster_mode must be static or query" });
+    }
+    if (fields.query_next_step !== undefined && !["any", "stale"].includes(fields.query_next_step)) {
+      return res.status(400).json({ error: "query_next_step must be any or stale" });
+    }
+    if (fields.chat_mode !== undefined && !["per_heartbeat", "quiet", "digest"].includes(fields.chat_mode)) {
+      return res.status(400).json({ error: "chat_mode must be per_heartbeat, quiet, or digest" });
     }
     if (fields.enabled !== undefined) fields.enabled = fields.enabled ? 1 : 0;
     try {

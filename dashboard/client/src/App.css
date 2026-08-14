@@ -6308,3 +6308,20 @@ html.vt-no-target::view-transition-old(card-morph) {
   font-size: 0.8rem;
   padding: 0.8rem 0.9rem;
 }
+
+/* Query rosters */
+.agents-roster-toggle {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+.agents-panel h3 .agents-roster-toggle button { margin-left: 0; }
+
+.agents-query-controls {
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}

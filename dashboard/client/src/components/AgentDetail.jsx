@@ -165,6 +165,15 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
   const days = String(agent.schedule_days || "").split(",").map(Number);
   const memoryWarn = agent.memory_lines >= 80;
   const live = liveState || agent.live;
+  const isQuery = agent.roster_mode === "query";
+  const queryStatuses = String(agent.query_status || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+  function toggleQueryStatus(s) {
+    const next = queryStatuses.includes(s)
+      ? queryStatuses.filter((x) => x !== s)
+      : [...queryStatuses, s];
+    patch({ query_status: next.join(",") });
+  }
 
   return (
     <div className="agents-view agents-detail">
@@ -270,6 +279,24 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
               </select>
             </div>
           </div>
+          <div className="agents-field-row">
+            <div className="agents-field">
+              <label>Chat notifications</label>
+              <select value={agent.chat_mode} onChange={(e) => patch({ chat_mode: e.target.value })}>
+                <option value="per_heartbeat">per heartbeat</option>
+                <option value="quiet">quiet</option>
+                <option value="digest">window digest</option>
+              </select>
+            </div>
+            <div className="agents-field">
+              <label>Max cards / heartbeat (0 = all)</label>
+              <input
+                type="number" min="0" step="1"
+                defaultValue={agent.max_cards_per_heartbeat}
+                onBlur={(e) => Number(e.target.value) !== agent.max_cards_per_heartbeat && patch({ max_cards_per_heartbeat: Number(e.target.value) })}
+              />
+            </div>
+          </div>
           <div className="agents-field">
             <label>Chat webhook URL (blank = global)</label>
             <input
@@ -283,11 +310,55 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
 
         <section className="agents-panel">
           <h3>
-            Assigned cards ({agent.projects.length})
-            <button className="agents-assign-btn" onClick={() => setPickerOpen(true)}>+ Assign</button>
+            {isQuery ? `Matching cards (${agent.projects.length} right now)` : `Assigned cards (${agent.projects.length})`}
+            <span className="agents-roster-toggle">
+              <button
+                className={`agents-day-chip${!isQuery ? " on" : ""}`}
+                onClick={() => agent.roster_mode !== "static" && patch({ roster_mode: "static" })}
+              >
+                Static
+              </button>
+              <button
+                className={`agents-day-chip${isQuery ? " on" : ""}`}
+                onClick={() => agent.roster_mode !== "query" && patch({ roster_mode: "query" })}
+              >
+                Query
+              </button>
+            </span>
+            {!isQuery && (
+              <button className="agents-assign-btn" onClick={() => setPickerOpen(true)}>+ Assign</button>
+            )}
           </h3>
+          {isQuery && (
+            <div className="agents-query-controls">
+              <div className="agents-field">
+                <label>Card statuses</label>
+                <div className="agents-day-chips">
+                  {["in_progress", "wfhuman", "ice", "completed"].map((s) => (
+                    <button
+                      key={s}
+                      className={`agents-day-chip${queryStatuses.includes(s) ? " on" : ""}`}
+                      onClick={() => toggleQueryStatus(s)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="agents-enable-toggle">
+                <input
+                  type="checkbox"
+                  checked={agent.query_next_step === "stale"}
+                  onChange={(e) => patch({ query_next_step: e.target.checked ? "stale" : "any" })}
+                />
+                Only cards with an overdue or missing next-step date
+              </label>
+            </div>
+          )}
           {agent.projects.length === 0 ? (
-            <div className="agents-empty">No cards assigned — the agent has nothing to work from.</div>
+            <div className="agents-empty">
+              {isQuery ? "No cards match the query right now." : "No cards assigned — the agent has nothing to work from."}
+            </div>
           ) : (
             <ul className="agents-project-list">
               {agent.projects.map((p) => (
@@ -297,7 +368,9 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                   </button>
                   <span className="agents-project-meta">{p.company_short || p.company_name || ""} · {p.status}</span>
                   {p.next_step && <span className="agents-project-next" title={p.next_step}>{p.next_step}</span>}
-                  <button className="agents-remove-btn" onClick={() => unassignProject(p.id)} title="Unassign">×</button>
+                  {!isQuery && (
+                    <button className="agents-remove-btn" onClick={() => unassignProject(p.id)} title="Unassign">×</button>
+                  )}
                 </li>
               ))}
             </ul>

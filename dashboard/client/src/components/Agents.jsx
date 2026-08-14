@@ -59,7 +59,8 @@ export default function Agents({ projects, onOpenProject }) {
     const days = String(a.schedule_days || "").split(",").map((d) => DAY[Number(d)]).filter(Boolean);
     const dayStr = days.length === 5 && days[0] === "Mon" && days[4] === "Fri"
       ? "Mon–Fri" : days.join(" ");
-    return `${dayStr} ${a.schedule_start}–${a.schedule_end} ET · every ${a.heartbeat_minutes}m`;
+    const cap = a.max_cards_per_heartbeat > 0 ? ` · ${a.max_cards_per_heartbeat} card/hb` : "";
+    return `${dayStr} ${a.schedule_start}–${a.schedule_end} ET · every ${a.heartbeat_minutes}m${cap}`;
   }
 
   if (selectedId) {
