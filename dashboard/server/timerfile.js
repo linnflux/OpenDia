@@ -18,12 +18,15 @@ import {
 const HOME = process.env.HOME || "/home/linnflux";
 export const TIMER_DIR = `${HOME}/OpenDia/Time`;
 
-/** Current wall time in Eastern, pre-split into the pieces markers need. */
+/** Current wall time in Eastern, pre-split into the pieces markers need.
+ *  `iso` stays minute-resolution — it is the ledger's timestamp format and
+ *  every marker written since the beginning is shaped like it. `ss` is there
+ *  only for breaking a same-minute tie; see uniqueMarker. */
 export function etNow() {
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
   });
   const parts = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]));
   const h = parts.hour === "24" ? "00" : parts.hour;
@@ -33,6 +36,7 @@ export function etNow() {
     DD: parts.day,
     HH: h,
     mm: parts.minute,
+    ss: parts.second,
     iso: `${parts.year}-${parts.month}-${parts.day}T${h}:${parts.minute}`
   };
 }
@@ -90,6 +94,41 @@ export function listRunningTimers() {
 }
 
 /**
+ * A marker no other entry in this ledger is already using.
+ *
+ * The marker is both the anchor a ledger entry is edited through and the name
+ * of its state file, so two timers opened in the same minute used to collide on
+ * both: the second overwrote the first's state file, and closing either one
+ * edited whichever entry `indexOf` found first. Rare by hand, ordinary once a
+ * Spark run and a scheduled agent can fire together.
+ *
+ * The tie is broken by extending to seconds rather than by appending a counter.
+ * A counter is what `inbox_stage_b.py` does and it is quietly wrong: the marker
+ * is also written as `start:`, and `2026-08-14T12:50-2` is not a timestamp —
+ * `new Date` returns Invalid Date, durations come out `NaNh NaNm`, and Python's
+ * `fromisoformat` raises. `2026-08-14T12:50:30` is a real timestamp, is true,
+ * and every reader already handles it, so nothing downstream has to change.
+ *
+ * Collision is checked against both the state file and the ledger text: a
+ * same-minute entry that has already closed has no state file left, but its
+ * anchor is still sitting there waiting to be matched by mistake.
+ */
+export function uniqueMarker(iso, seconds, dailyFile) {
+  let ledger = "";
+  try { ledger = readFileSync(dailyFile, "utf8"); } catch {}
+  const taken = (m) => existsSync(stateFileFor(m)) || ledger.includes(`<!-- entry:${m} -->`);
+
+  if (!taken(iso)) return iso;
+  const base = Math.max(0, Math.min(59, parseInt(seconds, 10) || 0));
+  for (let i = 0; i < 60; i += 1) {
+    const s = String((base + i) % 60).padStart(2, "0");
+    const candidate = `${iso}:${s}`;
+    if (!taken(candidate)) return candidate;
+  }
+  throw new Error(`no free timer marker in the minute ${iso}`);
+}
+
+/**
  * Whether an entry for this client and division bills.
  *
  * **The client decides, not the division.** Internal work is our own name on
@@ -129,7 +168,6 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
   // before, but the client string was being derived twice.
   const client = project.company_name || project.name;
   const billable = isBillable(client, project.division);
-  const marker = t.iso;
 
   const yearDir = `${TIMER_DIR}/${t.YYYY}/${t.MM}`;
   mkdirSync(yearDir, { recursive: true });
@@ -138,6 +176,9 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
   if (!existsSync(dailyFile)) {
     writeFileSync(dailyFile, `# Time Entries - ${t.YYYY}-${t.MM}-${t.DD}\n`);
   }
+
+  // After the ledger exists, because the collision check reads it.
+  const marker = uniqueMarker(t.iso, t.ss, dailyFile);
 
   appendFileSync(dailyFile, [
     ``,
