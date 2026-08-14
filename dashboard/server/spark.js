@@ -496,6 +496,15 @@ async function closeSparkTimer(run, project, { failed = false, reason = "" } = {
         run.result?.next_step?.text ? `NEXT: ${run.result.next_step.text}` : "",
       ].filter(Boolean).join("\n");
     }
+
+    // An ODA scan is scheduled monitoring, not client-requested work: the
+    // sweep itself bills nothing (plan-covered overhead), and the estimate
+    // covers only approved-and-executed actions. Human-triggered Sparks keep
+    // the base estimate — a human judged the card needed the attention.
+    if ((run.startedBy || "").startsWith("agent:")) {
+      estimate = Math.max(0, (run.accruedMinutes || BASE_ESTIMATE_MIN) - BASE_ESTIMATE_MIN);
+      notes += `\nODA scan (${run.startedBy}) — sweep not billed; estimate covers approved actions only.`;
+    }
   }
 
   try {

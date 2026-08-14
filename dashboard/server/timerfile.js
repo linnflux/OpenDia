@@ -129,6 +129,9 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
     `end:`,
     `duration:`,
     `billable: ${billable}`,
+    // Attribution must live in the entry itself: the state file (which also
+    // carries started_by) is deleted on close, and billing reads the markdown.
+    ...(extra.started_by ? [`started_by: ${extra.started_by}`] : []),
     `notes:`,
     `---`,
     ``
