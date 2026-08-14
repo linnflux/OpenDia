@@ -627,7 +627,14 @@ export default function SparkPanel({ spark, project, showToast, onGoToTerminal, 
             {spark.elapsedSec ? <span className="spark-chip">{fmtElapsed(spark.elapsedSec)}</span> : null}
             {spark.accruedMinutes ? <span className="spark-chip">{spark.accruedMinutes}m billed</span> : null}
             {spark.costUsd != null && <span className="spark-chip">${spark.costUsd.toFixed(2)}</span>}
-            {spark.model && <span className="spark-chip">{spark.model}</span>}
+            {spark.model && (
+              <span className="spark-chip" title="scan model · round model">
+                {spark.model}
+                {spark.roundModel && spark.roundModel !== spark.model
+                  ? ` · rounds ${spark.roundModel}`
+                  : ""}
+              </span>
+            )}
             {r.style_warnings?.length > 0 && (
               <span className="spark-chip spark-chip-warn" title={r.style_warnings.join("; ")}>
                 style

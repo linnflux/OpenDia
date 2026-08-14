@@ -53,6 +53,18 @@ const CLAUDE_BIN = resolve(HOME, ".local", "bin", "claude");
 const SPARK_ROOT = `${HOME}/OpenDia/spark`;
 
 const MODEL = process.env.SPARK_MODEL || "opus";
+// The model for act rounds — every phase after a human typed or clicked
+// something. The scan is a scripted sweep and rides the cheap model; a round
+// exists because a human decision entered the loop ("do this" or "you got it
+// wrong, do this instead"), and interpreting that correction against the scan
+// context is the highest-judgment moment in the whole flow. Deliberately
+// defaults to opus even though SPARK_MODEL defaults lower in .env: rounds are
+// rare (only a human triggers one — ODA heartbeats stop at proposing), so the
+// premium is pocket change, and the stated preference is "cost more but work".
+// Rounds also override an ODA's pinned model for the same reason.
+// Cost note: caches are per-model, so a cross-model resume re-reads the scan
+// context cold. Accepted — see above.
+const ROUND_MODEL = process.env.SPARK_ROUND_MODEL || "opus";
 const BUDGET_USD = process.env.SPARK_BUDGET_USD || "3.00";
 const MAX_CONCURRENT = Number(process.env.SPARK_MAX_CONCURRENT || 2);
 const HARD_KILL_MS = 20 * 60 * 1000;
@@ -149,7 +161,8 @@ function publicRun(run) {
     timerStarted: !!run.timer,
     timerNote: run.timerNote,
     costUsd: run.costUsd,
-    model: MODEL,
+    model: run.agent?.model || MODEL,
+    roundModel: ROUND_MODEL,
     lowCertitude: LOW_CERTITUDE,
     result: run.result,
     error: run.error,
@@ -910,11 +923,14 @@ function finishRun(run, status) {
   }, RETAIN_MS).unref?.();
 }
 
-function spawnPhase(run, { prompt, deny, resume }) {
+function spawnPhase(run, { prompt, deny, resume, model }) {
   const args = [
     "-p", prompt,
     ...(resume ? ["--resume", run.id] : ["--session-id", run.id]),
-    "--model", run.agent?.model || MODEL,
+    // An explicit phase model outranks the ODA's pinned model on purpose —
+    // see the ROUND_MODEL comment. The transcript is model-agnostic, so a
+    // cross-model --resume continues the same session on the new model.
+    "--model", model || run.agent?.model || MODEL,
     "--permission-mode", "bypassPermissions",
     "--disallowedTools", deny.join(" "),
     "--output-format", "stream-json",
@@ -1255,6 +1271,8 @@ async function startRound(run, intent, note = "") {
       "write the result JSON to the out_path named in the round file, then stop.",
     deny: DENY_ACT,
     resume: true,
+    // A human just typed or clicked — the round runs on the judgment model.
+    model: ROUND_MODEL,
   });
 
   proc.on("error", async (err) => {
