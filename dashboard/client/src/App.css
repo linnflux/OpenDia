@@ -6325,3 +6325,18 @@ html.vt-no-target::view-transition-old(card-morph) {
   flex-direction: column;
   gap: 0.5rem;
 }
+
+/* Plan-mode banner: the session cannot write plan.json while planning, so
+   the room's steps are frozen — say so instead of looking stuck. */
+.runroom-planmode {
+  max-width: 640px;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--warning, #d99e28);
+  background: var(--bg-recessed);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.runroom-planmode strong { color: var(--warning, #d99e28); }

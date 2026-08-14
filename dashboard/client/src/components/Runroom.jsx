@@ -522,6 +522,16 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
           ))}
         </aside>
         <main className="runroom-main">
+          {/* Plan mode blocks all file writes in the session — including
+              plan.json — so the steps here are frozen until the plan is
+              approved. Without this banner a planning session reads as stuck. */}
+          {!finished && plan.gate?.planMode && (
+            <div className="runroom-planmode">
+              ⏸ The session is in <strong>plan mode</strong> — steps here are frozen until its plan
+              is approved. Approve the plan in the terminal (or shift+tab out of plan mode) and
+              updates will resume.
+            </div>
+          )}
           {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} />}
           {/* Action buttons aim at the current step only — reading an earlier
               step must not offer buttons that would fire at a different one. */}

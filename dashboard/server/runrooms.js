@@ -167,11 +167,15 @@ function gateForSession(tmuxSession) {
   }
   const plainLines = pane.replace(SGR_RE, "").split("\n");
   const working = detectWorking(plainLines);
+  // The TUI footer says "⏸ plan mode on" while planning. In plan mode the
+  // session cannot write plan.json, so runroom steps are frozen no matter how
+  // much context arrives — the page should say so instead of looking stuck.
+  const planMode = plainLines.slice(-6).some((l) => l.includes("plan mode on"));
   const verdict = classifyPane(pane);
-  if (!verdict.ok) return { ...verdict, working };
+  if (!verdict.ok) return { ...verdict, working, planMode };
   const holder = terminalHolderFor(tmuxSession);
-  if (holder) return { ok: false, reason: "terminal-held", holder, working };
-  return { ok: true, working };
+  if (holder) return { ok: false, reason: "terminal-held", holder, working, planMode };
+  return { ok: true, working, planMode };
 }
 
 const MAX_SEND_CHARS = 4000;
