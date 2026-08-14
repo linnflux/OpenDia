@@ -137,7 +137,7 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
     ``
   ].join("\n"));
 
-  const stateFile = `${TIMER_DIR}/.timer-${marker.replace(/:/g, "-")}.json`;
+  const stateFile = stateFileFor(marker);
   writeFileSync(stateFile, JSON.stringify({
     client: project.company_name || project.name,
     project: project.name,
@@ -149,13 +149,32 @@ export function startTimerForProject(project, taskOverride, opts = {}) {
     marker,
     tmux_session: tmuxSession,
     project_id: project.id,
+    // Mirrored from the markdown entry. A reader that only has the state file
+    // (spark.js recovering a run after a restart) would otherwise have to guess
+    // the estimate, and guessing means losing whatever the run had accrued.
+    estimated_minutes: estimatedMinutes,
     ...extra
   }, null, 2));
 
   return { stateFile, marker, dailyFile, task, estimatedMinutes };
 }
 
-/** Rewrite the open entry's `estimated_minutes:` line in place. */
+/** The state file that pairs with a marker. Derived, never stored — the two
+ *  artifacts are keyed by the same marker, so there is nothing to keep in sync. */
+export function stateFileFor(marker) {
+  return `${TIMER_DIR}/.timer-${marker.replace(/:/g, "-")}.json`;
+}
+
+/**
+ * Rewrite the open entry's `estimated_minutes:` line in place, in BOTH
+ * artifacts.
+ *
+ * The markdown is what bills, so it is the one that must not fail. The state
+ * file is best-effort: a still-running timer whose JSON says 15 while the
+ * ledger says 40 is the drift that made recovered Spark runs lose their
+ * accrual, but a state file that cannot be written should not stop the estimate
+ * landing where the money is read from.
+ */
 export function setEntryEstimate(dailyFile, marker, estimatedMinutes) {
   try {
     const content = readFileSync(dailyFile, "utf8");
@@ -167,10 +186,19 @@ export function setEntryEstimate(dailyFile, marker, estimatedMinutes) {
     const section = content.slice(idx, sectionEnd)
       .replace(/\nestimated_minutes: \d+\n/, `\nestimated_minutes: ${estimatedMinutes}\n`);
     writeFileSync(dailyFile, content.slice(0, idx) + section + content.slice(sectionEnd));
-    return true;
   } catch {
     return false;
   }
+
+  const stateFile = stateFileFor(marker);
+  try {
+    if (existsSync(stateFile)) {
+      const data = JSON.parse(readFileSync(stateFile, "utf8"));
+      data.estimated_minutes = estimatedMinutes;
+      writeFileSync(stateFile, JSON.stringify(data, null, 2));
+    }
+  } catch {}
+  return true;
 }
 
 /**
