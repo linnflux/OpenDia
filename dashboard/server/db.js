@@ -703,10 +703,17 @@ export function updateAgent(id, fields) {
 }
 
 // Heartbeat bookkeeping writes bypass the admin-editable allowlist on purpose.
-export function markAgentHeartbeat(id, rotationCursor) {
-  getDb().prepare(
-    "UPDATE agents SET last_heartbeat_at = datetime('now'), rotation_cursor = ? WHERE id = ?"
-  ).run(rotationCursor, id);
+// last_heartbeat_at means "last SCHEDULED heartbeat": manual runs advance the
+// rotation cursor but never defer the schedule — the schedule is a promise,
+// and a manual run is extra work on top of it.
+export function markAgentHeartbeat(id, rotationCursor, { touchHeartbeat = true } = {}) {
+  if (touchHeartbeat) {
+    getDb().prepare(
+      "UPDATE agents SET last_heartbeat_at = datetime('now'), rotation_cursor = ? WHERE id = ?"
+    ).run(rotationCursor, id);
+  } else {
+    getDb().prepare("UPDATE agents SET rotation_cursor = ? WHERE id = ?").run(rotationCursor, id);
+  }
 }
 
 export function getAgentProjects(agentId) {

@@ -48,6 +48,17 @@ const live = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// SQLite datetime('now') is UTC with no zone marker; user-facing text is ET.
+function fmtET(sqliteUtc) {
+  if (!sqliteUtc) return "";
+  const d = new Date(sqliteUtc.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return sqliteUtc;
+  return d.toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  }) + " ET";
+}
+
 // ── slug + scaffold ────────────────────────────────────────────────────────
 
 function slugify(name) {
@@ -210,9 +221,10 @@ function startHeartbeat(agent, trigger) {
 
 async function runHeartbeat(agent, state) {
   const assigned = getAgentProjects(agent.id);
+  const touchHeartbeat = state.trigger !== "manual";
   if (assigned.length === 0) {
     updateAgentRun(state.runId, { status: "done", summary: "No projects assigned.", finished: true });
-    markAgentHeartbeat(agent.id, agent.rotation_cursor);
+    markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
     finishHeartbeat(agent, state, "done");
     return;
   }
@@ -327,7 +339,7 @@ async function runHeartbeat(agent, state) {
     detail: JSON.stringify(details),
     finished: true,
   });
-  markAgentHeartbeat(agent.id, (agent.rotation_cursor + ran) % assigned.length);
+  markAgentHeartbeat(agent.id, (agent.rotation_cursor + ran) % assigned.length, { touchHeartbeat });
 
   if (proposals > 0 || finalStatus !== "done") {
     // Per-card deep links straight to the Spark tab, where approval lives.
@@ -383,7 +395,7 @@ async function requestStatus(agent) {
   const memory = readAgentFile(agent.slug, "memory.md").split("\n").slice(-20).join("\n");
 
   const fallback =
-    `Idle since ${agent.last_heartbeat_at || "never run"}. ${projects.length} card(s) assigned; ` +
+    `Idle since ${fmtET(agent.last_heartbeat_at) || "never run"}. ${projects.length} card(s) assigned; ` +
     `working ${agent.schedule_days} ${agent.schedule_start}–${agent.schedule_end} ET, ` +
     `every ${agent.heartbeat_minutes}m. Last heartbeat: ${runs[0]?.summary || "none yet"}.`;
 

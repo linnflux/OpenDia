@@ -4,6 +4,18 @@ import AgentProjectPicker from "./AgentProjectPicker.jsx";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MODELS = ["opus", "sonnet", "haiku"];
 
+// agent_runs timestamps are SQLite datetime('now') — UTC with no zone marker.
+// Everything user-facing in OpenDia is Eastern.
+function fmtET(sqliteUtc) {
+  if (!sqliteUtc) return "";
+  const d = new Date(sqliteUtc.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return sqliteUtc;
+  return d.toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
 // Full admin surface for one ODA: every attribute editable in place, the two
 // markdown files, assigned cards, the activity feed, and a live heartbeat log
 // over SSE while one is running.
@@ -340,7 +352,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                   <li key={r.id} className={`agents-run status-${r.status}`}>
                     <button className="agents-run-head" onClick={() => setExpandedRun(open ? null : r.id)}>
                       <span className={`agents-run-status ${r.status}`}>{r.status}</span>
-                      <span className="agents-run-when">{r.started_at}</span>
+                      <span className="agents-run-when">{fmtET(r.started_at)}</span>
                       <span className="agents-run-summary">{r.summary || r.trigger}</span>
                       {r.tokens_used > 0 && (
                         <span className="agents-run-cost">{r.tokens_used.toLocaleString()} tok · ${(r.cost_usd || 0).toFixed(2)}</span>
