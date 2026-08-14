@@ -77,7 +77,7 @@ const INBOX_STATUS_DOT = {
   dismissed: "#475569",
 };
 
-export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin }) {
+export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
@@ -96,7 +96,7 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [review, setReview] = useState(null);
   const [notionTitle, setNotionTitle] = useState(null);
   const [divisionOpen, setDivisionOpen] = useState(false);
-  const [tab, setTab] = useState("details");
+  const [tab, setTab] = useState(initialTab || "details");
   // Owned here, not in SparkPanel: panels unmount on every tab switch, and a
   // run has to survive a glance at Details.
   const spark = useSparkRun(project.id);

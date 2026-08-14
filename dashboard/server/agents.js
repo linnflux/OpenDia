@@ -330,8 +330,18 @@ async function runHeartbeat(agent, state) {
   markAgentHeartbeat(agent.id, (agent.rotation_cursor + ran) % assigned.length);
 
   if (proposals > 0 || finalStatus !== "done") {
+    // Per-card deep links straight to the Spark tab, where approval lives.
+    // Google Chat webhook text renders <url|label> as a link.
+    const base = (process.env.DASHBOARD_PUBLIC_URL || "").replace(/\/$/, "");
+    const cardLinks = base
+      ? details
+          .filter((d) => d.spark_run_id)
+          .map((d) => `<${base}/?project=${d.project_id}&tab=spark|${d.name}>${d.actions ? ` (${d.actions})` : ""}`)
+          .join(", ")
+      : "";
     await notifyChat(agent.chat_webhook_url,
-      `${agent.name}: ${summary}${proposals > 0 ? " Open the dashboard to review." : ""}`);
+      `${agent.name}: ${summary}` +
+      (cardLinks ? `\nReview: ${cardLinks}` : proposals > 0 ? " Open the dashboard to review." : ""));
   }
   finishHeartbeat(agent, state, finalStatus, summary);
 }

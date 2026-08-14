@@ -49,6 +49,9 @@ export default function App() {
   const { items: inboxItems, loading: inboxLoading, dismissItem, updateItem, redispatchItem } = useInbox();
   const companies = useCompanies(projects);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
+  // Tab the next CardModal opens on — set only by the ?tab= deep link,
+  // cleared on close so manual opens default to details.
+  const [deepLinkTab, setDeepLinkTab] = useState(null);
   const [selectedInboxItem, setSelectedInboxItem] = useState(null);
   const [pendingClientKey, setPendingClientKey] = useState(null);
   // One of the NAV_ITEMS keys. "tara" used to live here too; it is a filter on
@@ -145,14 +148,21 @@ export default function App() {
   }, [fetchActiveTimers]);
 
   // Deep link: ?project=<id> opens that card's modal once projects load
-  // (used by OpenDia calendar event links). Param is consumed then stripped.
+  // (used by OpenDia calendar event links and ODA Chat notifications).
+  // ?tab=spark opens the modal directly on that tab. Params are consumed
+  // then stripped.
   useEffect(() => {
     if (projects.length === 0) return;
     const params = new URLSearchParams(window.location.search);
     const pid = parseInt(params.get("project"), 10);
     if (!pid) return;
-    if (projects.some((p) => p.id === pid)) openCardById(pid);
+    const tab = params.get("tab");
+    if (projects.some((p) => p.id === pid)) {
+      if (tab) setDeepLinkTab(tab);
+      openCardById(pid);
+    }
     params.delete("project");
+    params.delete("tab");
     const qs = params.toString();
     window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
   }, [projects]);
@@ -400,6 +410,7 @@ export default function App() {
   }
 
   function handleModalClose() {
+    setDeepLinkTab(null);
     closeCard();
   }
 
@@ -682,6 +693,7 @@ export default function App() {
           hasActiveTimer={activeTimerIds.has(selectedProject.id)}
           onInboxItemClick={handleInboxItemClick}
           isAdmin={!!me?.is_admin}
+          initialTab={deepLinkTab || undefined}
         />
       )}
       {selectedInboxItem && (
