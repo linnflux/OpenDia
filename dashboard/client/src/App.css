@@ -6822,3 +6822,26 @@ html.vt-no-target::view-transition-old(card-morph) {
   border-radius: var(--radius-xs);
 }
 .runroom-dialog-plan-body pre code { display: block; padding: 0.5rem; overflow-x: auto; }
+
+/* Expired-recommendation affordance on the idle Spark stage. */
+.spark-expired {
+  width: 100%;
+  max-width: 560px;
+  text-align: left;
+}
+
+.spark-expired-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin-bottom: 0.3rem;
+}
+
+.spark-expired-step {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin: 0 0 0.7rem;
+}

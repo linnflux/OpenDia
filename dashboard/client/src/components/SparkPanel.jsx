@@ -406,6 +406,30 @@ export default function SparkPanel({ spark, project, showToast, onGoToTerminal, 
     if (res?.error) showToast(res.error);
   }
 
+  // Load the archive whenever the panel sits idle, so an expired
+  // recommendation surfaces with its Rescan / I-did-this row instead of a
+  // blank Go screen the operator has to interpret.
+  useEffect(() => {
+    if (spark.status === "idle") spark.loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spark.status]);
+
+  async function attestDone() {
+    try {
+      const r = await fetch(`/api/projects/${project.id}/spark/attest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return showToast(d?.error || `HTTP ${r.status}`);
+      showToast("Recorded — the card now carries the Done note.");
+      spark.loadHistory();
+    } catch (e) {
+      showToast(e.message);
+    }
+  }
+
   function copyReport() {
     const r = spark.result;
     if (!r) return;
@@ -429,18 +453,45 @@ export default function SparkPanel({ spark, project, showToast, onGoToTerminal, 
   }
 
   if (spark.status === "idle") {
+    const last = (spark.history || []).find((h) => h.status === "done" && h.headline);
     return (
       <div className="spark-panel">
         <div className="spark-stage spark-idle">
-          <p className="spark-idle-copy">
-            A {SWEEP_MINUTES}-minute refresh across every message front for this card — email,
-            Google Voice, Google Chat, Notion, work sessions and artifacts — ending in one
-            next step, a confidence number, and a way to get it done.
-          </p>
-          <button className="spark-go" onClick={handleGo} disabled={spark.busy || !isAdmin}
-                  title={isAdmin ? undefined : "Spark runs are admin-only"}>
-            {spark.busy ? "Starting…" : "Go"}
-          </button>
+          {last ? (
+            // An expired recommendation is not a dead end: rescan it fresh, or
+            // attest that the step already got done by hand.
+            <div className="spark-expired">
+              <div className="spark-expired-label">
+                Last recommendation{last.certitude != null ? ` · ${last.certitude}%` : ""}{last.route ? ` · ${last.route}` : ""}
+              </div>
+              <p className="spark-expired-step">{last.headline}</p>
+              <div className="spark-decision-buttons">
+                <button className="spark-btn spark-btn-primary" onClick={handleGo} disabled={spark.busy || !isAdmin}>
+                  {spark.busy ? "Starting…" : "Rescan"}
+                </button>
+                <button
+                  className="spark-btn"
+                  onClick={attestDone}
+                  disabled={spark.busy || !isAdmin}
+                  title="You already did this step yourself — record it and write a Done note to the card"
+                >
+                  I did this
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="spark-idle-copy">
+                A {SWEEP_MINUTES}-minute refresh across every message front for this card — email,
+                Google Voice, Google Chat, Notion, work sessions and artifacts — ending in one
+                next step, a confidence number, and a way to get it done.
+              </p>
+              <button className="spark-go" onClick={handleGo} disabled={spark.busy || !isAdmin}
+                      title={isAdmin ? undefined : "Spark runs are admin-only"}>
+                {spark.busy ? "Starting…" : "Go"}
+              </button>
+            </>
+          )}
           <SparkHistory spark={spark} open={historyOpen} onToggle={() => setHistoryOpen((v) => !v)} />
         </div>
       </div>

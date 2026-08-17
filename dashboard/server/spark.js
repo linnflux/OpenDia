@@ -1786,6 +1786,35 @@ export function mountSpark(app) {
   });
 
   // Past runs are never pruned — every result.json stays on disk.
+  // The operator did an expired recommendation's step themselves and is
+  // reporting the fact after the run wrapped. The live-run "done" intent needs
+  // a proposing run; this is its history-side twin — attestation recorded in
+  // the run dir for the audit trail, completion note written to the card.
+  app.post("/api/projects/:id/spark/attest", requireAdmin, (req, res) => {
+    const project = loadProject(req, res);
+    if (!project) return;
+    const note = String(req.body?.note || "").trim().slice(0, 1000);
+    const entry = runsOnDisk(project.id).find((e) => e.status !== "interrupted");
+    const r = entry ? readRunResult(entry) : null;
+    const step = r?.next_step;
+    if (!step?.text) return res.status(404).json({ error: "no past recommendation to attest" });
+    try {
+      writeFileSync(`${SPARK_ROOT}/${project.id}/${entry.runId}/operator-attest.json`, JSON.stringify({
+        at: new Date().toISOString(),
+        by: req.user?.login || "",
+        note,
+        step_text: step.text,
+      }, null, 2));
+    } catch {}
+    const today = etNow().iso.slice(0, 10);
+    const done = `${today}: Done — operator performed: ${step.text}`.slice(0, 100);
+    try {
+      updateProject(project.id, { next_step: done });
+      fetch(`http://127.0.0.1:${PORT}/api/calendar/sync`, { method: "POST" }).catch(() => {});
+    } catch {}
+    res.json({ ok: true, next_step: done });
+  });
+
   app.get("/api/projects/:id/spark/history", (req, res) => {
     const project = loadProject(req, res);
     if (!project) return;
