@@ -672,32 +672,75 @@ export default function Runroom({ activeTimerIds, me, onOpenProject }) {
   }
 
   if (rooms === null) return <div className="loading">Loading runrooms...</div>;
+
+  const active = (rooms || []).filter((r) => r.status === "active");
+  const finished = (rooms || []).filter((r) => r.status !== "active");
+
+  const heading = (
+    <header className="runroom-list-header">
+      <h1 className="runroom-list-heading">Runrooms</h1>
+      <span className="runroom-list-count">
+        {active.length} active{finished.length > 0 && <> &middot; {finished.length} finished</>}
+      </span>
+    </header>
+  );
+
   if (rooms.length === 0) {
     return (
-      <div className="runroom-empty">
-        <h2>No runrooms open</h2>
-        <p>Agree on a plan in a work session, then run <code>/runroom</code> there to open one.</p>
+      <div className="runroom-list">
+        {heading}
+        <div className="runroom-empty">
+          <h2>No runrooms open</h2>
+          <p>Agree on a plan in a work session, then run <code>/runroom</code> there to open one.</p>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div className="runroom-list">
-      {rooms.map((r) => {
-        const colors = DIVISION_COLORS[r.division] || { bg: "#6b7280", text: "#fff" };
-        return (
-          <button key={r.session} className="runroom-list-item" onClick={() => setSelected(r.session)}>
+  // Same wordmark-or-pill fallback the room header uses, at list scale.
+  const roomItem = (r) => {
+    const wordmark = DIVISION_WORDMARKS[r.division];
+    const colors = DIVISION_COLORS[r.division] || { bg: "#6b7280", text: "#fff" };
+    const live = r.status === "active";
+    return (
+      <button
+        key={r.session}
+        // working = orbiting ring (mid-turn right now); active = steady ring
+        // (live, idle); finished = no ring, dimmed. Green means live
+        // everywhere in the app; motion means working.
+        className={`runroom-list-item${live ? (r.working ? " working" : " active") : " finished"}`}
+        onClick={() => setSelected(r.session)}
+      >
+        <span className="runroom-list-brand">
+          {wordmark ? (
+            <img src={wordmark} alt={r.division} className="runroom-list-mark" />
+          ) : (
             <span className="runroom-division-pill" style={{ backgroundColor: colors.bg, color: colors.text }}>
               {r.division || "?"}
             </span>
-            <span className="runroom-list-title">{r.title}</span>
-            <span className="runroom-list-meta">
-              {r.company} &middot; {r.steps_done}/{r.steps_total}
-              {r.status !== "active" && <> &middot; {r.status}</>}
-            </span>
-          </button>
-        );
-      })}
+          )}
+        </span>
+        <span className="runroom-list-title">{r.title}</span>
+        <span className="runroom-list-meta">
+          {r.company} &middot; {r.steps_done}/{r.steps_total}
+          {!live && <> &middot; {r.status}</>}
+        </span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="runroom-list">
+      {heading}
+      {active.length > 0
+        ? active.map(roomItem)
+        : <div className="runroom-list-none">No active runrooms.</div>}
+      {finished.length > 0 && (
+        <>
+          <div className="runroom-list-section">Finished</div>
+          {finished.map(roomItem)}
+        </>
+      )}
     </div>
   );
 }

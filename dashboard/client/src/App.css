@@ -6942,3 +6942,47 @@ html.vt-no-target::view-transition-old(card-morph) {
     box-shadow: 0 0 0 2px #54af4d;
   }
 }
+
+/* Runroom list — heading, wordmark slots, live/working rings, finished dim. */
+.runroom-list-header {
+  display: flex; align-items: baseline; gap: 0.8rem;
+  padding: 0.75rem 0 0.4rem; border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+.runroom-list-heading { margin: 0; font-size: 1.35rem; color: var(--text-heading); }
+.runroom-list-count { font-size: 0.8rem; color: var(--text-secondary); }
+
+.runroom-list-brand { flex: 0 0 120px; display: flex; align-items: center; }
+.runroom-list-mark { height: 20px; width: auto; max-width: 110px; object-fit: contain; }
+
+.runroom-list-item.active { box-shadow: 0 0 0 2px #54af4d; border-color: transparent; }
+.runroom-list-item.working {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    conic-gradient(from var(--rr-angle),
+      #54af4d 0deg, rgba(84, 175, 77, 0.12) 70deg,
+      rgba(84, 175, 77, 0.12) 110deg, #54af4d 180deg,
+      rgba(84, 175, 77, 0.12) 250deg, rgba(84, 175, 77, 0.12) 290deg,
+      #54af4d 360deg) border-box;
+  box-shadow: 0 0 14px -6px rgba(84, 175, 77, 0.55);
+  animation: rr-sweep 2.8s linear infinite;
+}
+.runroom-list-item.finished { opacity: 0.65; }
+.runroom-list-item.finished:hover { opacity: 1; }
+
+.runroom-list-section {
+  margin-top: 1.1rem; padding: 0 0 0.2rem;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+.runroom-list-none { color: var(--text-secondary); font-size: 0.85rem; padding: 0.5rem 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .runroom-list-item.working {
+    animation: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 2px #54af4d;
+  }
+}
