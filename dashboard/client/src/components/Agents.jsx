@@ -2,6 +2,168 @@ import { useState, useEffect, useCallback } from "react";
 import AgentDetail from "./AgentDetail.jsx";
 import AgentAvatar from "./AgentAvatar.jsx";
 
+// Queue timestamps arrive in two shapes: pending rows carry epoch ms
+// (in-memory spark runs), processed rows carry the DB's naive-UTC
+// "YYYY-MM-DD HH:MM:SS" strings. Both render as Eastern.
+function fmtQueueTime(v) {
+  if (v == null) return "";
+  const d = typeof v === "number" ? new Date(v) : new Date(String(v).replace(" ", "T") + "Z");
+  if (isNaN(d)) return "";
+  return d.toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+const QUEUE_STATUS_LABEL = {
+  awaiting: "awaiting review",
+  escalated: "escalated — needs you",
+  approved: "approved",
+};
+
+// The pile the scanners file for the supervisor. There is no queue table —
+// an agent-filed spark run sitting in "proposing" IS the queue item, and the
+// server overlays the supervisor's recent verdicts on top. Pending rows
+// expand to the actual proposal; the processed tail holds recent verdicts.
+function SupervisorQueue({ onOpenProject }) {
+  const [q, setQ] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [showProcessed, setShowProcessed] = useState(false);
+
+  const fetchQueue = useCallback(() => {
+    fetch("/api/agents/review-queue")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(setQ)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchQueue();
+    const t = setInterval(fetchQueue, 15000);
+    return () => clearInterval(t);
+  }, [fetchQueue]);
+
+  if (!q?.supervisor) return null;
+
+  const rowHead = (key, open, children) => (
+    <div
+      className="agents-queue-rowhead"
+      role="button"
+      tabIndex={0}
+      onClick={() => setExpanded(open ? null : key)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(open ? null : key); } }}
+    >
+      {children}
+    </div>
+  );
+
+  const cardLink = (id, name) => (
+    <button
+      className="agents-queue-cardlink"
+      onClick={(e) => { e.stopPropagation(); onOpenProject?.(id); }}
+    >
+      #{id} {name}
+    </button>
+  );
+
+  return (
+    <section className="agents-panel agents-queue">
+      <div className="agents-queue-head">
+        <h3 className="agents-queue-title">Supervisor queue</h3>
+        <span className="agents-queue-sub">
+          {q.supervisor.name} · {q.supervisor.autopilot ? "autopilot" : "shadow"} · {q.pending.length} pending
+        </span>
+      </div>
+
+      {q.pending.length === 0 ? (
+        <div className="agents-queue-empty">Nothing waiting — the scanners&rsquo; next filings land here.</div>
+      ) : (
+        <ul className="agents-queue-list">
+          {q.pending.map((p) => {
+            const key = `p:${p.spark_run_id}`;
+            const open = expanded === key;
+            return (
+              <li key={key} className={`agents-queue-row status-${p.review_status}`}>
+                {rowHead(key, open, (
+                  <>
+                    <span className="agents-queue-when">{fmtQueueTime(p.filed_at)}</span>
+                    <span className="agents-queue-agent">{p.filed_by?.name || p.filed_by?.slug}</span>
+                    {cardLink(p.project_id, p.project_name)}
+                    {p.certitude?.pct != null && <span className="agents-run-certitude">{p.certitude.pct}%</span>}
+                    {p.route && <span className={`agents-queue-route route-${p.route}`}>{p.route}</span>}
+                    <span className={`agents-queue-status ${p.review_status}`}>{QUEUE_STATUS_LABEL[p.review_status]}</span>
+                  </>
+                ))}
+                {open && (
+                  <div className="agents-queue-detail">
+                    <div className="agents-queue-step">{p.step.text}</div>
+                    {p.step.why && <div className="agents-run-note">{p.step.why}</div>}
+                    <div className="agents-queue-meta">
+                      {[
+                        p.step.estimated_minutes ? `${p.step.estimated_minutes}m` : null,
+                        p.step.by_when ? `by ${p.step.by_when}` : null,
+                        p.step.reversible != null ? (p.step.reversible ? "reversible" : "NOT reversible") : null,
+                        p.certitude?.reason || null,
+                      ].filter(Boolean).join(" · ")}
+                    </div>
+                    {p.step.first_action && (
+                      <div className="agents-queue-meta">First action: {p.step.first_action}</div>
+                    )}
+                    {p.verdict && (
+                      <div className="agents-run-note">
+                        Verdict ({fmtQueueTime(p.verdict.at)}{p.verdict.shadow ? " · shadow" : ""}):{" "}
+                        {p.verdict.reason || p.verdict.note || p.verdict.report_line || p.review_status}
+                        {p.verdict.wouldApprove ? " — would approve on autopilot" : ""}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {q.processed.length > 0 && (
+        <>
+          <button className="agents-queue-toggle" onClick={() => setShowProcessed((v) => !v)}>
+            {showProcessed ? "▾" : "▸"} Recently processed ({q.processed.length})
+          </button>
+          {showProcessed && (
+            <ul className="agents-queue-list processed">
+              {q.processed.map((e, i) => {
+                const key = `d:${i}`;
+                const open = expanded === key;
+                return (
+                  <li key={key} className={`agents-queue-row kind-${e.kind}`}>
+                    {rowHead(key, open, (
+                      <>
+                        <span className="agents-queue-when">{fmtQueueTime(e.at)}</span>
+                        {cardLink(e.project_id, e.name)}
+                        {e.certitude != null && <span className="agents-run-certitude">{e.certitude}%</span>}
+                        <span className={`agents-queue-status ${e.kind}`}>
+                          {e.kind === "approved" ? "approved ✓" : "escalated ↗"}{e.shadow ? " · shadow" : ""}
+                        </span>
+                      </>
+                    ))}
+                    {open && (
+                      <div className="agents-queue-detail">
+                        {e.reason && <div className="agents-run-note">{e.reason}</div>}
+                        {e.note && <div className="agents-run-note">{e.note}</div>}
+                        {e.report_line && <div className="agents-queue-meta">{e.report_line}</div>}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 // Admin roster of OpenDia Agents (ODAs). List view polls like Rooms; clicking
 // a row opens the detail view, which owns its own fetching and live stream.
 export default function Agents({ projects, onOpenProject }) {
@@ -174,6 +336,8 @@ export default function Agents({ projects, onOpenProject }) {
           })}
         </div>
       )}
+
+      <SupervisorQueue onOpenProject={onOpenProject} />
     </div>
   );
 }

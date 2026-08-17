@@ -1052,6 +1052,81 @@ export function mountAgents(app) {
     }
   });
 
+  // The supervisor's inbox, derived exactly the way the heartbeat derives
+  // it: every agent-filed spark run sitting in "proposing" with a next step,
+  // overlaid with the supervisor's recent verdicts so the page can say which
+  // items still await review, which are approved, and which are escalated
+  // and waiting on a human. There is no queue table to drift out of sync —
+  // this endpoint and runSupervisorHeartbeat read the same sources.
+  // (Registered before the /api/agents/:id routes so the literal path is
+  // never captured by :id.)
+  app.get("/api/agents/review-queue", requireAdmin, (_req, res) => {
+    try {
+      const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
+      if (!supervisor) return res.json({ supervisor: null, pending: [], processed: [] });
+
+      // Verdicts from the last 48h of review passes, newest pass first —
+      // the same window the dedup ledger uses.
+      const since = new Date(Date.now() - 48 * 3600 * 1000)
+        .toISOString().slice(0, 19).replace("T", " ");
+      const reviewRuns = getAgentRunsSince(supervisor.id, since)
+        .filter((r) => r.trigger === "review")
+        .sort((a, b) => (b.started_at || "").localeCompare(a.started_at || ""));
+      const latestVerdict = new Map(); // project_id -> flattened entry
+      const processed = [];
+      for (const run of reviewRuns) {
+        let detail = null;
+        try { detail = JSON.parse(run.detail || "null"); } catch {}
+        if (!detail) continue;
+        const shadowFor = new Map((detail.reviewed_runs || []).map((r) => [r.project_id, !!r.shadow]));
+        for (const kind of ["approved", "escalated"]) {
+          for (const e of detail[kind] || []) {
+            const row = { ...e, kind, at: run.started_at, shadow: shadowFor.get(e.project_id) ?? !supervisor.autopilot };
+            processed.push(row);
+            if (!latestVerdict.has(e.project_id)) latestVerdict.set(e.project_id, row);
+          }
+        }
+      }
+
+      const pending = listAgentSparkRuns()
+        .filter((r) => r.status === "proposing" &&
+          r.startedBy !== `agent:${supervisor.slug}` && r.result?.next_step)
+        .map((r) => {
+          const v = latestVerdict.get(r.projectId);
+          return {
+            spark_run_id: r.runId,
+            project_id: r.projectId,
+            project_name: r.projectName,
+            filed_by: r.agent || { slug: (r.startedBy || "").replace(/^agent:/, ""), name: null },
+            filed_at: r.startedAt,
+            route: r.result.next_step.route || null,
+            certitude: r.result.certitude || null,
+            step: r.result.next_step,
+            idle_wrap_at: r.idleWrapAt,
+            review_status: v ? v.kind : "awaiting",
+            verdict: v ? {
+              at: v.at, reason: v.reason || null, note: v.note || null,
+              report_line: v.report_line || null,
+              wouldApprove: v.wouldApprove ?? null, shadow: v.shadow,
+            } : null,
+          };
+        })
+        .sort((a, b) => (a.filed_at || 0) - (b.filed_at || 0));
+
+      // Items still pending render up top with their verdict overlay; the
+      // processed list is history for everything else.
+      const pendingIds = new Set(pending.map((p) => p.project_id));
+      res.json({
+        supervisor: { id: supervisor.id, slug: supervisor.slug, name: supervisor.name, autopilot: !!supervisor.autopilot },
+        pending,
+        processed: processed.filter((p) => !pendingIds.has(p.project_id)).slice(0, 30),
+      });
+    } catch (err) {
+      console.error("GET /api/agents/review-queue error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/agents", requireAdmin, (req, res) => {
     const name = (req.body?.name || "").trim();
     if (!name) return res.status(400).json({ error: "name is required" });

@@ -7043,6 +7043,90 @@ html.vt-no-target::view-transition-old(card-morph) {
    lands, instead of re-showing the settled question until the next poll. */
 .runroom-dialog.answered .runroom-dialog-label { color: var(--timer-open); }
 
+/* Supervisor queue — the pile of agent-filed proposals, under the agent grid. */
+.agents-queue {
+  max-width: 1200px;
+  margin-top: 1.5rem;
+  padding: 1rem 1.2rem;
+}
+.agents-queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin-bottom: 0.5rem;
+}
+.agents-queue-title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-heading);
+}
+.agents-queue-sub { font-size: 0.76rem; color: var(--text-faint); }
+.agents-queue-empty {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  padding: 0.5rem 0;
+}
+.agents-queue-list { list-style: none; margin: 0; padding: 0; }
+.agents-queue-list.processed { opacity: 0.85; }
+.agents-queue-row { border-top: 1px solid var(--border-subtle); }
+.agents-queue-rowhead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.45rem 0.15rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.agents-queue-rowhead:hover { background: var(--bg-hover); }
+.agents-queue-when { color: var(--text-faint); font-size: 0.74rem; white-space: nowrap; }
+.agents-queue-agent { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+.agents-queue-cardlink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+  text-align: left;
+}
+.agents-queue-cardlink:hover { color: var(--accent); }
+.agents-queue-route {
+  font-size: 0.68rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.agents-queue-route.route-opendia { color: var(--accent); border-color: var(--accent); }
+.agents-queue-status {
+  margin-left: auto;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+.agents-queue-status.escalated { color: var(--warning); font-weight: 600; }
+.agents-queue-status.approved { color: var(--timer-open); }
+.agents-queue-detail { padding: 0.15rem 0.15rem 0.7rem 0.9rem; }
+.agents-queue-step { font-size: 0.82rem; color: var(--text-primary); line-height: 1.45; }
+.agents-queue-meta { font-size: 0.74rem; color: var(--text-faint); margin-top: 0.25rem; }
+.agents-queue-toggle {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0.45rem 0 0.1rem;
+  margin-top: 0.3rem;
+  cursor: pointer;
+  font-size: 0.74rem;
+  color: var(--accent);
+  text-align: left;
+}
+.agents-queue-toggle:hover { color: var(--accent-hover); }
+
 /* Agent detail — collapsible panel carets (Settings, Matching/Assigned cards). */
 .agents-collapse-caret {
   background: transparent; border: none; color: var(--text-secondary);
