@@ -28,6 +28,10 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
   const [editingFile, setEditingFile] = useState(null);   // "agent_md" | "memory_md"
   const [fileDraft, setFileDraft] = useState("");
   const [expandedRun, setExpandedRun] = useState(null);
+  // Collapsible panels: start open; caret-only toggle so the cards
+  // header's live Static/Query/+Assign buttons are never swallowed.
+  const [closedPanels, setClosedPanels] = useState({});
+  const togglePanel = (k) => setClosedPanels((c) => ({ ...c, [k]: !c[k] }));
   // Persona/memory start collapsed — glanceable roster stats first, prose on
   // demand. Editing a file implicitly holds it open.
   const [openFiles, setOpenFiles] = useState({});
@@ -268,7 +272,8 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
 
       <div className="agents-detail-grid">
         <section className="agents-panel agents-panel-wide">
-          <h3>Settings</h3>
+          <h3><button className="agents-collapse-caret" title="Collapse / expand" onClick={() => togglePanel("settings")}>{closedPanels.settings ? "▸" : "▾"}</button>Settings</h3>
+          {!closedPanels.settings && (<>
 
           <div className="agents-group">
             <div className="agents-group-title">Schedule</div>
@@ -421,11 +426,12 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
               </div>
             </div>
           </div>
+          </>)}
         </section>
 
         {!isSupervisor && (
         <section className="agents-panel agents-panel-wide">
-          <h3>
+          <h3><button className="agents-collapse-caret" title="Collapse / expand" onClick={() => togglePanel("cards")}>{closedPanels.cards ? "▸" : "▾"}</button>
             {isQuery ? `Matching cards (${agent.projects.length} right now)` : `Assigned cards (${agent.projects.length})`}
             <span className="agents-roster-toggle">
               <button
@@ -445,6 +451,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
               <button className="agents-assign-btn" onClick={() => setPickerOpen(true)}>+ Assign</button>
             )}
           </h3>
+          {!closedPanels.cards && (<>
           {isQuery && (
             <div className="agents-query-controls">
               <div className="agents-field">
@@ -512,6 +519,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
               ))}
             </ul>
           )}
+          </>)}
         </section>
         )}
 
