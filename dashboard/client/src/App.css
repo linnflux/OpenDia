@@ -6024,6 +6024,9 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 
 .agents-panel h3 button { margin-left: auto; }
+/* The collapse caret leads the heading; without this it inherits the
+   float-right rule above and drags the title with it. */
+.agents-panel h3 .agents-collapse-caret { margin-left: 0; }
 .agents-panel h3 .agents-file-actions { margin-left: auto; display: flex; gap: 0.35rem; }
 .agents-panel h3 .agents-file-actions button { margin-left: 0; }
 
