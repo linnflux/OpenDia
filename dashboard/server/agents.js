@@ -666,11 +666,18 @@ async function runSupervisorHeartbeat(agent, state) {
   let approvals = 0;
   const nameOf = (pid) => getProjectById(pid)?.name || `card ${pid}`;
 
+  // Certitude travels into every recorded entry so the activity feed can
+  // show what confidence each decision was made at.
+  const certOf = (r) => {
+    const pct = r?.result?.certitude?.pct;
+    return Number.isInteger(pct) ? pct : null;
+  };
+
   if (!verdicts) {
     // Fail closed: a review pass with no usable verdict file escalates everything.
     pushLog(state, "warn", "Review pass produced no usable verdict file — escalating all.");
     for (const r of reviewables) {
-      escalated.push({ project_id: r.projectId, name: nameOf(r.projectId), reason: "no usable verdict", note: "", wouldApprove: false });
+      escalated.push({ project_id: r.projectId, name: nameOf(r.projectId), certitude: certOf(r), reason: "no usable verdict", note: "", wouldApprove: false });
     }
   } else {
     // Highest certitude first, so the approval cap spends itself on the most
@@ -683,15 +690,16 @@ async function runSupervisorHeartbeat(agent, state) {
     for (const v of verdicts) {
       const pid = Number(v.project_id);
       if (!byPid.has(pid)) continue;
+      const certitude = certOf(byPid.get(pid));
       if (v.verdict === "hold") continue;
       if (Date.now() - state.startedAt > HEARTBEAT_MAX_MS - 5 * 60 * 1000) {
-        escalated.push({ project_id: pid, name: nameOf(pid), reason: "ran out of window", note: v.escalation_note || "", wouldApprove: false });
+        escalated.push({ project_id: pid, name: nameOf(pid), certitude, reason: "ran out of window", note: v.escalation_note || "", wouldApprove: false });
         continue;
       }
       const g = guardrailCheck(agent, v, approvals);
       if (!g.ok) {
         escalated.push({
-          project_id: pid, name: nameOf(pid),
+          project_id: pid, name: nameOf(pid), certitude,
           reason: g.reason, note: v.escalation_note || v.reason || "",
           wouldApprove: g.reason === "shadow mode" && v.verdict === "approve",
         });
@@ -701,7 +709,7 @@ async function runSupervisorHeartbeat(agent, state) {
         intent: "do", model: SUPERVISED_ROUND_MODEL, decidedBy: `agent:${agent.slug}`,
       });
       if (!res.ok) {
-        escalated.push({ project_id: pid, name: nameOf(pid), reason: res.error, note: v.reason || "", wouldApprove: false });
+        escalated.push({ project_id: pid, name: nameOf(pid), certitude, reason: res.error, note: v.reason || "", wouldApprove: false });
         continue;
       }
       approvals += 1;
@@ -710,7 +718,7 @@ async function runSupervisorHeartbeat(agent, state) {
       pushLog(state, "info", `Approved ${nameOf(pid)} — round running on ${SUPERVISED_ROUND_MODEL}.`);
       const settled = await waitForRunSettled(pid);
       const outcome = settled?.outcomes?.[settled.outcomes.length - 1] || null;
-      approved.push({ project_id: pid, name: nameOf(pid), reason: v.reason || "", outcome, redispatched: false });
+      approved.push({ project_id: pid, name: nameOf(pid), certitude, reason: v.reason || "", outcome, redispatched: false });
       state.cardsDone += 1;
       state.currentProject = null;
       emit(state, "progress", publicLive(state));
@@ -766,7 +774,7 @@ async function runSupervisorHeartbeat(agent, state) {
         }
       }
       // Anything else — unknown verdict, second defect, undecidable run — escalates.
-      escalated.push({ project_id: pid, name: a.name, reason: `QA: ${q.verdict}`, note: q.fix_note || q.report_line || "", wouldApprove: false });
+      escalated.push({ project_id: pid, name: a.name, certitude: a.certitude ?? null, reason: `QA: ${q.verdict}`, note: q.fix_note || q.report_line || "", wouldApprove: false });
     }
   }
 

@@ -6678,3 +6678,53 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 
 .switch-track { display: inline-block; }
+
+/* Display capitalization only — values stay lowercase on the wire. */
+.agents-group-fields select,
+.agents-group-fields select option { text-transform: capitalize; }
+
+/* The generic h3-button rule pushes buttons right (for the corner Edit
+   actions); the collapse-toggle IS the title, so it stays flush left. */
+.agents-panel h3 .agents-file-toggle {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* Review-run expansion: certitude pill, section headings, entry notes. */
+.agents-run-head.inert { cursor: default; }
+.agents-run-head.inert:hover { color: var(--text-secondary); }
+
+.agents-run-detail-h {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin: 0.35rem 0 0.15rem;
+}
+
+.agents-run-certitude {
+  margin-left: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--text-primary);
+}
+
+.agents-run-flag {
+  margin-left: 0.4rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--warning);
+}
+.agents-run-flag.would { color: #54af4d; }
+
+.agents-run-note {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  margin: 0.1rem 0 0.25rem 0.9rem;
+}

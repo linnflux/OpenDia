@@ -546,12 +546,24 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
           ) : (
             <ul className="agents-run-list">
               {agent.runs.map((r) => {
-                let detail = [];
-                try { detail = JSON.parse(r.detail || "[]"); } catch {}
-                const open = expandedRun === r.id;
+                // Scanner heartbeats store an ARRAY of per-card entries;
+                // supervisor reviews store an OBJECT {approved, escalated,…}.
+                // Both audit differently, so both get their own expansion.
+                let detail = null;
+                try { detail = JSON.parse(r.detail || "null"); } catch {}
+                const scanCards = Array.isArray(detail) ? detail : null;
+                const review = !Array.isArray(detail) && detail
+                  && (detail.approved?.length || detail.escalated?.length) ? detail : null;
+                const expandable = (scanCards && scanCards.length > 0) || !!review;
+                const open = expandedRun === r.id && expandable;
+                const cert = (v) => Number.isInteger(v)
+                  ? <span className="agents-run-certitude">{v}%</span> : null;
                 return (
                   <li key={r.id} className={`agents-run status-${r.status}`}>
-                    <button className="agents-run-head" onClick={() => setExpandedRun(open ? null : r.id)}>
+                    <button
+                      className={`agents-run-head${expandable ? "" : " inert"}`}
+                      onClick={() => expandable && setExpandedRun(open ? null : r.id)}
+                    >
                       <span className={`agents-run-status ${r.status}`}>{r.status}</span>
                       <span className="agents-run-when">{fmtET(r.started_at)}</span>
                       <span className="agents-run-summary">{r.summary || r.trigger}</span>
@@ -559,9 +571,9 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                         <span className="agents-run-cost">{r.tokens_used.toLocaleString()} tok · ${(r.cost_usd || 0).toFixed(2)}</span>
                       )}
                     </button>
-                    {open && detail.length > 0 && (
+                    {open && scanCards && (
                       <ul className="agents-run-detail">
-                        {detail.map((d, i) => (
+                        {scanCards.map((d, i) => (
                           <li key={i}>
                             <button className="agents-project-link" onClick={() => onOpenProject?.(d.project_id)}>
                               {d.name}
@@ -573,6 +585,49 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {open && review && (
+                      <div className="agents-run-detail">
+                        {review.approved?.length > 0 && (
+                          <>
+                            <div className="agents-run-detail-h">Approved</div>
+                            <ul>
+                              {review.approved.map((a, i) => (
+                                <li key={i}>
+                                  <button className="agents-project-link" onClick={() => onOpenProject?.(a.project_id)}>
+                                    {a.name}
+                                  </button>
+                                  {cert(a.certitude)}
+                                  {a.redispatched ? <span className="agents-run-flag">redispatched</span> : null}
+                                  {a.reason && <div className="agents-run-note">{a.reason}</div>}
+                                  {a.outcome?.summary && (
+                                    <div className="agents-run-note">outcome [{a.outcome.status}]: {a.outcome.summary}</div>
+                                  )}
+                                  {a.report_line && <div className="agents-run-note">QA: {a.report_line}</div>}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        )}
+                        {review.escalated?.length > 0 && (
+                          <>
+                            <div className="agents-run-detail-h">Escalated</div>
+                            <ul>
+                              {review.escalated.map((e, i) => (
+                                <li key={i}>
+                                  <button className="agents-project-link" onClick={() => onOpenProject?.(e.project_id)}>
+                                    {e.name}
+                                  </button>
+                                  {cert(e.certitude)}
+                                  <span className="agents-run-flag">{e.reason}</span>
+                                  {e.wouldApprove ? <span className="agents-run-flag would">would approve</span> : null}
+                                  {e.note && <div className="agents-run-note">{e.note}</div>}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        )}
+                      </div>
                     )}
                   </li>
                 );
