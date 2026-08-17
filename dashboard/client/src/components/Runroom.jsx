@@ -782,10 +782,11 @@ export default function Runroom({ activeTimerIds, me, onOpenProject }) {
     return (
       <button
         key={r.session}
-        // working = orbiting ring (mid-turn right now); active = steady ring
-        // (live, idle); finished = no ring, dimmed. Green means live
-        // everywhere in the app; motion means working.
-        className={`runroom-list-item${live ? (r.working ? " working" : " active") : " finished"}`}
+        // Motion means thinking, amber means your move: working = orbiting
+        // green ring (mid-turn, leave it alone); needs = steady amber ring
+        // (waiting on the operator — a dialog, an idle prompt, or a dead
+        // session); finished = no ring, dimmed.
+        className={`runroom-list-item${live ? (r.working ? " working" : " needs") : " finished"}`}
         onClick={() => setSelected(r.session)}
       >
         <span className="runroom-list-brand">
@@ -798,6 +799,14 @@ export default function Runroom({ activeTimerIds, me, onOpenProject }) {
           )}
         </span>
         <span className="runroom-list-title">{r.title}</span>
+        {live && (
+          <span className={`runroom-list-state ${r.working ? "working" : r.needs || "input"}`}>
+            {r.working ? "thinking…"
+              : r.needs === "dialog" ? "decision waiting"
+              : r.needs === "gone" ? "session gone"
+              : "your move"}
+          </span>
+        )}
         <span className="runroom-list-meta">
           {r.company} &middot; {r.steps_done}/{r.steps_total}
           {!live && <> &middot; {r.status}</>}

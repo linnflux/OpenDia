@@ -404,30 +404,44 @@ export function registerRunroomRoutes(app) {
     const rooms = sessions
       .map((s) => ({ session: s, plan: readPlan(s) }))
       .filter((r) => r.plan)
-      .map(({ session, plan }) => ({
-        session,
-        plan_mtime: planMtime(session),
-        title: plan.title,
-        status: plan.status,
-        card_id: plan.card_id,
-        card_name: plan.card_name,
-        company: plan.company,
-        division: plan.division,
-        created: plan.created,
-        current_step: plan.current_step,
-        steps_total: (plan.steps || []).length,
-        steps_done: (plan.steps || []).filter((s) => s.state === "done").length,
-        // Is the bound session mid-turn right now? Lets the list show the
-        // orbiting ring on rooms being actively worked, not just open.
-        // Computed for ACTIVE rooms only — one capture-pane per active room
-        // per poll, local and cheap at the 1-3 rooms this list carries.
-        working: plan.status === "active"
-          ? !!gateForSession(plan.tmux_session)?.working
-          : false,
-      }))
-      // Active rooms first, newest first within each group.
+      .map(({ session, plan }) => {
+        // One gate read per active room per poll — local and cheap at the
+        // 1-3 rooms this list carries. It answers the list's real question:
+        // is this room thinking (leave it alone) or waiting on the operator
+        // (go back in)?  working = mid-turn; needs = why it's waiting:
+        // "dialog" (a decision is on screen), "input" (idle, your move), or
+        // "gone" (the tmux session died under an active room).
+        let working = false, needs = null;
+        if (plan.status === "active") {
+          const g = gateForSession(plan.tmux_session);
+          working = !!g?.working;
+          if (!working) {
+            needs = g?.reason === "dialog-open" ? "dialog"
+              : g?.reason === "session-gone" ? "gone" : "input";
+          }
+        }
+        return {
+          session,
+          plan_mtime: planMtime(session),
+          title: plan.title,
+          status: plan.status,
+          card_id: plan.card_id,
+          card_name: plan.card_name,
+          company: plan.company,
+          division: plan.division,
+          created: plan.created,
+          current_step: plan.current_step,
+          steps_total: (plan.steps || []).length,
+          steps_done: (plan.steps || []).filter((s) => s.state === "done").length,
+          working,
+          needs,
+        };
+      })
+      // Active rooms first; within active, rooms waiting on the operator
+      // outrank rooms that are busy thinking; newest first as the tiebreak.
       .sort((a, b) =>
         (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1)
+        || (a.needs ? 0 : 1) - (b.needs ? 0 : 1)
         || (b.created || "").localeCompare(a.created || ""));
     res.json(rooms);
   });

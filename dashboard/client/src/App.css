@@ -6955,7 +6955,26 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-list-brand { flex: 0 0 120px; display: flex; align-items: center; }
 .runroom-list-mark { height: 20px; width: auto; max-width: 110px; object-fit: contain; }
 
-.runroom-list-item.active { box-shadow: 0 0 0 2px #54af4d; border-color: transparent; }
+/* Waiting on the operator (dialog up, idle prompt, or dead session): steady
+   amber — the visual opposite of the working orbit. Motion means thinking;
+   amber means your move. */
+.runroom-list-item.needs { box-shadow: 0 0 0 2px var(--warning); border-color: transparent; }
+
+.runroom-list-state {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-pill);
+}
+.runroom-list-state.working { color: #54af4d; border: 1px solid #54af4d; }
+.runroom-list-state.dialog, .runroom-list-state.input {
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}
+.runroom-list-state.gone { color: var(--danger); border: 1px solid var(--danger); }
 .runroom-list-item.working {
   border: 2px solid transparent;
   background:
