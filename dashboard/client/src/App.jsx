@@ -670,7 +670,7 @@ export default function App() {
           ) : view === "agents" && me?.is_admin ? (
             <Agents projects={projects} onOpenProject={handleProjectClick} />
           ) : view === "runrooms" ? (
-            <Runroom activeTimerIds={activeTimerIds} me={me} />
+            <Runroom activeTimerIds={activeTimerIds} me={me} onOpenProject={handleProjectClick} />
           ) : (
             <Clients
               projects={projects}

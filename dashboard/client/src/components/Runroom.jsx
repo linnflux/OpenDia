@@ -48,7 +48,7 @@ function copyText(text) {
   }
 }
 
-function RoomHeader({ plan, hasActiveTimer }) {
+function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
   const wordmark = DIVISION_WORDMARKS[plan.division];
   const colors = DIVISION_COLORS[plan.division] || { bg: "#6b7280", text: "#fff" };
   const total = (plan.steps || []).length;
@@ -65,7 +65,22 @@ function RoomHeader({ plan, hasActiveTimer }) {
         ) : null}
         <span className="runroom-header-meta">
           {plan.company}
-          {plan.card_id != null && <> &middot; Card #{plan.card_id}{plan.card_name ? ` ${plan.card_name}` : ""}</>}
+          {plan.card_id != null && (
+            <>
+              {" "}&middot;{" "}
+              {onOpenProject ? (
+                <button
+                  className="runroom-card-link"
+                  title="Open the card"
+                  onClick={() => onOpenProject(plan.card_id)}
+                >
+                  Card #{plan.card_id}{plan.card_name ? ` ${plan.card_name}` : ""}
+                </button>
+              ) : (
+                <>Card #{plan.card_id}{plan.card_name ? ` ${plan.card_name}` : ""}</>
+              )}
+            </>
+          )}
         </span>
       </div>
       <h1 className="runroom-title">{plan.title}</h1>
@@ -491,7 +506,7 @@ function CompletedSummary({ plan }) {
   );
 }
 
-function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
+function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject }) {
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState(null);
   const [railOpen, setRailOpen] = useState(true);
@@ -535,7 +550,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
       {showBack && (
         <button className="runroom-back" onClick={onBack}>&larr; all runrooms</button>
       )}
-      <RoomHeader plan={plan} hasActiveTimer={activeTimerIds?.has(plan.card_id)} />
+      <RoomHeader plan={plan} hasActiveTimer={activeTimerIds?.has(plan.card_id)} onOpenProject={onOpenProject} />
       <div className="runroom-body">
         <aside className={`runroom-rail${railOpen ? "" : " collapsed"}`}>
           <button className="runroom-rail-toggle" onClick={() => setRailOpen((v) => !v)}
@@ -581,7 +596,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
   );
 }
 
-export default function Runroom({ activeTimerIds, me }) {
+export default function Runroom({ activeTimerIds, me, onOpenProject }) {
   const [rooms, setRooms] = useState(null); // null = loading
   const [selected, setSelected] = useState(null);
   const [autoOpened, setAutoOpened] = useState(false);
@@ -625,6 +640,7 @@ export default function Runroom({ activeTimerIds, me }) {
         session={selected}
         activeTimerIds={activeTimerIds}
         me={me}
+        onOpenProject={onOpenProject}
         onBack={() => { setSelected(null); setAutoOpened(true); }}
         showBack={(rooms || []).length > 1}
       />
