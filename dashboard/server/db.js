@@ -686,12 +686,28 @@ export function ensureAgentsTables() {
   if (!cols.includes("last_digest_at")) {
     db.exec("ALTER TABLE agents ADD COLUMN last_digest_at TEXT");
   }
+  // Supervisor role (added 2026-08): a supervisor reviews other agents' spark
+  // runs instead of scanning cards. autopilot=0 is shadow mode — review and
+  // escalate only, recording what would have been approved.
+  if (!cols.includes("role")) {
+    db.exec("ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'scanner'");
+  }
+  if (!cols.includes("min_certitude")) {
+    db.exec("ALTER TABLE agents ADD COLUMN min_certitude INTEGER NOT NULL DEFAULT 70");
+  }
+  if (!cols.includes("max_auto_approvals")) {
+    db.exec("ALTER TABLE agents ADD COLUMN max_auto_approvals INTEGER NOT NULL DEFAULT 5");
+  }
+  if (!cols.includes("autopilot")) {
+    db.exec("ALTER TABLE agents ADD COLUMN autopilot INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 const AGENT_UPDATABLE_FIELDS = new Set([
   "name", "enabled", "model", "schedule_days", "schedule_start", "schedule_end",
   "heartbeat_minutes", "heartbeat_token_limit", "run_budget_usd", "chat_webhook_url",
   "roster_mode", "query_status", "query_next_step", "max_cards_per_heartbeat", "chat_mode",
+  "role", "min_certitude", "max_auto_approvals", "autopilot",
 ]);
 
 export function getAllAgents() {

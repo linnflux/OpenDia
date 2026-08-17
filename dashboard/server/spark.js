@@ -83,6 +83,8 @@ const ACCRUAL_PAUSE_MIN = 60;        // stop auto-accruing; ask the human first
 const LOW_CERTITUDE = 60;
 const IDLE_WARN_MS = 20 * 60 * 1000; // waiting on a decision
 const IDLE_WRAP_MS = 30 * 60 * 1000;
+// Agent-started runs stay decidable across the supervisor's nightly pass.
+const AGENT_IDLE_WRAP_MS = Number(process.env.SPARK_AGENT_IDLE_WRAP_MS || 5 * 60 * 60 * 1000);
 
 const FRONTS = ["timers", "notion", "email", "voice", "chat", "artifacts"];
 const FRONT_STATES = ["pending", "checking", "done", "checked", "skipped", "unavailable"];
@@ -1176,16 +1178,23 @@ function offerNextStep(run) {
   setVerb(run, null);
   emit(run, "next_step", { round: run.roundsUsed + 1, step });
 
+  // Agent-started runs stay decidable much longer: they bill zero, hold no
+  // compute (the claude child has exited), and the supervisor's nightly pass
+  // arrives hours after the scan. Human runs keep the short window so a
+  // walked-away decision never leaves a timer accruing.
+  const isAgentRun = (run.startedBy || "").startsWith("agent:");
+  const wrapMs = isAgentRun ? AGENT_IDLE_WRAP_MS : IDLE_WRAP_MS;
+  const warnMs = Math.max(wrapMs - 10 * 60 * 1000, IDLE_WARN_MS);
   clearTimeout(run.idleWarnTimer);
   clearTimeout(run.idleWrapTimer);
   run.idleWarnTimer = setTimeout(() => {
-    pushLedger(run, "warn", "Waiting on a decision — this Spark wraps up in 10 minutes.");
-  }, IDLE_WARN_MS);
-  run.idleWrapAt = Date.now() + IDLE_WRAP_MS;
+    pushLedger(run, "warn", `Waiting on a decision — this Spark wraps up in ${Math.round((wrapMs - warnMs) / 60000)} minutes.`);
+  }, warnMs);
+  run.idleWrapAt = Date.now() + wrapMs;
   run.idleWrapTimer = setTimeout(() => {
-    pushLedger(run, "warn", "No decision after 30 minutes — wrapping up so the timer does not sit open.");
+    pushLedger(run, "warn", `No decision after ${Math.round(wrapMs / 60000)} minutes — wrapping up so the timer does not sit open.`);
     wrapUp(run);
-  }, IDLE_WRAP_MS);
+  }, wrapMs);
 }
 
 async function wrapUp(run) {
@@ -1201,7 +1210,7 @@ async function wrapUp(run) {
  * Run one act round. `intent` is "do" (carry the step out) or "adjust" (perform
  * nothing, re-recommend from the operator's correction).
  */
-async function startRound(run, intent, note = "") {
+async function startRound(run, intent, note = "", opts = {}) {
   const project = run.project;
   const step = run.result?.next_step || null;
   run.roundsUsed += 1;
@@ -1216,6 +1225,9 @@ async function startRound(run, intent, note = "") {
     emit(run, "step_progress", run.stepState);
   }
   if (note) pushLedger(run, "note", `Correction: ${note}`);
+  if (opts.decidedBy) {
+    pushLedger(run, "note", `Approved by ${opts.decidedBy} — running on ${opts.model || ROUND_MODEL}.`);
+  }
 
   const roundFile = `${run.runDir}/round-${run.round}.json`;
   const outPath = `${run.runDir}/round-${run.round}-result.json`;
@@ -1272,7 +1284,10 @@ async function startRound(run, intent, note = "") {
     deny: DENY_ACT,
     resume: true,
     // A human just typed or clicked — the round runs on the judgment model.
-    model: ROUND_MODEL,
+    // A supervisor-approved round overrides to the execution model: the plan
+    // was made on opus (scan) and reviewed on opus (supervisor); carrying it
+    // out is the mechanical part.
+    model: opts.model || ROUND_MODEL,
   });
 
   proc.on("error", async (err) => {
@@ -1508,6 +1523,47 @@ export function activeSparkCount({ excludeProposing = false } = {}) {
 }
 export function getSparkRun(projectId) {
   return runs.get(String(projectId));
+}
+
+// Snapshot of live agent-started runs, for the supervisor executor.
+export function listAgentSparkRuns() {
+  return [...runs.values()]
+    .filter((r) => !r.finishedAt && (r.startedBy || "").startsWith("agent:"))
+    .map((r) => ({
+      projectId: r.projectId,
+      runId: r.id,
+      status: r.status,
+      startedBy: r.startedBy,
+      result: r.result,
+      roundsUsed: r.roundsUsed,
+      stepsRun: r.stepsRun,
+      outcomes: r.outcomes,
+      drafts: r.drafts,
+      idleWrapAt: r.idleWrapAt || null,
+      runDir: r.runDir,
+    }));
+}
+
+// Programmatic decide for the supervisor: the same checks the HTTP route
+// applies, without an HTTP self-call. The server calls this only after its own
+// guardrail checklist passes — the model that produced the verdict never can.
+export async function superviseDecide(projectId, { intent, note = "", model = null, decidedBy = "" } = {}) {
+  const run = runs.get(String(projectId));
+  if (!run || run.finishedAt) return { ok: false, error: "no active run" };
+  if (run.status !== "proposing") return { ok: false, error: `run is ${run.status}, not awaiting a decision` };
+  const step = run.result?.next_step;
+  if (intent === "do") {
+    if (!step) return { ok: false, error: "no next step to carry out" };
+    if (step.route !== ROUTE_OPENDIA) return { ok: false, error: "step is human-routed" };
+  } else if (intent !== "adjust") {
+    return { ok: false, error: `unsupported intent: ${intent}` };
+  }
+  startRound(run, intent, note, { model, decidedBy }).catch(async (err) => {
+    run.error = { message: err.message };
+    emit(run, "error", run.error);
+    await wrapUp(run);
+  });
+  return { ok: true, round: run.round };
 }
 
 export function mountSpark(app) {

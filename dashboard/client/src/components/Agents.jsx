@@ -117,6 +117,7 @@ export default function Agents({ projects, onOpenProject }) {
                   <td><span className={`agents-dot ${dot.cls}`} title={dot.label} /></td>
                   <td className="agents-name">
                     {a.name}
+                    {a.role === "supervisor" && <span className="agents-role-badge">supervisor</span>}
                     {a.active && a.current_project && (
                       <span className="agents-current">→ {a.current_project.name}</span>
                     )}

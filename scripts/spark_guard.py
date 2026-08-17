@@ -57,13 +57,26 @@ BASH_DENY = [
     ("touches billing", r"\bsquare_(create|update|publish|cancel)|invoices?\.(create|publish)"),
 ]
 
+# Reviewer-only additions: the dashboard grants admin to any loopback caller,
+# so a fenced session could otherwise POST /spark/decide and approve its own
+# recommendation. Read-only HTTP stays open; anything mutating is denied.
+REVIEWER_DENY = [
+    ("makes a non-GET HTTP request",
+     CMD + r"(curl|wget|http|https)\b"
+     r"(?=.*(?:-X\s*(?:POST|PUT|PATCH|DELETE)|--request\s*(?:POST|PUT|PATCH|DELETE)"
+     r"|--data\b|--data-\w+|-d\s|--form\b|-F\s|--upload-file|--json\b"
+     r"|--method[= ]\s*(?:post|put|patch|delete)))"),
+]
+
 WRITE_TOOLS = {"Write", "Edit", "NotebookEdit", "MultiEdit"}
 
 
-def denied_reason(tool_name: str, tool_input: dict, run_dir: Path, allow_dirs: list[Path]) -> str | None:
+def denied_reason(tool_name: str, tool_input: dict, run_dir: Path, allow_dirs: list[Path],
+                  reviewer: bool = False) -> str | None:
     if tool_name == "Bash":
         command = (tool_input.get("command") or "")
-        for label, pattern in BASH_DENY:
+        deny = BASH_DENY + (REVIEWER_DENY if reviewer else [])
+        for label, pattern in deny:
             if re.search(pattern, command, re.IGNORECASE):
                 return (
                     f"Spark may not run a command that {label}. "
@@ -98,6 +111,8 @@ def main():
     # Extra writable roots — ODA runs pass their own ~/OpenDia/agents/<slug>/
     # so the agent can maintain its scratchpad memory.
     ap.add_argument("--allow-dir", action="append", default=[])
+    # Reviewer runs (ODA supervisor) also lose non-GET HTTP — see REVIEWER_DENY.
+    ap.add_argument("--reviewer", action="store_true")
     args = ap.parse_args()
     run_dir = Path(args.run_dir)
     allow_dirs = [Path(os.path.expanduser(d)).resolve() for d in args.allow_dir]
@@ -112,7 +127,7 @@ def main():
     tool_name = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
 
-    reason = denied_reason(tool_name, tool_input, run_dir, allow_dirs)
+    reason = denied_reason(tool_name, tool_input, run_dir, allow_dirs, reviewer=args.reviewer)
     if not reason:
         sys.exit(0)
 

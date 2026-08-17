@@ -166,6 +166,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
   const memoryWarn = agent.memory_lines >= 80;
   const live = liveState || agent.live;
   const isQuery = agent.roster_mode === "query";
+  const isSupervisor = agent.role === "supervisor";
   const queryStatuses = String(agent.query_status || "").split(",").map((s) => s.trim()).filter(Boolean);
 
   function toggleQueryStatus(s) {
@@ -278,7 +279,45 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                 {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
+            <div className="agents-field">
+              <label>Role</label>
+              <select value={agent.role} onChange={(e) => patch({ role: e.target.value })}>
+                <option value="scanner">scanner</option>
+                <option value="supervisor">supervisor</option>
+              </select>
+            </div>
           </div>
+          {isSupervisor && (
+            <div className="agents-field-row">
+              <div className="agents-field">
+                <label>Min certitude to approve</label>
+                <input
+                  type="number" min="0" max="100" step="5"
+                  defaultValue={agent.min_certitude}
+                  onBlur={(e) => Number(e.target.value) !== agent.min_certitude && patch({ min_certitude: Number(e.target.value) })}
+                />
+              </div>
+              <div className="agents-field">
+                <label>Max auto-approvals / pass</label>
+                <input
+                  type="number" min="0" step="1"
+                  defaultValue={agent.max_auto_approvals}
+                  onBlur={(e) => Number(e.target.value) !== agent.max_auto_approvals && patch({ max_auto_approvals: Number(e.target.value) })}
+                />
+              </div>
+              <div className="agents-field">
+                <label>Mode</label>
+                <label className="agents-enable-toggle" title="Shadow reviews and escalates only, recording what it would have approved.">
+                  <input
+                    type="checkbox"
+                    checked={!!agent.autopilot}
+                    onChange={(e) => patch({ autopilot: e.target.checked })}
+                  />
+                  {agent.autopilot ? "Autopilot — approve within guardrails" : "Shadow — review & escalate only"}
+                </label>
+              </div>
+            </div>
+          )}
           <div className="agents-field-row">
             <div className="agents-field">
               <label>Chat notifications</label>
@@ -308,6 +347,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
           </div>
         </section>
 
+        {!isSupervisor && (
         <section className="agents-panel">
           <h3>
             {isQuery ? `Matching cards (${agent.projects.length} right now)` : `Assigned cards (${agent.projects.length})`}
@@ -376,6 +416,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
             </ul>
           )}
         </section>
+        )}
 
         {["agent_md", "memory_md"].map((fileKey) => (
           <section className="agents-panel" key={fileKey}>

@@ -28,7 +28,14 @@ import {
   insertAgentRun, updateAgentRun, getAgentRuns, interruptStaleAgentRuns,
   getProjectById, getProjectsByStatuses, markAgentDigest, getAgentRunsSince,
 } from "./db.js";
-import { startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT } from "./spark.js";
+import {
+  startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT,
+  listAgentSparkRuns, superviseDecide,
+} from "./spark.js";
+import { spawn } from "child_process";
+import { createInterface } from "readline";
+import { createWriteStream } from "fs";
+import { resolve as resolvePath } from "path";
 import { etNow } from "./timerfile.js";
 import { notifyChat } from "./chat_notify.js";
 import { runClaude } from "./ai.js";
@@ -37,6 +44,29 @@ const HOME = process.env.HOME || "/home/linnflux";
 const AGENTS_ROOT = `${HOME}/OpenDia/agents`;
 
 const HEARTBEAT_MAX_MS = Number(process.env.AGENT_HEARTBEAT_MAX_MS || 45 * 60 * 1000);
+const SUPERVISED_ROUND_MODEL = process.env.SPARK_SUPERVISED_ROUND_MODEL || "sonnet";
+const REVIEW_KILL_MS = 15 * 60 * 1000;      // per supervisor model invocation
+const ROUND_SETTLE_MAX_MS = 25 * 60 * 1000; // > spark's 20-min hard kill
+const CLAUDE_BIN = resolvePath(HOME, ".local", "bin", "claude");
+
+// The supervisor is strictly read-only: same list spark uses for scans —
+// no edits, no drafts, no Notion writes, no subagents. Its only output is the
+// verdict file, and Bash is fenced by spark_guard --reviewer (which also
+// blocks non-GET HTTP so the loopback-admin API is out of reach).
+const DENY_REVIEW = [
+  "Edit", "NotebookEdit", "Agent", "Workflow",
+  "mcp__google-workspace__gmail_send",
+  "mcp__google-workspace__gmail_create_draft",
+  "mcp__google-workspace__calendar_create_event",
+  "mcp__google-workspace__calendar_update_event",
+  "mcp__google-workspace__calendar_delete_event",
+  "mcp__notion__notion_update_page",
+  "mcp__notion__notion_create_page",
+  "mcp__notion__notion_append_blocks",
+  "mcp__notion__notion_update_block",
+  "mcp__notion__notion_delete_block",
+  "mcp__notion__notion_create_comment",
+];
 const CARD_WAIT_MAX_MS = 25 * 60 * 1000;   // > spark's 20-min hard kill
 const CONCURRENCY_WAIT_MAX_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
@@ -241,6 +271,7 @@ async function waitForScan(sparkRun) {
 
 function startHeartbeat(agent, trigger) {
   const runId = randomUUID();
+  if (agent.role === "supervisor") trigger = "review";
   const state = {
     runId,
     agentId: agent.id,
@@ -269,6 +300,7 @@ function startHeartbeat(agent, trigger) {
 }
 
 async function runHeartbeat(agent, state) {
+  if (agent.role === "supervisor") return runSupervisorHeartbeat(agent, state);
   const assigned = rosterFor(agent);
   const touchHeartbeat = state.trigger !== "manual";
   if (assigned.length === 0) {
@@ -436,6 +468,308 @@ function finishHeartbeat(agent, state, status, summary = "") {
   live.delete(agent.id);
 }
 
+// ── supervisor executor ────────────────────────────────────────────────────
+//
+// A supervisor reviews other agents' spark runs instead of scanning cards.
+// One session per heartbeat, two invocations: the review pass writes verdicts,
+// the SERVER executes them through superviseDecide after its own guardrail
+// checklist (the model never decides), then a QA pass on --resume verifies
+// outcomes. Shadow mode (autopilot=0) records would-approve and escalates
+// everything — the trust ramp before granting auto-approve.
+
+function reviewDirFor(agent, runId) {
+  return `${agentDir(agent.slug)}/reviews/${runId}`;
+}
+
+function spawnSupervisor(agent, state, reviewDir, { briefFile, resume }) {
+  const guardFile = `${reviewDir}/guard.json`;
+  writeFileSync(guardFile, JSON.stringify({
+    hooks: {
+      PreToolUse: [{
+        matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit",
+        hooks: [{
+          type: "command",
+          command: `python3 ${HOME}/OpenDia/scripts/spark_guard.py --run-dir ${reviewDir} --reviewer`,
+        }],
+      }],
+    },
+  }, null, 2));
+
+  const args = [
+    "-p",
+    `Run /supervise ${briefFile}\n\n` +
+    "Invoked headlessly by the OpenDia agent scheduler. There is no interactive " +
+    "user — never ask a question and never wait for input. Write the verdict " +
+    "JSON to the out_path named in the brief, then stop.",
+    ...(resume ? ["--resume", state.runId] : ["--session-id", state.runId]),
+    "--model", agent.model,
+    "--permission-mode", "bypassPermissions",
+    "--disallowedTools", DENY_REVIEW.join(" "),
+    "--output-format", "stream-json",
+    "--verbose",
+    "--max-budget-usd", String(agent.run_budget_usd),
+    "--add-dir", `${HOME}/OpenDia`,
+    "--settings", guardFile,
+  ];
+
+  return new Promise((resolve) => {
+    const proc = spawn(CLAUDE_BIN, args, { cwd: `${HOME}/OpenDia`, stdio: ["ignore", "pipe", "pipe"] });
+    const rawLog = createWriteStream(`${reviewDir}/raw.log`, { flags: "a" });
+    createInterface({ input: proc.stdout }).on("line", (line) => {
+      rawLog.write(line + "\n");
+      try {
+        const msg = JSON.parse(line);
+        if (msg.type === "result") {
+          if (typeof msg.total_cost_usd === "number") state.costUsd += msg.total_cost_usd;
+          if (msg.usage) state.tokens += tokensFromUsage(msg.usage);
+        }
+      } catch {}
+    });
+    proc.stderr.on("data", (d) => rawLog.write(d));
+    const kill = setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, REVIEW_KILL_MS);
+    proc.on("error", () => { clearTimeout(kill); resolve({ ok: false }); });
+    proc.on("close", (code) => { clearTimeout(kill); resolve({ ok: code === 0 }); });
+  });
+}
+
+function readVerdicts(path, phase) {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    if (!Array.isArray(raw.verdicts)) return null;
+    return raw.verdicts.filter((v) => Number.isInteger(v.project_id) || /^\d+$/.test(String(v.project_id)));
+  } catch {
+    return null;
+  }
+}
+
+// Every rule a model verdict must clear before the server will act on it.
+// Returns { ok, reason } — the reason lands verbatim in the escalation line.
+function guardrailCheck(agent, verdict, approvals) {
+  if (!agent.autopilot) return { ok: false, reason: "shadow mode" };
+  if (verdict.verdict !== "approve") return { ok: false, reason: `verdict: ${verdict.verdict}` };
+  const run = getSparkRun(verdict.project_id);
+  if (!run || run.finishedAt) return { ok: false, reason: "run no longer decidable" };
+  if (run.status !== "proposing") return { ok: false, reason: `run is ${run.status}` };
+  if (!(run.startedBy || "").startsWith("agent:")) return { ok: false, reason: "not an agent run" };
+  if (run.startedBy === `agent:${agent.slug}`) return { ok: false, reason: "own run" };
+  const step = run.result?.next_step;
+  if (!step) return { ok: false, reason: "no next step" };
+  if (step.route !== "opendia") return { ok: false, reason: "human-routed" };
+  if (step.reversible !== true) return { ok: false, reason: "not reversible" };
+  const pct = run.result?.certitude?.pct;
+  if (!Number.isInteger(pct) || pct < agent.min_certitude) {
+    return { ok: false, reason: `certitude ${pct ?? "?"} < ${agent.min_certitude}` };
+  }
+  if (approvals >= agent.max_auto_approvals) return { ok: false, reason: "approval cap reached" };
+  if (activeSparkCount({ excludeProposing: true }) >= SPARK_MAX_CONCURRENT) {
+    return { ok: false, reason: "spark concurrency cap" };
+  }
+  return { ok: true, reason: null };
+}
+
+async function waitForRunSettled(projectId) {
+  const deadline = Date.now() + ROUND_SETTLE_MAX_MS;
+  while (Date.now() < deadline) {
+    const run = getSparkRun(projectId);
+    if (!run || run.finishedAt || run.status === "proposing") return run || null;
+    await sleep(POLL_MS);
+  }
+  return getSparkRun(projectId) || null;
+}
+
+async function runSupervisorHeartbeat(agent, state) {
+  const touchHeartbeat = state.trigger !== "manual";
+  const reviewables = listAgentSparkRuns().filter((r) =>
+    r.status === "proposing" &&
+    r.startedBy !== `agent:${agent.slug}` &&
+    r.result?.next_step
+  );
+
+  if (reviewables.length === 0) {
+    updateAgentRun(state.runId, { status: "done", summary: "Nothing to review.", finished: true });
+    markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
+    finishHeartbeat(agent, state, "done");
+    return;
+  }
+
+  const reviewDir = reviewDirFor(agent, state.runId);
+  mkdirSync(reviewDir, { recursive: true });
+  state.cardsTotal = reviewables.length;
+  pushLog(state, "info", `Review pass — ${reviewables.length} run(s) awaiting a decision.`);
+
+  // ── Phase A: review ──
+  const briefFile = `${reviewDir}/review-brief.json`;
+  writeFileSync(briefFile, JSON.stringify({
+    schema: 1,
+    phase: "review",
+    review_id: state.runId,
+    out_path: `${reviewDir}/supervisor-review.json`,
+    supervisor: { slug: agent.slug, name: agent.name },
+    policy: {
+      min_certitude: agent.min_certitude,
+      auto_route: "opendia",
+      reversible_only: true,
+      max_approvals: agent.max_auto_approvals,
+      shadow: !agent.autopilot,
+    },
+    reviewables: reviewables.map((r) => ({
+      project_id: r.projectId,
+      project: getProjectById(r.projectId),
+      spark_run_id: r.runId,
+      run_status: r.status,
+      started_by: r.startedBy,
+      rounds_used: r.roundsUsed,
+      idle_wrap_at: r.idleWrapAt,
+      result: r.result,
+    })),
+  }, null, 2));
+
+  await spawnSupervisor(agent, state, reviewDir, { briefFile, resume: false });
+  const verdicts = readVerdicts(`${reviewDir}/supervisor-review.json`, "review");
+
+  const approved = [];   // {project_id, name, verdict, outcome?, redispatched?}
+  const escalated = [];  // {project_id, name, reason, note, wouldApprove}
+  let approvals = 0;
+  const nameOf = (pid) => getProjectById(pid)?.name || `card ${pid}`;
+
+  if (!verdicts) {
+    // Fail closed: a review pass with no usable verdict file escalates everything.
+    pushLog(state, "warn", "Review pass produced no usable verdict file — escalating all.");
+    for (const r of reviewables) {
+      escalated.push({ project_id: r.projectId, name: nameOf(r.projectId), reason: "no usable verdict", note: "", wouldApprove: false });
+    }
+  } else {
+    // Highest certitude first, so the approval cap spends itself on the most
+    // defensible work.
+    const byPid = new Map(reviewables.map((r) => [Number(r.projectId), r]));
+    verdicts.sort((a, b) =>
+      (byPid.get(Number(b.project_id))?.result?.certitude?.pct || 0) -
+      (byPid.get(Number(a.project_id))?.result?.certitude?.pct || 0));
+
+    for (const v of verdicts) {
+      const pid = Number(v.project_id);
+      if (!byPid.has(pid)) continue;
+      if (v.verdict === "hold") continue;
+      if (Date.now() - state.startedAt > HEARTBEAT_MAX_MS - 5 * 60 * 1000) {
+        escalated.push({ project_id: pid, name: nameOf(pid), reason: "ran out of window", note: v.escalation_note || "", wouldApprove: false });
+        continue;
+      }
+      const g = guardrailCheck(agent, v, approvals);
+      if (!g.ok) {
+        escalated.push({
+          project_id: pid, name: nameOf(pid),
+          reason: g.reason, note: v.escalation_note || v.reason || "",
+          wouldApprove: g.reason === "shadow mode" && v.verdict === "approve",
+        });
+        continue;
+      }
+      const res = await superviseDecide(pid, {
+        intent: "do", model: SUPERVISED_ROUND_MODEL, decidedBy: `agent:${agent.slug}`,
+      });
+      if (!res.ok) {
+        escalated.push({ project_id: pid, name: nameOf(pid), reason: res.error, note: v.reason || "", wouldApprove: false });
+        continue;
+      }
+      approvals += 1;
+      state.currentProject = { id: pid, name: nameOf(pid) };
+      emit(state, "progress", publicLive(state));
+      pushLog(state, "info", `Approved ${nameOf(pid)} — round running on ${SUPERVISED_ROUND_MODEL}.`);
+      const settled = await waitForRunSettled(pid);
+      const outcome = settled?.outcomes?.[settled.outcomes.length - 1] || null;
+      approved.push({ project_id: pid, name: nameOf(pid), reason: v.reason || "", outcome, redispatched: false });
+      state.cardsDone += 1;
+      state.currentProject = null;
+      emit(state, "progress", publicLive(state));
+    }
+  }
+
+  // ── Phase B: QA on what actually ran ──
+  if (approved.length > 0) {
+    const qaFile = `${reviewDir}/qa-brief.json`;
+    writeFileSync(qaFile, JSON.stringify({
+      schema: 1,
+      phase: "qa",
+      review_id: state.runId,
+      out_path: `${reviewDir}/supervisor-qa.json`,
+      approved: approved.map((a) => {
+        const run = getSparkRun(a.project_id);
+        return {
+          project_id: a.project_id,
+          name: a.name,
+          outcome: a.outcome,
+          drafts: run?.drafts || [],
+          new_next_step: run?.result?.next_step || null,
+          card_next_step: getProjectById(a.project_id)?.next_step || null,
+        };
+      }),
+    }, null, 2));
+
+    pushLog(state, "info", `QA pass — verifying ${approved.length} completed round(s).`);
+    await spawnSupervisor(agent, state, reviewDir, { briefFile: qaFile, resume: true });
+    const qa = readVerdicts(`${reviewDir}/supervisor-qa.json`, "qa") || [];
+
+    for (const q of qa) {
+      const pid = Number(q.project_id);
+      const a = approved.find((x) => x.project_id === pid);
+      if (!a) continue;
+      a.report_line = q.report_line || "";
+      if (q.verdict === "accept") continue;
+      if (q.verdict === "redispatch" && !a.redispatched && agent.autopilot) {
+        const run = getSparkRun(pid);
+        const step = run?.result?.next_step;
+        if (run && run.status === "proposing" && step?.route === "opendia" && step.reversible === true) {
+          a.redispatched = true;
+          pushLog(state, "warn", `Redispatching ${a.name}: ${q.fix_note || "fix requested"}`);
+          const res = await superviseDecide(pid, {
+            intent: "do", note: q.fix_note || "", model: SUPERVISED_ROUND_MODEL,
+            decidedBy: `agent:${agent.slug}`,
+          });
+          if (res.ok) {
+            const settled = await waitForRunSettled(pid);
+            a.outcome = settled?.outcomes?.[settled.outcomes.length - 1] || a.outcome;
+          }
+          continue;
+        }
+      }
+      // Anything else — unknown verdict, second defect, undecidable run — escalates.
+      escalated.push({ project_id: pid, name: a.name, reason: `QA: ${q.verdict}`, note: q.fix_note || q.report_line || "", wouldApprove: false });
+    }
+  }
+
+  // ── Record + report ──
+  const wouldApprove = escalated.filter((e) => e.wouldApprove).length;
+  const finalStatus = "done";
+  const shadowTag = agent.autopilot ? "" : `SHADOW — would have approved ${wouldApprove}. `;
+  const summary =
+    `${shadowTag}Reviewed ${reviewables.length}, approved ${approved.length}` +
+    `${approved.filter((a) => a.redispatched).length ? ` (${approved.filter((a) => a.redispatched).length} redispatched)` : ""}, ` +
+    `escalated ${escalated.length}.`;
+
+  updateAgentRun(state.runId, {
+    status: finalStatus,
+    tokensUsed: state.tokens,
+    costUsd: state.costUsd,
+    summary,
+    detail: JSON.stringify({ reviewed: reviewables.length, approved, escalated }),
+    finished: true,
+  });
+  markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
+
+  const base = (process.env.DASHBOARD_PUBLIC_URL || "").replace(/\/$/, "");
+  const link = (pid, name) => base ? `<${base}/?project=${pid}&tab=spark|${name}>` : name;
+  const lines = [`${agent.name} — nightly review: ${summary}`];
+  for (const a of approved) {
+    lines.push(`✓ ${link(a.project_id, a.name)} — ${a.report_line || a.outcome?.summary || "completed"}`);
+  }
+  for (const e of escalated) {
+    lines.push(`→ ${link(e.project_id, e.name)} — needs Nick: ${e.note || e.reason}${e.wouldApprove ? " [would approve]" : ""}`);
+  }
+  lines.push(`Tokens ${state.tokens.toLocaleString()} · $${state.costUsd.toFixed(2)}`);
+  await notifyChat(agent.chat_webhook_url, lines.join("\n"));
+
+  finishHeartbeat(agent, state, finalStatus, summary);
+}
+
 // ── tick ───────────────────────────────────────────────────────────────────
 
 // Digest mode: one Chat message after the window closes, covering every run
@@ -481,7 +815,8 @@ function tick() {
     if (!agent.enabled) { skipped.push({ slug: agent.slug, reason: "disabled" }); continue; }
     if (live.has(agent.id)) { skipped.push({ slug: agent.slug, reason: "running" }); continue; }
     if (!inScheduleWindow(agent)) {
-      if (agent.chat_mode === "digest") sendDigest(agent);
+      // Supervisors send their own report per review pass — no digest.
+      if (agent.chat_mode === "digest" && agent.role !== "supervisor") sendDigest(agent);
       skipped.push({ slug: agent.slug, reason: "off-schedule" });
       continue;
     }
@@ -605,6 +940,20 @@ export function mountAgents(app) {
     if (fields.chat_mode !== undefined && !["per_heartbeat", "quiet", "digest"].includes(fields.chat_mode)) {
       return res.status(400).json({ error: "chat_mode must be per_heartbeat, quiet, or digest" });
     }
+    if (fields.role !== undefined && !["scanner", "supervisor"].includes(fields.role)) {
+      return res.status(400).json({ error: "role must be scanner or supervisor" });
+    }
+    if (fields.min_certitude !== undefined) {
+      const n = Number(fields.min_certitude);
+      if (!Number.isInteger(n) || n < 0 || n > 100) return res.status(400).json({ error: "min_certitude must be 0-100" });
+      fields.min_certitude = n;
+    }
+    if (fields.max_auto_approvals !== undefined) {
+      const n = Number(fields.max_auto_approvals);
+      if (!Number.isInteger(n) || n < 0) return res.status(400).json({ error: "max_auto_approvals must be >= 0" });
+      fields.max_auto_approvals = n;
+    }
+    if (fields.autopilot !== undefined) fields.autopilot = fields.autopilot ? 1 : 0;
     if (fields.enabled !== undefined) fields.enabled = fields.enabled ? 1 : 0;
     try {
       updateAgent(agent.id, fields);

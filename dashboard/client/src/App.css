@@ -6340,3 +6340,16 @@ html.vt-no-target::view-transition-old(card-morph) {
   line-height: 1.45;
 }
 .runroom-planmode strong { color: var(--warning, #d99e28); }
+
+/* Supervisor role */
+.agents-role-badge {
+  margin-left: 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  background: var(--badge-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-pill);
+}
