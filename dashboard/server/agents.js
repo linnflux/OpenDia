@@ -259,6 +259,11 @@ function rosterFor(agent) {
       return m && m[1] <= today;
     });
   }
+  if (agent.query_client_only) {
+    // Client deliverables only: a real Company set, and not our own house.
+    // OpenDia exists to help Linnflux deliver — internal admin can wait.
+    rows = rows.filter((r) => r.company_name && r.company_name !== "Linnflux");
+  }
   // A card with a running timer is being worked by a human right now —
   // never an agent's to take, whatever the query says.
   const busyIds = new Set(
@@ -1090,6 +1095,7 @@ export function mountAgents(app) {
       return res.status(400).json({ error: "query_next_step must be any, stale, or due" });
     }
     if (fields.triage !== undefined) fields.triage = fields.triage ? 1 : 0;
+    if (fields.query_client_only !== undefined) fields.query_client_only = fields.query_client_only ? 1 : 0;
     if (fields.chat_mode !== undefined && !["per_heartbeat", "quiet", "digest"].includes(fields.chat_mode)) {
       return res.status(400).json({ error: "chat_mode must be per_heartbeat, quiet, or digest" });
     }

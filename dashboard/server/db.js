@@ -706,13 +706,18 @@ export function ensureAgentsTables() {
   if (!cols.includes("triage")) {
     db.exec("ALTER TABLE agents ADD COLUMN triage INTEGER NOT NULL DEFAULT 0");
   }
+  // Client-deliverable focus: query rosters keep only cards with a real
+  // client Company set (not Linnflux-internal, not unassigned).
+  if (!cols.includes("query_client_only")) {
+    db.exec("ALTER TABLE agents ADD COLUMN query_client_only INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 const AGENT_UPDATABLE_FIELDS = new Set([
   "name", "enabled", "model", "schedule_days", "schedule_start", "schedule_end",
   "heartbeat_minutes", "heartbeat_token_limit", "run_budget_usd", "chat_webhook_url",
   "roster_mode", "query_status", "query_next_step", "max_cards_per_heartbeat", "chat_mode",
-  "role", "min_certitude", "max_auto_approvals", "autopilot", "triage",
+  "role", "min_certitude", "max_auto_approvals", "autopilot", "triage", "query_client_only",
 ]);
 
 export function getAllAgents() {

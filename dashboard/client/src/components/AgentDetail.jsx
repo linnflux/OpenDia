@@ -481,6 +481,15 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                 <span className="switch-track" />
                 Triage quick wins before scanning
               </label>
+              <label className="switch" title="Only cards with a real client Company set — Linnflux-internal and unassigned cards are excluded.">
+                <input
+                  type="checkbox"
+                  checked={!!agent.query_client_only}
+                  onChange={(e) => patch({ query_client_only: e.target.checked })}
+                />
+                <span className="switch-track" />
+                Client deliverables only
+              </label>
             </div>
           )}
           {agent.projects.length === 0 ? (
