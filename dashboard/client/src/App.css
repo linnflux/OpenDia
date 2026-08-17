@@ -6883,3 +6883,39 @@ html.vt-no-target::view-transition-old(card-morph) {
   font-weight: 500;
 }
 .update-banner .update-banner-dismiss:hover { color: var(--text-primary); background: none; }
+
+/* Runroom working border — the session is doing something RIGHT NOW.
+   Two bands of Linnflux green orbit the pane's border (conic gradient driven
+   by an animatable @property angle): motion reads as activity in a way the
+   board's static timer ring doesn't. Falls back to that exact steady ring
+   when the user prefers reduced motion. */
+@property --rr-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.runroom-pane.working {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    conic-gradient(from var(--rr-angle),
+      #54af4d 0deg, rgba(84, 175, 77, 0.12) 70deg,
+      rgba(84, 175, 77, 0.12) 110deg, #54af4d 180deg,
+      rgba(84, 175, 77, 0.12) 250deg, rgba(84, 175, 77, 0.12) 290deg,
+      #54af4d 360deg) border-box;
+  box-shadow: 0 0 22px -8px rgba(84, 175, 77, 0.55),
+              0 16px 48px -24px rgba(0, 0, 0, 0.35);
+  animation: runroom-breathe-in 0.45s cubic-bezier(0.2, 0.6, 0.2, 1) both,
+             rr-sweep 2.8s linear infinite;
+}
+@keyframes rr-sweep {
+  to { --rr-angle: 360deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runroom-pane.working {
+    animation: runroom-breathe-in 0.45s cubic-bezier(0.2, 0.6, 0.2, 1) both;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    box-shadow: 0 0 0 2px #54af4d, 0 16px 48px -24px rgba(0, 0, 0, 0.35);
+  }
+}

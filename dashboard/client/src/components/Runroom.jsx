@@ -111,7 +111,7 @@ function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
   );
 }
 
-function StepPane({ step, total }) {
+function StepPane({ step, total, working }) {
   const paneRef = useRef(null);
   const html = useMemo(
     () => (step?.detail ? marked.parse(step.detail) : ""),
@@ -150,7 +150,7 @@ function StepPane({ step, total }) {
   // key={step.n} re-mounts the pane on step change so the enter animation
   // plays — one gentle breath per step, not per poll.
   return (
-    <div className="runroom-pane" key={step.n}>
+    <div className={`runroom-pane${working ? " working" : ""}`} key={step.n}>
       <div className="runroom-overline">
         <span className="runroom-overline-step">Step {step.n} of {total}</span>
         <span className={`runroom-actor actor-${step.actor}`}>
@@ -603,7 +603,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
               the approval buttons will appear right here when it does.
             </div>
           )}
-          {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} />}
+          {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} working={!finished && !!plan.gate?.working} />}
           {/* Action buttons aim at the current step only — reading an earlier
               step must not offer buttons that would fire at a different one. */}
           {!finished && shown && shown.n === plan.current_step && (
