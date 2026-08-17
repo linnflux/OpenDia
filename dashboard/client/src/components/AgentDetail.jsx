@@ -30,8 +30,16 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
   const [expandedRun, setExpandedRun] = useState(null);
   // Collapsible panels: start open; caret-only toggle so the cards
   // header's live Static/Query/+Assign buttons are never swallowed.
-  const [closedPanels, setClosedPanels] = useState({});
-  const togglePanel = (k) => setClosedPanels((c) => ({ ...c, [k]: !c[k] }));
+  // Persisted per browser (not per agent — a layout preference, not data).
+  const [closedPanels, setClosedPanels] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("opendia.agentPanelsClosed")) || {}; }
+    catch { return {}; }
+  });
+  const togglePanel = (k) => setClosedPanels((c) => {
+    const next = { ...c, [k]: !c[k] };
+    try { localStorage.setItem("opendia.agentPanelsClosed", JSON.stringify(next)); } catch {}
+    return next;
+  });
   // Persona/memory start collapsed — glanceable roster stats first, prose on
   // demand. Editing a file implicitly holds it open.
   const [openFiles, setOpenFiles] = useState({});
