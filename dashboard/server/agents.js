@@ -36,7 +36,7 @@ import { spawn } from "child_process";
 import { createInterface } from "readline";
 import { createWriteStream } from "fs";
 import { resolve as resolvePath } from "path";
-import { etNow } from "./timerfile.js";
+import { etNow, listRunningTimers } from "./timerfile.js";
 import { notifyChat } from "./chat_notify.js";
 import { runClaude } from "./ai.js";
 
@@ -243,14 +243,28 @@ function rosterFor(agent) {
   const statuses = String(agent.query_status || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
   let rows = getProjectsByStatuses(statuses);
+  const now = etNow();
+  const today = `${now.YYYY}-${now.MM}-${now.DD}`;
   if (agent.query_next_step === "stale") {
-    const now = etNow();
-    const today = `${now.YYYY}-${now.MM}-${now.DD}`;
+    // Overdue or undated: the WFHuman-backlog shape.
     rows = rows.filter((r) => {
       const m = NEXT_STEP_DATE_RE.exec(r.next_step || "");
       return !m || m[1] < today;
     });
+  } else if (agent.query_next_step === "due") {
+    // Dated, today or past: the quick-win shape. Undated cards are excluded
+    // on purpose — an undated In Progress card usually means work in flight.
+    rows = rows.filter((r) => {
+      const m = NEXT_STEP_DATE_RE.exec(r.next_step || "");
+      return m && m[1] <= today;
+    });
   }
+  // A card with a running timer is being worked by a human right now —
+  // never an agent's to take, whatever the query says.
+  const busyIds = new Set(
+    listRunningTimers().map((t) => t.data.project_id).filter(Boolean)
+  );
+  rows = rows.filter((r) => !busyIds.has(r.id));
   const guardBefore = Date.now() - RESCAN_GUARD_MS;
   rows = rows.filter((r) => lastSparkAt(r.id) < guardBefore);
   // Stalest first: undated ("" sorts lowest), then oldest date, then oldest
@@ -324,6 +338,64 @@ function startHeartbeat(agent, trigger) {
   return state;
 }
 
+// Quick-win triage: a cheap model pass over the FULL query-match list, so an
+// agent like Eddie only spends real scans on cards it is confident an
+// opendia-routed step can move today. Fail-open: a triage that errors or
+// returns junk falls back to plain roster order — worst case is Leah-style
+// behavior, never a dead heartbeat.
+async function triageQuickWins(agent, rows, state) {
+  const brief = rows.map((r) => {
+    const p = getProjectById(r.id) || {};
+    return {
+      id: r.id,
+      name: r.name,
+      company: r.company_name || null,
+      division: r.division || null,
+      next_step: r.next_step || null,
+      notes: (p.notes || "").slice(0, 200) || null,
+      updated_at: r.updated_at || null,
+    };
+  });
+  const prompt =
+    `You are ${agent.name}, an OpenDia agent triaging cards for quick wins. ` +
+    `For each card below, judge: could a Spark scan plausibly produce an ` +
+    `internal, reversible "opendia"-routed step (a Gmail draft, a card/Notion ` +
+    `update, read-only diagnostics, a single-URL cache purge) that moves the ` +
+    `card forward TODAY? A card needing a human decision, a server change, or ` +
+    `a phone call is NOT a quick win. Respond with ONLY a JSON array: ` +
+    `[{"id": <number>, "quick_win": <bool>, "confidence": <0-100>, "reason": "<one sentence>"}]\n\n` +
+    JSON.stringify(brief, null, 1);
+  try {
+    const text = await runClaude(prompt, { model: "haiku", timeoutMs: 60_000 });
+    const m = text.match(/\[[\s\S]*\]/);
+    const verdicts = JSON.parse(m ? m[0] : text);
+    if (!Array.isArray(verdicts)) throw new Error("triage output is not an array");
+    const byId = new Map(rows.map((r) => [Number(r.id), r]));
+    const selected = [];
+    const rejects = [];
+    for (const v of verdicts) {
+      const row = byId.get(Number(v.id));
+      if (!row) continue;
+      const conf = Number(v.confidence) || 0;
+      if (v.quick_win && conf >= 70) {
+        selected.push({ row, conf });
+      } else {
+        rejects.push({ project_id: row.id, name: row.name, status: "not-selected", reason: v.reason || "not a quick win", confidence: conf });
+      }
+    }
+    for (const r of rows) {
+      if (!verdicts.some((v) => Number(v.id) === Number(r.id))) {
+        rejects.push({ project_id: r.id, name: r.name, status: "not-selected", reason: "not judged by triage", confidence: null });
+      }
+    }
+    selected.sort((a, b) => b.conf - a.conf);
+    return { cards: selected.map((s) => s.row), rejects, triaged: true };
+  } catch (err) {
+    pushLog(state, "warn", `Triage failed (${err.message}) — falling back to roster order.`);
+    return { cards: rows, rejects: [], triaged: false };
+  }
+}
+
 async function runHeartbeat(agent, state) {
   if (agent.role === "supervisor") return runSupervisorHeartbeat(agent, state);
   const assigned = rosterFor(agent);
@@ -347,13 +419,23 @@ async function runHeartbeat(agent, state) {
     const cursor = agent.rotation_cursor % assigned.length;
     cards = [...assigned.slice(cursor), ...assigned.slice(0, cursor)];
   }
+  let triageRejects = [];
+  if (agent.roster_mode === "query" && agent.triage) {
+    pushLog(state, "info", `Triaging ${cards.length} match(es) for quick wins…`);
+    const t = await triageQuickWins(agent, cards, state);
+    cards = t.cards;
+    triageRejects = t.rejects;
+    if (t.triaged) pushLog(state, "info", `Triage kept ${cards.length}, passed on ${t.rejects.length}.`);
+  }
   if (agent.max_cards_per_heartbeat > 0) {
     cards = cards.slice(0, agent.max_cards_per_heartbeat);
   }
   state.cardsTotal = cards.length;
   pushLog(state, "info", `Heartbeat started — ${cards.length} card(s), token limit ${agent.heartbeat_token_limit}.`);
 
-  const details = [];
+  // Triage rejects lead the detail array so the activity feed shows why the
+  // unpicked matches were passed over — same row shape as skipped cards.
+  const details = [...triageRejects];
   let ran = 0;
   let finalStatus = "done";
 
@@ -1008,9 +1090,10 @@ export function mountAgents(app) {
     if (fields.roster_mode !== undefined && !["static", "query"].includes(fields.roster_mode)) {
       return res.status(400).json({ error: "roster_mode must be static or query" });
     }
-    if (fields.query_next_step !== undefined && !["any", "stale"].includes(fields.query_next_step)) {
-      return res.status(400).json({ error: "query_next_step must be any or stale" });
+    if (fields.query_next_step !== undefined && !["any", "stale", "due"].includes(fields.query_next_step)) {
+      return res.status(400).json({ error: "query_next_step must be any, stale, or due" });
     }
+    if (fields.triage !== undefined) fields.triage = fields.triage ? 1 : 0;
     if (fields.chat_mode !== undefined && !["per_heartbeat", "quiet", "digest"].includes(fields.chat_mode)) {
       return res.status(400).json({ error: "chat_mode must be per_heartbeat, quiet, or digest" });
     }

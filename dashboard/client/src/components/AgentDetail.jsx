@@ -461,14 +461,25 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                   ))}
                 </div>
               </div>
-              <label className="switch">
+              <div className="agents-field">
+                <label>Next-step date filter</label>
+                <select
+                  value={agent.query_next_step}
+                  onChange={(e) => patch({ query_next_step: e.target.value })}
+                >
+                  <option value="any">any — no date filter</option>
+                  <option value="stale">stale — overdue or undated</option>
+                  <option value="due">due — dated, today or past</option>
+                </select>
+              </div>
+              <label className="switch" title="A cheap model pass judges the full match list for quick wins first; only confident picks get real scans.">
                 <input
                   type="checkbox"
-                  checked={agent.query_next_step === "stale"}
-                  onChange={(e) => patch({ query_next_step: e.target.checked ? "stale" : "any" })}
+                  checked={!!agent.triage}
+                  onChange={(e) => patch({ triage: e.target.checked })}
                 />
                 <span className="switch-track" />
-                Only cards with an overdue or missing next-step date
+                Triage quick wins before scanning
               </label>
             </div>
           )}
