@@ -1655,6 +1655,8 @@ export function mountSpark(app) {
   //   do      — carry it out here (only a step routed "opendia" qualifies)
   //   runroom — seed a plan, open a session, and hand the work over
   //   adjust  — perform nothing; re-recommend from the operator's correction
+  //   done    — the operator attests the step is already done (any route);
+  //             recorded as an outcome with their note as evidence, no round
   //   stop    — close the run without doing anything
   app.post("/api/projects/:id/spark/decide", requireAdmin, async (req, res) => {
     const project = loadProject(req, res);
@@ -1666,7 +1668,7 @@ export function mountSpark(app) {
     const intent = String(req.body?.intent || "").trim();
     const note = String(req.body?.note || "").trim().slice(0, 2000);
     const step = run.result?.next_step;
-    if (!["do", "runroom", "adjust", "stop"].includes(intent)) {
+    if (!["do", "runroom", "adjust", "done", "stop"].includes(intent)) {
       return res.status(400).json({ error: `unknown intent ${JSON.stringify(intent)}` });
     }
 
@@ -1674,6 +1676,24 @@ export function mountSpark(app) {
       pushLedger(run, "skip", "Closed without acting on the recommendation.");
       await wrapUp(run);
       return res.json({ ok: true, started: false });
+    }
+
+    // The operator did the step themselves (sent the email, made the call,
+    // clicked the thing) and is reporting the fact — no model needs to run.
+    // Their word is the evidence; a scheduled email counts as sent.
+    if (intent === "done") {
+      if (!step) return res.status(409).json({ error: "this run has no next step to mark done" });
+      run.outcomes.push({
+        status: "done",
+        summary: `Operator reports the step done${note ? `: ${note}` : "."}`,
+        evidence: note || "operator attestation",
+        minutes: 0,
+        note_bullet: `Operator performed: ${step.text}`.slice(0, 200),
+      });
+      run.stepsRun += 1;
+      pushLedger(run, "done", `Operator reports the step done${note ? ` — ${note}` : "."}`);
+      await wrapUp(run);
+      return res.json({ ok: true, started: false, done: true });
     }
 
     if (intent === "adjust") {

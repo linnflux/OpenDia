@@ -108,10 +108,15 @@ function parseDialog(lines) {
     if (lines[i].trim() !== "") context.unshift(lines[i].trim());
   }
   const hint = ((lines[end + 1] || "").trim() || (lines[end + 2] || "").trim()) || "";
+  // AskUserQuestion's multi-question form renders a tab strip above the
+  // options — "← ☐ Scope ☐ Follow-up ✔ Submit →". In that shape a number key
+  // TOGGLES a checkbox instead of answering, so the room needs to know it is
+  // driving a form, not a one-shot menu.
+  const multi = context.some((l) => /Submit/.test(l) && /[←→☐✔☑]/.test(l));
   const fingerprint = createHash("sha1")
     .update(JSON.stringify({ context, options: options.map((o) => [o.n, o.label]) }))
     .digest("hex").slice(0, 16);
-  return { context, options, hint, fingerprint };
+  return { context, options, hint, multi, fingerprint };
 }
 
 // SGR helpers for the suggestion problem: Claude Code ghosts a SUGGESTED
@@ -480,7 +485,10 @@ export function registerRunroomRoutes(app) {
     if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
 
     const { choice, fingerprint } = req.body || {};
-    if (!/^([1-9]|enter|esc)$/.test(String(choice))) {
+    // left/right/space exist for multi-question forms: number keys toggle a
+    // checkbox there rather than answering, arrows move between questions,
+    // and Submit sits at the end — the room must be able to drive all of it.
+    if (!/^([1-9]|enter|esc|left|right|space)$/.test(String(choice))) {
       return res.status(400).json({ error: "bad choice" });
     }
 
@@ -499,7 +507,8 @@ export function registerRunroomRoutes(app) {
       return res.status(400).json({ error: "no such option", gate });
     }
 
-    const key = choice === "esc" ? "Escape" : choice === "enter" ? "Enter" : String(choice);
+    const KEYMAP = { esc: "Escape", enter: "Enter", left: "Left", right: "Right", space: "Space" };
+    const key = KEYMAP[choice] || String(choice);
     try {
       execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, key], { timeout: 3000 });
     } catch (e) {

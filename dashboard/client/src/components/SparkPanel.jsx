@@ -291,6 +291,14 @@ function SparkDecision({ spark, showToast, onGoToRunroom, isAdmin }) {
           >
             Adjust
           </button>
+          <button
+            className="spark-btn"
+            onClick={() => act("done")}
+            disabled={!canAct}
+            title="You already did this yourself — record it as done (a scheduled email counts as sent) and close the run"
+          >
+            I did this
+          </button>
           <button className="spark-btn spark-btn-quiet" onClick={() => act("stop")} disabled={!canAct}>
             Not now
           </button>
