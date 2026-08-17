@@ -28,6 +28,9 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
   const [editingFile, setEditingFile] = useState(null);   // "agent_md" | "memory_md"
   const [fileDraft, setFileDraft] = useState("");
   const [expandedRun, setExpandedRun] = useState(null);
+  // Persona/memory start collapsed — glanceable roster stats first, prose on
+  // demand. Editing a file implicitly holds it open.
+  const [openFiles, setOpenFiles] = useState({});
   const [liveState, setLiveState] = useState(null);
   const esRef = useRef(null);
 
@@ -264,7 +267,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
       )}
 
       <div className="agents-detail-grid">
-        <section className="agents-panel">
+        <section className="agents-panel agents-panel-wide">
           <h3>Settings</h3>
           <div className="agents-field">
             <label>Working days</label>
@@ -399,7 +402,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
         </section>
 
         {!isSupervisor && (
-        <section className="agents-panel">
+        <section className="agents-panel agents-panel-wide">
           <h3>
             {isQuery ? `Matching cards (${agent.projects.length} right now)` : `Assigned cards (${agent.projects.length})`}
             <span className="agents-roster-toggle">
@@ -470,14 +473,23 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
         </section>
         )}
 
-        {["agent_md", "memory_md"].map((fileKey) => (
-          <section className="agents-panel" key={fileKey}>
+        {["agent_md", "memory_md"].map((fileKey) => {
+          const open = openFiles[fileKey] || editingFile === fileKey;
+          return (
+          <section className="agents-panel agents-panel-file" key={fileKey}>
             <h3>
-              {fileKey === "agent_md" ? "Persona & expertise (agent.md)" : `Memory (memory.md · ${agent.memory_lines} lines)`}
+              <button
+                className="agents-file-toggle"
+                aria-expanded={open}
+                onClick={() => setOpenFiles((s) => ({ ...s, [fileKey]: !open }))}
+              >
+                <span className={`agents-file-chevron${open ? " open" : ""}`}>▸</span>
+                {fileKey === "agent_md" ? "Persona & expertise (agent.md)" : `Memory (memory.md · ${agent.memory_lines} lines)`}
+              </button>
               {fileKey === "memory_md" && memoryWarn && (
                 <span className="agents-memory-warn">over 80 lines — needs pruning</span>
               )}
-              {editingFile === fileKey ? (
+              {open && (editingFile === fileKey ? (
                 <span className="agents-file-actions">
                   <button onClick={saveFile}>Save</button>
                   <button onClick={() => setEditingFile(null)}>Cancel</button>
@@ -489,9 +501,9 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                 >
                   Edit
                 </button>
-              )}
+              ))}
             </h3>
-            {editingFile === fileKey ? (
+            {open && (editingFile === fileKey ? (
               <textarea
                 className="agents-file-editor"
                 value={fileDraft}
@@ -500,9 +512,10 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
               />
             ) : (
               <pre className="agents-file-view">{agent[fileKey] || "(empty)"}</pre>
-            )}
+            ))}
           </section>
-        ))}
+          );
+        })}
 
         <section className="agents-panel agents-feed">
           <h3>Activity</h3>
