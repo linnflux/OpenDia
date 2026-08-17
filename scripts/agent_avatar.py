@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 NANO_BANANA = Path(__file__).resolve().parent / "nano_banana.py"
 AGENTS_ROOT = Path.home() / "OpenDia" / "agents"
 
@@ -38,6 +40,28 @@ HOUSE_PROMPT = (
 def die(msg, code=1):
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def normalize_square(path, size=512):
+    """Pad to square with the image's own corner color, then resize.
+
+    The model is asked for 1:1 but does not reliably deliver it, and a
+    non-square image center-cropped into the dashboard's circular frame
+    loses whatever sticks out (an antenna, a shoulder). Padding with the
+    sampled corner color extends the portrait's own backdrop, so the circle
+    always shows the whole subject on a seamless ground.
+    """
+    img = Image.open(path).convert("RGBA")
+    w, h = img.size
+    if w != h:
+        side = max(w, h)
+        corners = [img.getpixel(p) for p in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]]
+        fill = tuple(sum(c[i] for c in corners) // 4 for i in range(4))
+        canvas = Image.new("RGBA", (side, side), fill)
+        canvas.paste(img, ((side - w) // 2, (side - h) // 2), img)
+        img = canvas
+    img = img.resize((size, size), Image.LANCZOS)
+    img.save(path)
 
 
 def main():
@@ -61,6 +85,8 @@ def main():
     )
     if result.returncode != 0:
         die(f"nano_banana failed:\n{result.stderr.strip()}")
+
+    normalize_square(out)
 
     if base.resolve() != kept_base.resolve():
         shutil.copy2(base, kept_base)
