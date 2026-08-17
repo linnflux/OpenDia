@@ -6919,3 +6919,26 @@ html.vt-no-target::view-transition-old(card-morph) {
     box-shadow: 0 0 0 2px #54af4d, 0 16px 48px -24px rgba(0, 0, 0, 0.35);
   }
 }
+
+/* The thinking strip wears the same orbit as the pane — it IS the working
+   readout, so it glows with the same green while it exists. */
+.runroom-thinking {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--bg-recessed), var(--bg-recessed)) padding-box,
+    conic-gradient(from var(--rr-angle),
+      #54af4d 0deg, rgba(84, 175, 77, 0.12) 70deg,
+      rgba(84, 175, 77, 0.12) 110deg, #54af4d 180deg,
+      rgba(84, 175, 77, 0.12) 250deg, rgba(84, 175, 77, 0.12) 290deg,
+      #54af4d 360deg) border-box;
+  box-shadow: 0 0 14px -6px rgba(84, 175, 77, 0.55);
+  animation: rr-sweep 2.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .runroom-thinking {
+    animation: none;
+    background: var(--bg-recessed);
+    border: 1px solid transparent;
+    box-shadow: 0 0 0 2px #54af4d;
+  }
+}
