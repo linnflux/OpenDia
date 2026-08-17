@@ -108,11 +108,14 @@ function parseDialog(lines) {
     if (lines[i].trim() !== "") context.unshift(lines[i].trim());
   }
   const hint = ((lines[end + 1] || "").trim() || (lines[end + 2] || "").trim()) || "";
-  // AskUserQuestion's multi-question form renders a tab strip above the
-  // options — "← ☐ Scope ☐ Follow-up ✔ Submit →". In that shape a number key
-  // TOGGLES a checkbox instead of answering, so the room needs to know it is
-  // driving a form, not a one-shot menu.
-  const multi = context.some((l) => /Submit/.test(l) && /[←→☐✔☑]/.test(l));
+  // Form-style dialogs need different driving than one-shot menus. Two tells:
+  // the multi-question tab strip above the options ("← ☐ Scope ✔ Submit →"),
+  // and checkbox markers in the option labels themselves ("[ ]"/"[✔]") — the
+  // latter navigates with arrows and toggles with Enter, and number keys are
+  // inert. The footer hint "Enter to select" is the belt to that suspenders.
+  const multi = context.some((l) => /Submit/.test(l) && /[←→☐✔☑]/.test(l))
+    || options.some((o) => /^\[[ ✔✓xX]\]/.test(o.label))
+    || /Enter to select/i.test(hint);
   const fingerprint = createHash("sha1")
     .update(JSON.stringify({ context, options: options.map((o) => [o.n, o.label]) }))
     .digest("hex").slice(0, 16);
@@ -485,21 +488,27 @@ export function registerRunroomRoutes(app) {
     if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
 
     const { choice, fingerprint } = req.body || {};
-    // left/right/space exist for multi-question forms: number keys toggle a
-    // checkbox there rather than answering, arrows move between questions,
-    // and Submit sits at the end — the room must be able to drive all of it.
-    if (!/^([1-9]|enter|esc|left|right|space)$/.test(String(choice))) {
+    // Navigation keys exist for form-style dialogs: checkbox multiselects
+    // toggle with Enter and move with arrows (number keys are inert there),
+    // and the multi-question variant walks its parts with ←/→ ending on
+    // Submit — the room must be able to drive all of it.
+    if (!/^([1-9]|enter|esc|up|down|left|right|space)$/.test(String(choice))) {
       return res.status(400).json({ error: "bad choice" });
     }
+    const isNav = !/^[1-9]$/.test(String(choice));
 
     // Re-read the screen at answer time. The dialog must still be up, must
     // still parse, and must be the SAME dialog the operator saw — a changed
     // fingerprint means their click was aimed at something that is gone.
+    // Navigation keys are exempt from the fingerprint match: in a checkbox
+    // form every toggle rewrites the labels ("[ ]"→"[✔]") and thus the
+    // fingerprint, which turned the operator's second click into a stale
+    // rejection loop. Arrows/space/enter/esc are safe against any dialog.
     const gate = gateForSession(plan.tmux_session);
     if (gate.reason !== "dialog-open" || !gate.dialog) {
       return res.status(409).json({ error: "no dialog on screen", gate });
     }
-    if (!fingerprint || fingerprint !== gate.dialog.fingerprint) {
+    if (!isNav && (!fingerprint || fingerprint !== gate.dialog.fingerprint)) {
       return res.status(409).json({ error: "dialog changed", gate });
     }
     if (/^[1-9]$/.test(String(choice)) &&
@@ -507,7 +516,7 @@ export function registerRunroomRoutes(app) {
       return res.status(400).json({ error: "no such option", gate });
     }
 
-    const KEYMAP = { esc: "Escape", enter: "Enter", left: "Left", right: "Right", space: "Space" };
+    const KEYMAP = { esc: "Escape", enter: "Enter", up: "Up", down: "Down", left: "Left", right: "Right", space: "Space" };
     const key = KEYMAP[choice] || String(choice);
     try {
       execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, key], { timeout: 3000 });

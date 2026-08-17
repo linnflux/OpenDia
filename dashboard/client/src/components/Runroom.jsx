@@ -372,12 +372,14 @@ function DialogCard({ session, dialog }) {
       </div>
       {dialog.multi && (
         <div className="runroom-dialog-multi-hint">
-          Multi-part form: number keys toggle a choice, ← → move between questions, Enter submits the highlighted part — finish on Submit.
+          Form dialog: ↑ ↓ move the highlight, Enter toggles or selects it, ← → switch question parts — finish on Submit. (Number buttons may be inert in this shape.)
         </div>
       )}
       <div className="runroom-dialog-foot">
         {dialog.multi && (
           <>
+            <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("up")}>↑</button>
+            <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("down")}>↓</button>
             <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("left")}>←</button>
             <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("right")}>→</button>
             <button className="runroom-dialog-util" disabled={busy} onClick={() => answer("space")}>Space</button>
