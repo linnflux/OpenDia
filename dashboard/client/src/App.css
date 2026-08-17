@@ -21,6 +21,10 @@
   --border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
   --border: #334155;
   --border-hover: #475569;
+  /* Semantic status colors. Every theme JSON overrides both; these fallbacks
+     exist so first paint (before /api/theme returns) is never unstyled. */
+  --danger: #f87171;
+  --warning: #f59e0b;
   --text-primary: #e2e8f0;
   --text-heading: #f1f5f9;
   --text-secondary: #94a3b8;
@@ -193,6 +197,22 @@ body.has-bg::before {
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.15);
     backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.15);
   }
+
+  /* Agents view surfaces. Panels follow the card recipe; the hero is a
+     full-width band, so like the modal it tints from --bg-surface (inputs
+     inside it derive from --bg-card and would vanish against a card tint). */
+  body.has-bg .agents-panel {
+    background: color-mix(in srgb, var(--bg-card) var(--glass-card), transparent);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  }
+  body.has-bg .agent-hero {
+    background: color-mix(in srgb, var(--bg-surface) var(--glass-modal), transparent);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  }
 }
 
 /* Accessibility + weak-GPU escape hatch: drop the blur entirely and go
@@ -202,14 +222,18 @@ body.has-bg::before {
 
   body.has-bg .nav-sidebar,
   body.has-bg .status-filter-pill,
-  body.has-bg .card {
+  body.has-bg .card,
+  body.has-bg .agents-panel,
+  body.has-bg .agent-hero {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
 
   body.has-bg .nav-sidebar,
-  body.has-bg .status-filter-pill { background: var(--bg-surface); }
-  body.has-bg .card { background: var(--bg-card); }
+  body.has-bg .status-filter-pill,
+  body.has-bg .agent-hero { background: var(--bg-surface); }
+  body.has-bg .card,
+  body.has-bg .agents-panel { background: var(--bg-card); }
 
   body.has-bg .modal-backdrop {
     background: var(--bg-backdrop);
@@ -5805,6 +5829,21 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-attachment-remove:hover { color: var(--danger); }
 
 /* Runroom thinking strip — the session's own spinner verb, mirrored. */
+/* Plan-mode banner: the session cannot write plan.json while planning, so
+   the room's steps are frozen — say so instead of looking stuck. */
+.runroom-planmode {
+  max-width: 640px;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--warning);
+  background: var(--bg-recessed);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.runroom-planmode strong { color: var(--warning); }
+
 .runroom-thinking {
   display: flex; align-items: baseline; gap: 0.15rem;
   max-width: 640px; margin-top: 1rem; padding: 0.45rem 0.9rem;
@@ -5825,9 +5864,8 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-thinking-meta { margin-left: 0.6rem; font-size: 0.72rem; color: var(--text-faint); }
 
 /* ── Agents (admin) ──────────────────────────────────────────── */
-.agents-view {
-  max-width: 1100px;
-}
+/* No max-width of its own: the grid caps itself at 1200px like the Board,
+   so the two views line up column-for-column. */
 
 .agents-header,
 .agents-detail-header {
@@ -5926,62 +5964,13 @@ html.vt-no-target::view-transition-old(card-morph) {
   .agents-dot.working { animation: none; }
 }
 
-.agents-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.82rem;
-}
-
-.agents-table th {
-  text-align: left;
-  color: var(--text-faint);
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.agents-table td {
-  padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--border-subtle);
-  vertical-align: middle;
-}
-
-.agents-row { cursor: pointer; }
-.agents-row:hover td { background: var(--bg-hover); }
-
-.agents-name {
-  color: var(--text-primary);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
+/* (The roster table this block once styled was replaced by .agents-grid
+   card tiles — see the Agents grid section near the end of the file.) */
 .agents-current {
   margin-left: 0.4rem;
   font-size: 0.72rem;
   font-weight: 500;
   color: #54af4d;
-}
-
-.agents-schedule {
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-.agents-count { color: var(--text-secondary); text-align: center; }
-
-.agents-pending {
-  font-weight: 700;
-  color: var(--warning, #d99e28);
-}
-
-.agents-lastrun {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  white-space: nowrap;
 }
 
 /* Detail */
@@ -6002,14 +5991,6 @@ html.vt-no-target::view-transition-old(card-morph) {
   margin-left: auto;
 }
 
-.agents-enable-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
 
 .agents-detail-grid {
   display: grid;
@@ -6058,7 +6039,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 .agents-field input,
 .agents-field select {
   font-size: 0.8rem;
-  background: var(--bg-primary, var(--bg-card));
+  background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -6142,7 +6123,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 
 .agents-memory-warn {
   font-size: 0.68rem;
-  color: var(--warning, #d99e28);
+  color: var(--warning);
   text-transform: none;
   letter-spacing: 0;
 }
@@ -6151,7 +6132,7 @@ html.vt-no-target::view-transition-old(card-morph) {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--text-secondary);
-  background: var(--bg-primary, transparent);
+  background: var(--bg-input);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 0.5rem 0.6rem;
@@ -6166,7 +6147,7 @@ html.vt-no-target::view-transition-old(card-morph) {
   font-size: 0.72rem;
   width: 100%;
   box-sizing: border-box;
-  background: var(--bg-primary, var(--bg-card));
+  background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -6206,7 +6187,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .agents-run-status.done { color: #54af4d; }
 .agents-run-status.running { color: var(--text-primary); }
-.agents-run-status.budget_exhausted { color: var(--warning, #d99e28); }
+.agents-run-status.budget_exhausted { color: var(--warning); }
 .agents-run-status.error,
 .agents-run-status.interrupted { color: var(--danger); }
 
@@ -6258,7 +6239,7 @@ html.vt-no-target::view-transition-old(card-morph) {
   overflow: auto;
 }
 .agents-live-line { color: var(--text-muted); padding: 0.05rem 0; }
-.agents-live-line.warn { color: var(--warning, #d99e28); }
+.agents-live-line.warn { color: var(--warning); }
 
 /* Project picker (ctrl+k-style, scoped to assignment) */
 .agents-picker-backdrop { z-index: 300; }
@@ -6326,20 +6307,6 @@ html.vt-no-target::view-transition-old(card-morph) {
   gap: 0.5rem;
 }
 
-/* Plan-mode banner: the session cannot write plan.json while planning, so
-   the room's steps are frozen — say so instead of looking stuck. */
-.runroom-planmode {
-  max-width: 640px;
-  padding: 0.55rem 0.9rem;
-  margin-bottom: 1rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--warning, #d99e28);
-  background: var(--bg-recessed);
-  font-size: 0.82rem;
-  color: var(--text-secondary);
-  line-height: 1.45;
-}
-.runroom-planmode strong { color: var(--warning, #d99e28); }
 
 /* Supervisor role */
 .agents-role-badge {
@@ -6352,4 +6319,260 @@ html.vt-no-target::view-transition-old(card-morph) {
   background: var(--badge-bg);
   padding: 0.1rem 0.4rem;
   border-radius: var(--radius-pill);
+}
+
+/* ── Switch (shared primitive) ───────────────────────────────── */
+/* The app's one toggle-switch recipe. Markup:
+     <label className="switch"><input type="checkbox" …/><span className="switch-track" /></label>
+   Optionally followed by text inside the same label. First consumers: the
+   Agents view (Enabled, Autopilot). Use this for every boolean going
+   forward — never a bare checkbox. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  border: 1px solid var(--border);
+  transition: background 0.18s, border-color 0.18s;
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-circle);
+  background: var(--text-secondary);
+  transition: transform 0.18s, background 0.18s;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(14px);
+  background: #fff;
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch input:disabled + .switch-track {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track, .switch-track::after { transition: none; }
+}
+
+/* ── Agent avatars ───────────────────────────────────────────── */
+/* Image when ~/OpenDia/agents/<slug>/avatar.png exists (served through
+   /api/file), monogram fallback otherwise. The ring is drawn here, not
+   baked into the image, so it always matches the theme accent. */
+.agent-avatar {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: var(--radius-circle);
+  overflow: hidden;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.agent-avatar-initials {
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.agent-avatar.size-card { width: 56px; height: 56px; }
+.agent-avatar.size-card .agent-avatar-initials { font-size: 1.15rem; }
+.agent-avatar.size-hero { width: 96px; height: 96px; border-width: 3px; }
+.agent-avatar.size-hero .agent-avatar-initials { font-size: 2rem; }
+
+/* ── Agents grid + tiles ─────────────────────────────────────── */
+/* Same track math as .status-grid so Board and Agents line up. */
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  max-width: 1200px;
+  align-content: start;
+}
+
+@media (max-width: 900px) {
+  .agents-grid { grid-template-columns: 1fr; }
+}
+
+/* Tile deltas on top of the shared .card recipe. */
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 140px;
+}
+
+.agent-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  /* Clear the corner switch. */
+  padding-right: 3rem;
+}
+
+.agent-card-title { min-width: 0; }
+
+.agent-card-title .card-name {
+  margin-bottom: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-switch {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+}
+
+.agent-card-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.agent-card-meta {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: auto;
+}
+
+.agent-card-lastrun {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.agent-card-pending {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: var(--pill-warn-bg);
+  color: var(--pill-warn-color);
+  border: 1px solid var(--pill-warn-border);
+}
+
+/* ── Agent hero (detail view) ────────────────────────────────── */
+.agent-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.agent-hero-id { min-width: 0; flex: 1; }
+
+.agent-hero-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  margin: 0 0 0.2rem;
+}
+
+.agent-hero-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.agent-hero-stats {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  width: 100%;
+  order: 3;
+}
+
+.agent-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+}
+
+.agent-stat-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-stat-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.agent-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
 }

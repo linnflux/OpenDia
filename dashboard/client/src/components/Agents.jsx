@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import AgentDetail from "./AgentDetail.jsx";
+import AgentAvatar from "./AgentAvatar.jsx";
 
 // Admin roster of OpenDia Agents (ODAs). List view polls like Rooms; clicking
 // a row opens the detail view, which owns its own fetching and live stream.
@@ -49,9 +50,25 @@ export default function Agents({ projects, onOpenProject }) {
 
   function statusDot(a) {
     if (!a.enabled) return { cls: "disabled", label: "disabled" };
-    if (a.active) return { cls: "working", label: a.current_project ? `working: ${a.current_project.name}` : "working" };
-    if (a.in_window) return { cls: "idle", label: "idle (in window)" };
-    return { cls: "off", label: "off-schedule" };
+    if (a.active) return { cls: "working", label: a.current_project ? `working — ${a.current_project.name}` : "working" };
+    if (a.in_window) return { cls: "idle", label: "idle — in window" };
+    return { cls: "off", label: `next window ${a.schedule_start} ET` };
+  }
+
+  // Optimistic flip so the switch answers instantly; the 15s poll (or the
+  // refetch on failure) reconciles with the server's truth.
+  async function toggleEnabled(agent, value) {
+    setAgents((prev) => prev.map((a) => (a.id === agent.id ? { ...a, enabled: value ? 1 : 0 } : a)));
+    try {
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: value }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch {
+      fetchAgents();
+    }
   }
 
   function scheduleStr(a) {
@@ -102,43 +119,60 @@ export default function Agents({ projects, onOpenProject }) {
       {agents.length === 0 ? (
         <div className="agents-empty">No agents yet. Create one to get started.</div>
       ) : (
-        <table className="agents-table">
-          <thead>
-            <tr>
-              <th></th><th>Name</th><th>Schedule</th><th>Cards</th>
-              <th>Pending</th><th>Last heartbeat</th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map((a) => {
-              const dot = statusDot(a);
-              return (
-                <tr key={a.id} className="agents-row" onClick={() => setSelectedId(a.id)}>
-                  <td><span className={`agents-dot ${dot.cls}`} title={dot.label} /></td>
-                  <td className="agents-name">
-                    {a.name}
+        <div className="agents-grid">
+          {agents.map((a) => {
+            const dot = statusDot(a);
+            return (
+              <div
+                key={a.id}
+                className="card agent-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedId(a.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedId(a.id); } }}
+              >
+                <label
+                  className="switch agent-card-switch"
+                  title={a.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!a.enabled}
+                    onChange={(e) => toggleEnabled(a, e.target.checked)}
+                  />
+                  <span className="switch-track" />
+                </label>
+
+                <div className="agent-card-top">
+                  <AgentAvatar slug={a.slug} name={a.name} size="card" />
+                  <div className="agent-card-title">
+                    <div className="card-name">{a.name}</div>
                     {a.role === "supervisor" && <span className="agents-role-badge">supervisor</span>}
-                    {a.active && a.current_project && (
-                      <span className="agents-current">→ {a.current_project.name}</span>
-                    )}
-                  </td>
-                  <td className="agents-schedule">{scheduleStr(a)}</td>
-                  <td className="agents-count">{a.project_count}</td>
-                  <td className="agents-count">
-                    {a.pending_approvals > 0 ? (
-                      <span className="agents-pending">{a.pending_approvals}</span>
-                    ) : "—"}
-                  </td>
-                  <td className="agents-lastrun">
+                  </div>
+                </div>
+
+                <div className="agent-card-status">
+                  <span className={`agents-dot ${dot.cls}`} />
+                  <span>{dot.label}</span>
+                </div>
+
+                <div className="agent-card-meta">
+                  <span>{scheduleStr(a)}</span>
+                  <span className="agent-card-lastrun">
                     {a.last_run
-                      ? `${a.last_run.status} · ${a.last_run.tokens_used?.toLocaleString() ?? 0} tok · $${(a.last_run.cost_usd || 0).toFixed(2)}`
-                      : "never"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                      ? `${a.last_run.status} · ${(a.last_run.tokens_used ?? 0).toLocaleString()} tok · $${(a.last_run.cost_usd || 0).toFixed(2)}`
+                      : "no runs yet"}
+                  </span>
+                  {a.pending_approvals > 0 && (
+                    <span className="agent-card-pending">{a.pending_approvals} awaiting decision</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

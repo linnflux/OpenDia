@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import AgentProjectPicker from "./AgentProjectPicker.jsx";
+import AgentAvatar from "./AgentAvatar.jsx";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MODELS = ["opus", "sonnet", "haiku"];
@@ -176,25 +177,74 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
     patch({ query_status: next.join(",") });
   }
 
+  const dot = !agent.enabled
+    ? { cls: "disabled", label: "disabled" }
+    : agent.active
+      ? { cls: "working", label: agent.current_project ? `working — ${agent.current_project.name}` : "working" }
+      : agent.in_window
+        ? { cls: "idle", label: "idle — in window" }
+        : { cls: "off", label: `next window ${agent.schedule_start} ET` };
+
+  // At-a-glance week: computed from the runs the view already fetched.
+  const weekAgo = Date.now() - 7 * 86400 * 1000;
+  const weekRuns = (agent.runs || []).filter(
+    (r) => r.finished_at && new Date(r.started_at.replace(" ", "T") + "Z").getTime() > weekAgo
+  );
+  const weekTokens = weekRuns.reduce((n, r) => n + (r.tokens_used || 0), 0);
+  const weekCost = weekRuns.reduce((n, r) => n + (r.cost_usd || 0), 0);
+
   return (
     <div className="agents-view agents-detail">
       <div className="agents-detail-header">
         <button className="agents-back" onClick={onBack}>← All agents</button>
-        <h2 className="agents-title">
-          {agent.name}
-          <span className={`agents-dot ${agent.active ? "working" : agent.enabled ? (agent.in_window ? "idle" : "off") : "disabled"}`} />
-        </h2>
-        <div className="agents-detail-actions">
+      </div>
+
+      <div className="agent-hero">
+        <AgentAvatar slug={agent.slug} name={agent.name} size="hero" />
+        <div className="agent-hero-id">
+          <h2 className="agent-hero-name">
+            {agent.name}
+            {isSupervisor && <span className="agents-role-badge">supervisor</span>}
+          </h2>
+          <div className="agent-hero-status">
+            <span className={`agents-dot ${dot.cls}`} />
+            <span>{dot.label}</span>
+          </div>
+        </div>
+        <div className="agent-hero-actions">
           <button onClick={runNow} disabled={agent.active}>Run now</button>
           <button onClick={requestStatus}>Request status</button>
-          <label className="agents-enable-toggle">
+          <label className="switch" title={agent.enabled ? "Enabled" : "Disabled"}>
             <input
               type="checkbox"
               checked={!!agent.enabled}
               onChange={(e) => patch({ enabled: e.target.checked })}
             />
+            <span className="switch-track" />
             Enabled
           </label>
+        </div>
+        <div className="agent-hero-stats">
+          <div className="agent-stat">
+            <span className="agent-stat-value">{weekRuns.length}</span>
+            <span className="agent-stat-label">runs · 7d</span>
+          </div>
+          <div className="agent-stat">
+            <span className="agent-stat-value">{weekTokens.toLocaleString()}</span>
+            <span className="agent-stat-label">tokens · 7d</span>
+          </div>
+          <div className="agent-stat">
+            <span className="agent-stat-value">${weekCost.toFixed(2)}</span>
+            <span className="agent-stat-label">cost · 7d</span>
+          </div>
+          <div className="agent-stat">
+            <span className="agent-stat-value">{agent.pending_approvals ?? 0}</span>
+            <span className="agent-stat-label">awaiting decision</span>
+          </div>
+          <div className="agent-stat">
+            <span className="agent-stat-value">{agent.schedule_start}–{agent.schedule_end}</span>
+            <span className="agent-stat-label">window · ET</span>
+          </div>
         </div>
       </div>
 
@@ -307,12 +357,13 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
               </div>
               <div className="agents-field">
                 <label>Mode</label>
-                <label className="agents-enable-toggle" title="Shadow reviews and escalates only, recording what it would have approved.">
+                <label className="switch" title="Shadow reviews and escalates only, recording what it would have approved.">
                   <input
                     type="checkbox"
                     checked={!!agent.autopilot}
                     onChange={(e) => patch({ autopilot: e.target.checked })}
                   />
+                  <span className="switch-track" />
                   {agent.autopilot ? "Autopilot — approve within guardrails" : "Shadow — review & escalate only"}
                 </label>
               </div>
@@ -385,12 +436,13 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                   ))}
                 </div>
               </div>
-              <label className="agents-enable-toggle">
+              <label className="switch">
                 <input
                   type="checkbox"
                   checked={agent.query_next_step === "stale"}
                   onChange={(e) => patch({ query_next_step: e.target.checked ? "stale" : "any" })}
                 />
+                <span className="switch-track" />
                 Only cards with an overdue or missing next-step date
               </label>
             </div>

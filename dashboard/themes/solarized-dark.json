@@ -37,6 +37,7 @@
     "billable-color":         "#859900",
     "billable-bg":            "#073642",
     "danger":                 "#e87674",
+    "warning":                "#b58900",
     "timer-notes-border":     "#073642",
     "accent":                 "#268bd2",
     "accent-hover":           "#1a6e9f",
