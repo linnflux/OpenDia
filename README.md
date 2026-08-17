@@ -205,6 +205,34 @@ Streamed over SSE with a full snapshot on connect, so switching tabs, closing th
 
 The wider point Spark is aimed at: **most of a working day should not require a terminal.** A card already carries its own tmux session, its own timer controls and its own file exchange; Spark adds the part that was still missing — deciding what to do next, and then either doing it or opening the room where it gets done — so the dashboard becomes somewhere work happens rather than somewhere work is recorded. See [`docs/spark.md`](docs/spark.md), including its known limitations.
 
+## Agents — Scheduled Autonomy
+
+Spark answers "what happens next?" for one card when someone asks. **OpenDia Agents (ODAs)** ask it on a schedule, across many cards, without anyone in the chair — and a supervisor agent reviews the answers before anything runs.
+
+An ODA is a named agent with a persona: an `agent.md` describing its expertise and operating rules, and a `memory.md` scratchpad it maintains itself (dated bullets, newest first, hard line cap — the agent prunes its own memory). Each has a working schedule in Eastern time, a heartbeat interval, a per-heartbeat token limit, and a per-run budget. A cron tick asks the dashboard every five minutes which agents are due; the dashboard is the executor, cron is just the clock. Pause everything with one file: `touch ~/OpenDia/agents.disabled`.
+
+### Scanners
+
+A scanner's heartbeat runs one Spark sweep per assigned card, sequentially, with the agent's identity and memory injected — so its findings land in the card's existing Spark tab, and every Spark guardrail (deny lists, shell fence, budget, hard kill) comes along unchanged. Rosters come in two modes:
+
+- **Static** — a hand-picked card list, rotated between heartbeats so a token-exhausted sweep resumes where it left off.
+- **Query** — the roster is recomputed every heartbeat from the board itself: a status filter plus an optional "overdue or undated next step" condition. **The queue drains itself**: a sweep's one obligatory output is a dated next step, and writing it removes the card from the query. Cards re-enter automatically when their date passes. A 24-hour re-scan guard stops a card whose sweep produced no date from looping. Capping cards-per-heartbeat at 1 with a 5-minute interval turns a backlog into a steady drip.
+
+Agent sweeps **bill zero** — the closed timer entry is floored at accrued-minus-base with a note saying so, because scheduled monitoring is plan-covered overhead, not client-requested work. Only steps a human (or the supervisor) approves accrue minutes. `started_by: agent:<slug>` is written into the ledger entry itself, so agent work stays auditable in the monthly billing review forever.
+
+### The Supervisor
+
+One agent holds the `supervisor` role. Instead of scanning cards, it reviews the other agents' output — nightly, after the scanners' window closes (agent-started runs stay decidable for hours; they hold no compute and bill nothing while waiting). Its heartbeat is two invocations of one session:
+
+1. **Review pass** — reads every proposing run (the step, the certitude number, the evidence trail), verifies claims with the cheapest sufficient read-only check, and writes a verdict file: approve, escalate, or hold. **The model never decides** — the server reads the verdicts and executes them itself, and only after a guardrail checklist that no verdict can override: internal route only, reversible only, certitude at or above the agent's floor, an approval cap per pass, and live-run and concurrency checks. Approved steps run as ordinary Spark act rounds — on the **execution model**, because the plan was made on the judgment model and reviewed on the judgment model, and carrying it out is the mechanical part. Human-clicked approvals keep the judgment model.
+2. **QA pass** — resumes the same session (the review context is already in the transcript) to compare each completed round's claimed outcome against observable evidence. A concrete fixable defect earns one redispatch with an operator-correction-style fix note; anything murkier joins the escalations.
+
+The night ends with one chat message: what was approved with evidence one-liners, what needs the Operator with the decision packaged ("what must be decided, why, by when"), each line deep-linked to the card's Spark tab.
+
+**Shadow mode is the trust ramp.** A new supervisor reviews and escalates everything, tagging what it *would* have approved. The Operator grades its judgment against their own decisions on the same runs; autopilot is a toggle flipped only after the verdicts have earned it. Even at full autopilot, the blast radius of a wrong approval is bounded by construction: the act phase can draft and update, never send; the shell fence blocks servers, git, and — for reviewer sessions — any mutating HTTP call, so a supervisor cannot approve its own recommendations by reaching around the verdict file.
+
+The division of labor is deliberate: **the expensive model plans and reviews; the cheap model executes; the human decides everything that is external, irreversible, or uncertain.** Escalation is never a failure state — it is the system correctly pricing its own confidence.
+
 ## Custom Commands
 
 Custom commands are markdown prompt files that define repeatable workflows. The Operator types a slash command, and Claude executes the full routine.
