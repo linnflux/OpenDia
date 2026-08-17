@@ -271,10 +271,15 @@ async function waitForScan(sparkRun) {
 
 function startHeartbeat(agent, trigger) {
   const runId = randomUUID();
+  // Supervisors log every pass as trigger "review", but whether it defers the
+  // schedule depends on how it was STARTED — a manual Run now must never push
+  // the scheduled pass, same rule as scanners.
+  const manual = trigger === "manual";
   if (agent.role === "supervisor") trigger = "review";
   const state = {
     runId,
     agentId: agent.id,
+    manual,
     trigger,
     status: "running",
     startedAt: Date.now(),
@@ -302,7 +307,7 @@ function startHeartbeat(agent, trigger) {
 async function runHeartbeat(agent, state) {
   if (agent.role === "supervisor") return runSupervisorHeartbeat(agent, state);
   const assigned = rosterFor(agent);
-  const touchHeartbeat = state.trigger !== "manual";
+  const touchHeartbeat = !state.manual;
   if (assigned.length === 0) {
     const emptyMsg = agent.roster_mode === "query"
       ? "No cards match the roster query." : "No projects assigned.";
@@ -591,6 +596,9 @@ function seenReviewKeys(agent) {
     if (run.trigger !== "review") continue;
     try {
       for (const r of JSON.parse(run.detail || "{}").reviewed_runs || []) {
+        // A shadow review was a rehearsal: once autopilot is on, it must not
+        // suppress the real pass that can actually execute the approvals.
+        if (agent.autopilot && r.shadow) continue;
         seen.add(reviewKey(r.spark_run_id, r.rounds_used));
       }
     } catch {}
@@ -599,7 +607,7 @@ function seenReviewKeys(agent) {
 }
 
 async function runSupervisorHeartbeat(agent, state) {
-  const touchHeartbeat = state.trigger !== "manual";
+  const touchHeartbeat = !state.manual;
   const proposing = listAgentSparkRuns().filter((r) =>
     r.status === "proposing" &&
     r.startedBy !== `agent:${agent.slug}` &&
@@ -786,6 +794,7 @@ async function runSupervisorHeartbeat(agent, state) {
         spark_run_id: r.runId,
         rounds_used: r.roundsUsed || 0,
         project_id: r.projectId,
+        shadow: !agent.autopilot,
       })),
     }),
     finished: true,
