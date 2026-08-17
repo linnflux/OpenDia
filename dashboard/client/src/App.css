@@ -6845,3 +6845,41 @@ html.vt-no-target::view-transition-old(card-morph) {
   line-height: 1.5;
   margin: 0 0 0.7rem;
 }
+
+/* Stale-bundle banner: quiet, fixed, never blocks work. */
+.update-banner {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  box-shadow: 0 8px 24px var(--shadow-modal);
+}
+
+.update-banner button {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+.update-banner button:hover { background: var(--accent-hover); }
+
+.update-banner .update-banner-dismiss {
+  background: none;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.update-banner .update-banner-dismiss:hover { color: var(--text-primary); background: none; }

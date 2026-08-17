@@ -77,6 +77,7 @@ export default function App() {
   const [activeTimerIds, setActiveTimerIds] = useState(new Set());
   const [me, setMe] = useState(null);
   const [statusToast, setStatusToast] = useState(null);
+  const [staleBundle, setStaleBundle] = useState(false);
 
   // Derive the live project object from the current projects list so the open
   // modal automatically reflects status/next-step/notes changes pushed in by
@@ -146,6 +147,27 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [fetchActiveTimers]);
+
+  // Stale-bundle detection: the dashboard deploys many times a day and an
+  // open tab keeps its old JavaScript, silently missing features the API is
+  // already serving. Compare this tab's own bundle filename to the server's
+  // current one each minute; on divergence, offer a reload (never force one —
+  // the operator may be mid-form).
+  useEffect(() => {
+    const myBundle = (document.querySelector('script[src*="/assets/index-"]')?.src.match(/\/assets\/(index-[\w-]+\.js)/) || [])[1];
+    if (!myBundle) return;
+    const check = () => {
+      fetch("/api/version")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d?.bundle && d.bundle !== myBundle) setStaleBundle(true);
+        })
+        .catch(() => {});
+    };
+    check();
+    const t = setInterval(check, 60000);
+    return () => clearInterval(t);
+  }, []);
 
   // Deep link: ?project=<id> opens that card's modal once projects load
   // (used by OpenDia calendar event links and ODA Chat notifications).
@@ -683,6 +705,14 @@ export default function App() {
       </div>
 
       {statusToast && <div className="modal-toast status-toast">{statusToast}</div>}
+
+      {staleBundle && (
+        <div className="update-banner">
+          The dashboard has been updated since this tab loaded — some features may not render.
+          <button onClick={() => window.location.reload()}>Reload now</button>
+          <button className="update-banner-dismiss" onClick={() => setStaleBundle(false)}>Later</button>
+        </div>
+      )}
 
       {selectedProject && (
         <CardModal

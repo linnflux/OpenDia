@@ -174,6 +174,18 @@ app.post("/api/calendar/webhook", (req, res) => {
 app.use(requireLinnfluxUser);
 app.get("/api/me", (req, res) => res.json(req.user));
 
+// The dashboard deploys many times a day; a tab left open keeps its old
+// bundle and silently misses new features (observed: the plan-approval panel
+// shipped mid-evening and an open room tab never rendered it). The version is
+// the built bundle's hashed filename, read once at boot — the client compares
+// it to its own script tag and offers a reload when they diverge.
+let bundleVersion = null;
+try {
+  const html = readFileSync(resolve(__dirname, "..", "client", "dist", "index.html"), "utf8");
+  bundleVersion = (html.match(/\/assets\/(index-[\w-]+\.js)/) || [])[1] || null;
+} catch {}
+app.get("/api/version", (_req, res) => res.json({ bundle: bundleVersion }));
+
 // API routes
 app.get("/api/projects", (req, res) => {
   try {
