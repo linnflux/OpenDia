@@ -269,135 +269,157 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
       <div className="agents-detail-grid">
         <section className="agents-panel agents-panel-wide">
           <h3>Settings</h3>
-          <div className="agents-field">
-            <label>Working days</label>
-            <div className="agents-day-chips">
-              {DAY_LABELS.map((label, day) => (
-                <button
-                  key={day}
-                  className={`agents-day-chip${days.includes(day) ? " on" : ""}`}
-                  onClick={() => toggleDay(day)}
-                >
-                  {label}
-                </button>
-              ))}
+
+          <div className="agents-group">
+            <div className="agents-group-title">Schedule</div>
+            <div className="agents-group-fields">
+              <div className="agents-field agents-field-span">
+                <label>Working days</label>
+                <div className="agents-day-chips">
+                  {DAY_LABELS.map((label, day) => (
+                    <button
+                      key={day}
+                      className={`agents-day-chip${days.includes(day) ? " on" : ""}`}
+                      onClick={() => toggleDay(day)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="agents-field">
+                <label>Start (ET)</label>
+                <input
+                  type="time" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.schedule_start}
+                  onBlur={(e) => e.target.value !== agent.schedule_start && patch({ schedule_start: e.target.value })}
+                />
+              </div>
+              <div className="agents-field">
+                <label>End (ET)</label>
+                <input
+                  type="time" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.schedule_end}
+                  onBlur={(e) => e.target.value !== agent.schedule_end && patch({ schedule_end: e.target.value })}
+                />
+              </div>
+              <div className="agents-field">
+                <label>Every (min)</label>
+                <input
+                  type="number" min="5" step="5" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.heartbeat_minutes}
+                  onBlur={(e) => Number(e.target.value) !== agent.heartbeat_minutes && patch({ heartbeat_minutes: Number(e.target.value) })}
+                />
+              </div>
             </div>
           </div>
-          <div className="agents-field-row">
-            <div className="agents-field">
-              <label>Start (ET)</label>
-              <input
-                type="time"
-                defaultValue={agent.schedule_start}
-                onBlur={(e) => e.target.value !== agent.schedule_start && patch({ schedule_start: e.target.value })}
-              />
-            </div>
-            <div className="agents-field">
-              <label>End (ET)</label>
-              <input
-                type="time"
-                defaultValue={agent.schedule_end}
-                onBlur={(e) => e.target.value !== agent.schedule_end && patch({ schedule_end: e.target.value })}
-              />
-            </div>
-            <div className="agents-field">
-              <label>Heartbeat (min)</label>
-              <input
-                type="number" min="5" step="5"
-                defaultValue={agent.heartbeat_minutes}
-                onBlur={(e) => Number(e.target.value) !== agent.heartbeat_minutes && patch({ heartbeat_minutes: Number(e.target.value) })}
-              />
+
+          <div className="agents-group">
+            <div className="agents-group-title">Brain</div>
+            <div className="agents-group-fields">
+              <div className="agents-field">
+                <label>Model</label>
+                <select value={agent.model} onChange={(e) => patch({ model: e.target.value })}>
+                  {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="agents-field">
+                <label>Role</label>
+                <select value={agent.role} onChange={(e) => patch({ role: e.target.value })}>
+                  <option value="scanner">scanner</option>
+                  <option value="supervisor">supervisor</option>
+                </select>
+              </div>
             </div>
           </div>
-          <div className="agents-field-row">
-            <div className="agents-field">
-              <label>Token limit / heartbeat</label>
-              <input
-                type="number" min="1000" step="1000"
-                defaultValue={agent.heartbeat_token_limit}
-                onBlur={(e) => Number(e.target.value) !== agent.heartbeat_token_limit && patch({ heartbeat_token_limit: Number(e.target.value) })}
-              />
-            </div>
-            <div className="agents-field">
-              <label>Budget / card (USD)</label>
-              <input
-                type="number" min="0.25" step="0.25"
-                defaultValue={agent.run_budget_usd}
-                onBlur={(e) => Number(e.target.value) !== agent.run_budget_usd && patch({ run_budget_usd: Number(e.target.value) })}
-              />
-            </div>
-            <div className="agents-field">
-              <label>Model</label>
-              <select value={agent.model} onChange={(e) => patch({ model: e.target.value })}>
-                {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-            <div className="agents-field">
-              <label>Role</label>
-              <select value={agent.role} onChange={(e) => patch({ role: e.target.value })}>
-                <option value="scanner">scanner</option>
-                <option value="supervisor">supervisor</option>
-              </select>
+
+          <div className="agents-group">
+            <div className="agents-group-title">Limits</div>
+            <div className="agents-group-fields">
+              <div className="agents-field">
+                <label>Tokens / heartbeat</label>
+                <input
+                  type="number" min="1000" step="1000" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.heartbeat_token_limit}
+                  onBlur={(e) => Number(e.target.value) !== agent.heartbeat_token_limit && patch({ heartbeat_token_limit: Number(e.target.value) })}
+                />
+              </div>
+              <div className="agents-field">
+                <label>Budget / card (USD)</label>
+                <input
+                  type="number" min="0.25" step="0.25" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.run_budget_usd}
+                  onBlur={(e) => Number(e.target.value) !== agent.run_budget_usd && patch({ run_budget_usd: Number(e.target.value) })}
+                />
+              </div>
+              <div className="agents-field">
+                <label>Cards / heartbeat (0 = all)</label>
+                <input
+                  type="number" min="0" step="1" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.max_cards_per_heartbeat}
+                  onBlur={(e) => Number(e.target.value) !== agent.max_cards_per_heartbeat && patch({ max_cards_per_heartbeat: Number(e.target.value) })}
+                />
+              </div>
             </div>
           </div>
+
           {isSupervisor && (
-            <div className="agents-field-row">
-              <div className="agents-field">
-                <label>Min certitude to approve</label>
-                <input
-                  type="number" min="0" max="100" step="5"
-                  defaultValue={agent.min_certitude}
-                  onBlur={(e) => Number(e.target.value) !== agent.min_certitude && patch({ min_certitude: Number(e.target.value) })}
-                />
-              </div>
-              <div className="agents-field">
-                <label>Max auto-approvals / pass</label>
-                <input
-                  type="number" min="0" step="1"
-                  defaultValue={agent.max_auto_approvals}
-                  onBlur={(e) => Number(e.target.value) !== agent.max_auto_approvals && patch({ max_auto_approvals: Number(e.target.value) })}
-                />
-              </div>
-              <div className="agents-field">
-                <label>Mode</label>
-                <label className="switch" title="Shadow reviews and escalates only, recording what it would have approved.">
+            <div className="agents-group">
+              <div className="agents-group-title">Supervision</div>
+              <div className="agents-group-fields">
+                <div className="agents-field">
+                  <label>Min certitude to approve</label>
                   <input
-                    type="checkbox"
-                    checked={!!agent.autopilot}
-                    onChange={(e) => patch({ autopilot: e.target.checked })}
+                    type="number" min="0" max="100" step="5" autoComplete="off" data-form-type="other"
+                    defaultValue={agent.min_certitude}
+                    onBlur={(e) => Number(e.target.value) !== agent.min_certitude && patch({ min_certitude: Number(e.target.value) })}
                   />
-                  <span className="switch-track" />
-                  {agent.autopilot ? "Autopilot — approve within guardrails" : "Shadow — review & escalate only"}
-                </label>
+                </div>
+                <div className="agents-field">
+                  <label>Max approvals / pass</label>
+                  <input
+                    type="number" min="0" step="1" autoComplete="off" data-form-type="other"
+                    defaultValue={agent.max_auto_approvals}
+                    onBlur={(e) => Number(e.target.value) !== agent.max_auto_approvals && patch({ max_auto_approvals: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="agents-field">
+                  <label>Mode</label>
+                  <label className="switch" title="Shadow reviews and escalates only, recording what it would have approved.">
+                    <input
+                      type="checkbox"
+                      checked={!!agent.autopilot}
+                      onChange={(e) => patch({ autopilot: e.target.checked })}
+                    />
+                    <span className="switch-track" />
+                    {agent.autopilot ? "Autopilot — approve within guardrails" : "Shadow — review & escalate only"}
+                  </label>
+                </div>
               </div>
             </div>
           )}
-          <div className="agents-field-row">
-            <div className="agents-field">
-              <label>Chat notifications</label>
-              <select value={agent.chat_mode} onChange={(e) => patch({ chat_mode: e.target.value })}>
-                <option value="per_heartbeat">per heartbeat</option>
-                <option value="quiet">quiet</option>
-                <option value="digest">window digest</option>
-              </select>
+
+          <div className="agents-group">
+            <div className="agents-group-title">Notifications</div>
+            <div className="agents-group-fields">
+              <div className="agents-field">
+                <label>Chat</label>
+                <select value={agent.chat_mode} onChange={(e) => patch({ chat_mode: e.target.value })}>
+                  <option value="per_heartbeat">per heartbeat</option>
+                  <option value="quiet">quiet</option>
+                  <option value="digest">window digest</option>
+                </select>
+              </div>
+              <div className="agents-field agents-field-grow">
+                <label>Webhook URL (blank = global)</label>
+                <input
+                  type="text" autoComplete="off" data-form-type="other"
+                  defaultValue={agent.chat_webhook_url || ""}
+                  placeholder="https://chat.googleapis.com/v1/spaces/…"
+                  onBlur={(e) => (e.target.value || null) !== agent.chat_webhook_url && patch({ chat_webhook_url: e.target.value || null })}
+                />
+              </div>
             </div>
-            <div className="agents-field">
-              <label>Max cards / heartbeat (0 = all)</label>
-              <input
-                type="number" min="0" step="1"
-                defaultValue={agent.max_cards_per_heartbeat}
-                onBlur={(e) => Number(e.target.value) !== agent.max_cards_per_heartbeat && patch({ max_cards_per_heartbeat: Number(e.target.value) })}
-              />
-            </div>
-          </div>
-          <div className="agents-field">
-            <label>Chat webhook URL (blank = global)</label>
-            <input
-              type="text"
-              defaultValue={agent.chat_webhook_url || ""}
-              placeholder="https://chat.googleapis.com/v1/spaces/…"
-              onBlur={(e) => (e.target.value || null) !== agent.chat_webhook_url && patch({ chat_webhook_url: e.target.value || null })}
-            />
           </div>
         </section>
 
