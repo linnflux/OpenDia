@@ -151,9 +151,29 @@ function etDayOfWeek(now) {
 
 function inScheduleWindow(agent, now = etNow()) {
   const days = String(agent.schedule_days || "").split(",").map((d) => Number(d.trim()));
-  if (!days.includes(etDayOfWeek(now))) return false;
   const hhmm = `${now.HH}:${now.mm}`;
-  return agent.schedule_start <= hhmm && hhmm < agent.schedule_end;
+  const { schedule_start: start, schedule_end: end } = agent;
+
+  // Same-day window (start < end): the common case — both bounds on one day.
+  if (start <= end) {
+    return days.includes(etDayOfWeek(now)) && start <= hhmm && hhmm < end;
+  }
+
+  // Midnight-crossing window (start > end, e.g. 20:00–01:00). A plain
+  // `start <= now < end` can never be true when start sorts after end, so
+  // without this branch such a window silently never fires — the agent just
+  // logs off-schedule all night (how this bug was found: both agents were
+  // set to evening-past-midnight windows and went dark at 22:47).
+  //
+  // The window is two slices: the evening side (now >= start) belongs to the
+  // scheduled day itself; the early-morning side (now < end) belongs to the
+  // PREVIOUS day's window — a Friday-only 21:00–01:30 must cover Saturday's
+  // first ninety minutes, and must NOT fire early Friday unless Thursday is
+  // also scheduled.
+  const today = etDayOfWeek(now);
+  if (hhmm >= start) return days.includes(today);
+  if (hhmm < end) return days.includes((today + 6) % 7);
+  return false;
 }
 
 function minutesSinceLastHeartbeat(agent) {
