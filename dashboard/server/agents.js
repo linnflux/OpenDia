@@ -577,16 +577,42 @@ async function waitForRunSettled(projectId) {
   return getSparkRun(projectId) || null;
 }
 
+// A review is identified by run + round count: an escalated run deliberately
+// stays "proposing" for hours, and re-reviewing it every heartbeat would just
+// burn tokens and repeat the same Chat report. Only a new act round (rounds
+// count moved) makes a run worth a second look.
+const reviewKey = (runId, rounds) => `${runId}:${rounds || 0}`;
+
+function seenReviewKeys(agent) {
+  const since = new Date(Date.now() - 48 * 3600 * 1000)
+    .toISOString().slice(0, 19).replace("T", " ");
+  const seen = new Set();
+  for (const run of getAgentRunsSince(agent.id, since)) {
+    if (run.trigger !== "review") continue;
+    try {
+      for (const r of JSON.parse(run.detail || "{}").reviewed_runs || []) {
+        seen.add(reviewKey(r.spark_run_id, r.rounds_used));
+      }
+    } catch {}
+  }
+  return seen;
+}
+
 async function runSupervisorHeartbeat(agent, state) {
   const touchHeartbeat = state.trigger !== "manual";
-  const reviewables = listAgentSparkRuns().filter((r) =>
+  const proposing = listAgentSparkRuns().filter((r) =>
     r.status === "proposing" &&
     r.startedBy !== `agent:${agent.slug}` &&
     r.result?.next_step
   );
+  const seen = seenReviewKeys(agent);
+  const reviewables = proposing.filter((r) => !seen.has(reviewKey(r.runId, r.roundsUsed)));
 
   if (reviewables.length === 0) {
-    updateAgentRun(state.runId, { status: "done", summary: "Nothing to review.", finished: true });
+    const summary = proposing.length > 0
+      ? `Nothing new to review (${proposing.length} already-reviewed run(s) still awaiting Nick).`
+      : "Nothing to review.";
+    updateAgentRun(state.runId, { status: "done", summary, finished: true });
     markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
     finishHeartbeat(agent, state, "done");
     return;
@@ -750,7 +776,18 @@ async function runSupervisorHeartbeat(agent, state) {
     tokensUsed: state.tokens,
     costUsd: state.costUsd,
     summary,
-    detail: JSON.stringify({ reviewed: reviewables.length, approved, escalated }),
+    detail: JSON.stringify({
+      reviewed: reviewables.length,
+      approved,
+      escalated,
+      // The dedup ledger: what this pass looked at, keyed by run + round
+      // count, so later heartbeats skip anything unchanged.
+      reviewed_runs: reviewables.map((r) => ({
+        spark_run_id: r.runId,
+        rounds_used: r.roundsUsed || 0,
+        project_id: r.projectId,
+      })),
+    }),
     finished: true,
   });
   markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
