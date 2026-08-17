@@ -199,6 +199,40 @@ function fullDialogContext(tmuxSession) {
   return out.length ? out : null;
 }
 
+// The TUI's plan-approval dialog is a self-redrawing scrollable box: the
+// terminal buffer only ever holds one viewport page, so no pane capture can
+// show a long plan. The plan itself is a FILE, and a dispatched session's
+// plan file is named from its first prompt — "Read ~/OpenDia/handoffs/
+// <session>.md and follow it…" slugs to read-…-handoffs-<truncated-session>-
+// <word>-<word>.md. Strip prefix and the two-word random suffix; what
+// remains is a (possibly mid-word truncated) prefix of the session name.
+const PLANS_DIR = resolve(process.env.HOME, ".claude", "plans");
+const PLAN_FILE_RE = /^read-.*-handoffs-(.+)-[a-z]+-[a-z]+\.md$/;
+
+function sessionPlanFile(session, createdIso) {
+  let entries;
+  try {
+    entries = readdirSync(PLANS_DIR);
+  } catch {
+    return null;
+  }
+  const slug = String(session).toLowerCase();
+  // Tolerate a stale same-prefix file from an earlier engagement by
+  // requiring the file to be newer than shortly before the room opened.
+  const createdMs = createdIso ? new Date(createdIso).getTime() - 10 * 60 * 1000 : 0;
+  let best = null;
+  for (const name of entries) {
+    const m = name.match(PLAN_FILE_RE);
+    if (!m || !slug.startsWith(m[1])) continue;
+    try {
+      const mtime = statSync(resolve(PLANS_DIR, name)).mtimeMs;
+      if (mtime < createdMs) continue;
+      if (!best || mtime > best.mtime) best = { name, mtime };
+    } catch {}
+  }
+  return best;
+}
+
 function gateForSession(tmuxSession) {
   let pane;
   try {
@@ -314,10 +348,22 @@ export function registerRunroomRoutes(app) {
     if (!plan) return res.status(404).json({ error: "no such runroom" });
     // Piggyback the gate on the poll the page already makes, so the composer
     // can disable itself the moment a dialog opens — before a send bounces.
+    const gate = plan.status === "active" ? gateForSession(plan.tmux_session) : { ok: false, reason: plan.status };
+    // A plan-approval dialog gets the real plan document: the pane can only
+    // ever show one page of it, the file holds all of it.
+    if (gate.dialog?.options?.some((o) => /approve/i.test(o.label))) {
+      const found = sessionPlanFile(plan.tmux_session, plan.created);
+      if (found) {
+        try {
+          gate.dialog.plan_file = found.name;
+          gate.dialog.plan_md = readFileSync(resolve(PLANS_DIR, found.name), "utf8").slice(0, 60_000);
+        } catch {}
+      }
+    }
     res.json({
       ...plan,
       plan_mtime: planMtime(session),
-      gate: plan.status === "active" ? gateForSession(plan.tmux_session) : { ok: false, reason: plan.status },
+      gate,
     });
   });
 

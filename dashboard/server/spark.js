@@ -1478,6 +1478,15 @@ function writeHandoff(project, run, session = null) {
     `   the note), failed — before narrating in the pane.`,
     `3. When the work wraps (/od-stop), set status: "done".`,
     ``,
+    `## Working with the operator`,
+    ``,
+    `- Clarifying questions go in batches — AskUserQuestion carries up to four`,
+    `  at once. Serial single-question dialogs waste the operator's attention.`,
+    `- If the work touches a server: never attempt writes (including the`,
+    `  pre-work snapshot) while planning — plan mode blocks them by policy.`,
+    `  Make "take the pre-work Lightsail snapshot" step 1 of the plan itself,`,
+    `  and take it first thing after approval, before any other change.`,
+    ``,
   ];
   writeFileSync(file, lines.filter((l) => l !== "").join("\n") + "\n");
   return file;

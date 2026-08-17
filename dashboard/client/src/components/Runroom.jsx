@@ -333,7 +333,17 @@ function DialogCard({ session, dialog }) {
       {dialog.context.length > 0 && (
         <pre className="runroom-dialog-context">{dialog.context.join("\n")}</pre>
       )}
-      {dialog.context_full?.length > 0 && (
+      {dialog.plan_md ? (
+        // The real plan document, located on disk — the pane can only ever
+        // show one viewport page of the approval dialog's scroll box.
+        <div className="runroom-dialog-plan">
+          <div className="runroom-dialog-plan-label">Proposed plan · {dialog.plan_file}</div>
+          <div
+            className="runroom-dialog-plan-body"
+            dangerouslySetInnerHTML={{ __html: marked.parse(dialog.plan_md) }}
+          />
+        </div>
+      ) : dialog.context_full?.length > 0 && (
         <>
           <button
             className="runroom-dialog-context-toggle"

@@ -6744,7 +6744,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 .runroom-dialog-context-toggle:hover { color: var(--accent-hover); }
 
 .runroom-dialog-context.full {
-  max-height: 40vh;
+  max-height: 60vh;
   overflow: auto;
 }
 
@@ -6771,3 +6771,54 @@ html.vt-no-target::view-transition-old(card-morph) {
   color: var(--accent);
   text-decoration-color: var(--accent);
 }
+
+/* The proposed-plan panel: the located plan document, real markdown. */
+.runroom-dialog-plan {
+  margin: 0.4rem 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-recessed);
+  overflow: hidden;
+}
+
+.runroom-dialog-plan-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.runroom-dialog-plan-body {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-notes);
+}
+.runroom-dialog-plan-body h1, .runroom-dialog-plan-body h2, .runroom-dialog-plan-body h3 {
+  color: var(--text-heading);
+  margin: 0.7rem 0 0.3rem;
+  font-size: 0.95em;
+}
+.runroom-dialog-plan-body h1 { font-size: 1.05em; }
+.runroom-dialog-plan-body table {
+  border-collapse: collapse;
+  margin: 0.4rem 0;
+  font-size: 0.92em;
+}
+.runroom-dialog-plan-body th, .runroom-dialog-plan-body td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.2rem 0.5rem;
+}
+.runroom-dialog-plan-body code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--badge-bg);
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--radius-xs);
+}
+.runroom-dialog-plan-body pre code { display: block; padding: 0.5rem; overflow-x: auto; }
