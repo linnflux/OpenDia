@@ -375,9 +375,15 @@ export function registerRunroomRoutes(app) {
         } catch {}
       }
     }
+    // sends_mtime lets the page catch a quieter drift than the working-strip
+    // case: the operator has said things (or clicked actions) since the plan
+    // file last moved — the session acted without keeping the room current.
+    let sendsMtime = null;
+    try { sendsMtime = statSync(resolve(RUNROOMS_DIR, session, "sends.log")).mtimeMs; } catch {}
     res.json({
       ...plan,
       plan_mtime: planMtime(session),
+      sends_mtime: sendsMtime,
       gate,
     });
   });

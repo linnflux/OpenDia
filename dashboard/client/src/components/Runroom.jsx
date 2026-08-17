@@ -99,7 +99,11 @@ function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
           // indistinguishable from one that's simply finished talking.
           const mins = Math.max(0, Math.round((Date.now() - plan.plan_mtime) / 60000));
           const rel = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
-          const drifting = mins >= 10 && plan.gate?.working;
+          // Two drift shapes: the session is visibly working on an old plan,
+          // or the operator has sent things since the plan last moved (the
+          // quieter failure — work happened, the room was never told).
+          const sentSince = plan.sends_mtime && plan.sends_mtime > plan.plan_mtime + 60_000;
+          const drifting = (mins >= 10 && plan.gate?.working) || (mins >= 10 && sentSince);
           return (
             <span className={`runroom-plan-age${drifting ? " drifting" : ""}`}>
               steps updated {rel}{drifting ? " — the session may not be keeping the room current" : ""}
@@ -568,6 +572,13 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
   const shownN = viewStep ?? plan.current_step;
   const shown = (plan.steps || []).find((s) => s.n === shownN);
   const finished = plan.status !== "active";
+  // Every step done but status still "active": the work is over and the
+  // session just hasn't closed the room. Without this the page keeps showing
+  // the current step's instructions as if pending — the room lies finished-
+  // work into looking outstanding.
+  const allDone = !finished
+    && (plan.steps || []).length > 0
+    && (plan.steps || []).every((s) => s.state === "done");
 
   return (
     <div className="runroom-room">
@@ -601,6 +612,12 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
               ⏸ The session is in <strong>plan mode</strong> — steps here are frozen until its plan
               is approved. Answer its questions, or send &ldquo;wrap up and present your plan&rdquo; —
               the approval buttons will appear right here when it does.
+            </div>
+          )}
+          {allDone && (
+            <div className="runroom-alldone">
+              ✓ Every step is done — the room just hasn't been closed. Ask the session to
+              &ldquo;close the runroom&rdquo; (it sets status done in plan.json), or it will close at /od-stop.
             </div>
           )}
           {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} working={!finished && !!plan.gate?.working} />}

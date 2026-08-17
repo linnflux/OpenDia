@@ -6986,3 +6986,16 @@ html.vt-no-target::view-transition-old(card-morph) {
     box-shadow: 0 0 0 2px #54af4d;
   }
 }
+
+/* All-steps-done banner: work over, room not yet closed. */
+.runroom-alldone {
+  max-width: 640px;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--timer-open);
+  background: var(--bg-recessed);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
