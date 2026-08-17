@@ -305,6 +305,11 @@ function ActionRow({ session, step, gate, me }) {
 function DialogCard({ session, dialog }) {
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(null);
+  // Once answered, collapse to a receipt instead of leaving the full option
+  // list on screen until the next poll — the 0–2.5s where the room appeared
+  // to still be asking a question the operator had already settled. Form
+  // dialogs (multi) stay open: their keys drive a form, they don't end it.
+  const [answered, setAnswered] = useState(null);
   // The short context stops at the dialog's own box rule, so a plan-approval
   // dialog arrives with buttons and none of the plan. context_full is the
   // wide scrollback capture; auto-open it exactly when the choice is an
@@ -323,12 +328,26 @@ function DialogCard({ session, dialog }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) setFlash({ ok: false, msg: d?.error || `HTTP ${r.status}` });
-      else setFlash({ ok: true, msg: "answered" });
+      else {
+        setFlash({ ok: true, msg: "answered" });
+        if (!dialog.multi) {
+          const opt = dialog.options.find((o) => String(o.n) === String(choice));
+          setAnswered(opt ? opt.label : choice);
+        }
+      }
     } catch (e) {
       setFlash({ ok: false, msg: e.message });
     } finally {
       setBusy(false);
     }
+  }
+
+  if (answered) {
+    return (
+      <div className="runroom-dialog answered">
+        <div className="runroom-dialog-label">✓ Answered — {answered}</div>
+      </div>
+    );
   }
 
   return (
@@ -394,6 +413,44 @@ function DialogCard({ session, dialog }) {
         {dialog.hint && <span className="runroom-dialog-hint">{dialog.hint}</span>}
         {flash && <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>}
       </div>
+    </div>
+  );
+}
+
+// The terminal's narrative, in the room. After any operator send the server
+// anchors the pane's history position and every poll returns what has been
+// printed since, dim chrome already stripped. Expanded while the session
+// works; when the next dialog arrives the decision takes the stage and this
+// folds into a toggle. When work ends with no dialog, it stays open — that
+// closing text IS the announcement the operator came to read.
+function LiveOutput({ live, dialogOpen }) {
+  const [open, setOpen] = useState(!dialogOpen);
+  const boxRef = useRef(null);
+  // Stick to the bottom while the operator is at the bottom; a manual scroll
+  // up pins the view so reading back is never yanked away mid-line.
+  const stickRef = useRef(true);
+
+  useEffect(() => { setOpen(!dialogOpen); }, [dialogOpen, live.since]);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+  }, [live.lines, open]);
+
+  return (
+    <div className="runroom-live">
+      <button className="runroom-live-toggle" onClick={() => setOpen((v) => !v)}>
+        {open ? "▾ Terminal" : `▸ Show terminal output (${live.lines.length} lines)`}
+      </button>
+      {open && (
+        <pre
+          ref={boxRef}
+          className="runroom-live-body"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          }}
+        >{live.lines.join("\n")}</pre>
+      )}
     </div>
   );
 }
@@ -560,11 +617,14 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
       .catch((e) => setError(e.message));
   }, [session]);
 
+  // Tighten the poll while live output is streaming — 1.2s reads as "live"
+  // in the viewbox; 2.5s is plenty for everything else the room shows.
+  const streaming = !!(plan?.live_output && plan?.gate?.working);
   useEffect(() => {
     fetchPlan();
-    const t = setInterval(fetchPlan, 2500);
+    const t = setInterval(fetchPlan, streaming ? 1200 : 2500);
     return () => clearInterval(t);
-  }, [fetchPlan]);
+  }, [fetchPlan, streaming]);
 
   if (error) return <div className="runroom-error">Runroom unavailable: {error}</div>;
   if (!plan) return <div className="loading">Loading runroom...</div>;
@@ -625,6 +685,12 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
               step must not offer buttons that would fire at a different one. */}
           {!finished && shown && shown.n === plan.current_step && (
             <ActionRow session={session} step={shown} gate={plan.gate} me={me} />
+          )}
+          {!finished && plan.live_output?.lines?.length > 0 && (
+            <LiveOutput
+              live={plan.live_output}
+              dialogOpen={plan.gate?.reason === "dialog-open"}
+            />
           )}
           {!finished && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
             <DialogCard key={plan.gate.dialog.fingerprint} session={session} dialog={plan.gate.dialog} />

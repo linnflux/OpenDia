@@ -269,6 +269,113 @@ function gateForSession(tmuxSession) {
   return { ok: true, working, planMode };
 }
 
+// ── Live output ────────────────────────────────────────────────────────────
+// After the operator sends anything (a dialog answer, an action button, free
+// text), the session starts a work stretch whose narrative only exists in the
+// tmux pane. The room shows that stretch: at send time we record where the
+// pane's history stood, and every poll returns what has been printed since —
+// primary text only, dim chrome stripped. The anchor is the first per-room
+// in-memory state in this module; it is display-only and losing it on a
+// server restart just means the viewbox reappears at the next send.
+const liveAnchors = new Map(); // session -> { anchorTotal, at }
+const MAX_LIVE_CAPTURE = 600;  // lines of history a capture may reach back
+const MAX_LIVE_LINES = 400;    // lines the payload may carry after filtering
+
+// Absolute pane-position readout: lines scrolled into history, the viewport
+// height, and the cursor row. The anchor is history + cursor row — NOT
+// history + height, because a part-filled viewport has blank rows below the
+// cursor that new output consumes before anything scrolls into history;
+// counting them as already-seen would swallow the first lines of a reply.
+function panePos(tmuxSession) {
+  try {
+    const out = execFileSync("tmux",
+      ["display-message", "-p", "-t", tmuxSession, "#{history_size} #{pane_height} #{cursor_y}"],
+      { encoding: "utf8", timeout: 3000 });
+    const [hist, height, cursorY] = out.trim().split(/\s+/).map(Number);
+    if (!Number.isFinite(hist) || !Number.isFinite(height)) return null;
+    return { hist, height, cursorY: Number.isFinite(cursorY) ? cursorY : height - 1 };
+  } catch {
+    return null;
+  }
+}
+
+// The position MUST be read before the keys are sent: a session can start
+// printing within milliseconds of the Enter, and an anchor taken after the
+// send swallows those first lines. Callers snapshot with panePos() pre-send
+// and commit here only once the send succeeded.
+function markLiveAnchor(session, pos) {
+  if (pos) liveAnchors.set(session, { anchorTotal: pos.hist + pos.cursorY + 1, at: Date.now() });
+}
+
+// Everything the pane printed since the anchor, cleaned for reading: dim
+// spans deleted (all-dim lines vanish — spinner meta, ghost suggestions,
+// secondary chrome), SGR stripped, the bottom input-box/status chrome cut,
+// blank runs collapsed. Returns null when there is nothing worth showing.
+function captureLiveOutput(session, tmuxSession) {
+  const anchor = liveAnchors.get(session);
+  if (!anchor) return null;
+  const pos = panePos(tmuxSession);
+  if (!pos) return null;
+  // Start row relative to the visible top: negative reaches into history,
+  // 0..height-1 lands inside the viewport (both are valid for -S).
+  let start = anchor.anchorTotal - pos.hist;
+  if (start >= pos.height) return null;               // nothing new yet
+  if (start < -MAX_LIVE_CAPTURE) start = -MAX_LIVE_CAPTURE;
+  let pane;
+  try {
+    pane = execFileSync("tmux",
+      ["capture-pane", "-t", tmuxSession, "-p", "-e", "-S", String(start)],
+      { encoding: "utf8", timeout: 3000 });
+  } catch {
+    return null;
+  }
+  const raw = pane.split("\n");
+  let lines = [];
+  for (const escLine of raw) {
+    const undimmed = escLine.replace(DIM_SPAN_RE, "");
+    const plain = undimmed.replace(SGR_RE, "").replace(/\s+$/, "");
+    // A line that only had dim content is chrome, not a paragraph break —
+    // drop it entirely rather than leaving a phantom blank.
+    if (plain.trim() === "" && escLine.replace(SGR_RE, "").trim() !== "") continue;
+    lines.push(plain);
+  }
+  // Cut the bottom chrome: the input box is the "❯" line sandwiched between
+  // rules (same structural fact the gate relies on); everything from its top
+  // rule down is TUI furniture, not output.
+  const nonBlankIdx = (i, dir) => {
+    for (let j = i + dir; j >= 0 && j < lines.length; j += dir) {
+      if (lines[j].trim() !== "") return j;
+    }
+    return -1;
+  };
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith("❯")) continue;
+    const above = nonBlankIdx(i, -1), below = nonBlankIdx(i, +1);
+    if (above >= 0 && RULE_RE.test(lines[above]) &&
+        below >= 0 && RULE_RE.test(lines[below])) {
+      lines = lines.slice(0, above);
+      break;
+    }
+  }
+  // The spinner/status line rides just above the input box.
+  while (lines.length) {
+    const last = lines[lines.length - 1];
+    if (last.trim() === "" || SPINNER_RE.test(last) ||
+        last.includes("esc to interrupt") || last.includes("? for shortcuts")) {
+      lines.pop();
+    } else break;
+  }
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  const out = [];
+  let blanks = 0;
+  for (const l of lines) {
+    if (l.trim() === "") { if (++blanks > 1) continue; } else blanks = 0;
+    out.push(l);
+  }
+  if (!out.length) return null;
+  return { lines: out.slice(-MAX_LIVE_LINES), since: anchor.at };
+}
+
 const MAX_SEND_CHARS = 4000;
 
 // Gate + type + submit + audit, shared by the free-text composer and the
@@ -276,6 +383,7 @@ const MAX_SEND_CHARS = 4000;
 function deliver(session, plan, text, user, tag) {
   const gate = gateForSession(plan.tmux_session);
   if (!gate.ok) return { status: 409, body: { error: "gate closed", gate } };
+  const pos = panePos(plan.tmux_session);
   try {
     execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, "-l", text], { timeout: 3000 });
     execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, "Enter"], { timeout: 3000 });
@@ -286,6 +394,7 @@ function deliver(session, plan, text, user, tag) {
     appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
       `${new Date().toISOString()} ${user?.login || "?"}${tag ? ` [${tag}]` : ""}: ${text.replace(/\n/g, "\\n")}\n`);
   } catch {}
+  markLiveAnchor(session, pos);
   return { status: 200, body: { sent: true } };
 }
 
@@ -380,10 +489,13 @@ export function registerRunroomRoutes(app) {
     // file last moved — the session acted without keeping the room current.
     let sendsMtime = null;
     try { sendsMtime = statSync(resolve(RUNROOMS_DIR, session, "sends.log")).mtimeMs; } catch {}
+    if (plan.status !== "active") liveAnchors.delete(session);
+    const live = plan.status === "active" ? captureLiveOutput(session, plan.tmux_session) : null;
     res.json({
       ...plan,
       plan_mtime: planMtime(session),
       sends_mtime: sendsMtime,
+      ...(live ? { live_output: live } : {}),
       gate,
     });
   });
@@ -531,6 +643,7 @@ export function registerRunroomRoutes(app) {
 
     const KEYMAP = { esc: "Escape", enter: "Enter", up: "Up", down: "Down", left: "Left", right: "Right", space: "Space" };
     const key = KEYMAP[choice] || String(choice);
+    const pos = panePos(plan.tmux_session);
     try {
       execFileSync("tmux", ["send-keys", "-t", plan.tmux_session, key], { timeout: 3000 });
     } catch (e) {
@@ -542,6 +655,9 @@ export function registerRunroomRoutes(app) {
       appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
         `${new Date().toISOString()} ${req.user?.login || "?"} [dialog]: ${choice} (${label})\n`);
     } catch {}
+    // Digits and Enter commit an answer and start a work stretch worth
+    // watching live; bare navigation inside a form does not.
+    if (!isNav || choice === "enter") markLiveAnchor(session, pos);
     res.json({ answered: true });
   });
 }
