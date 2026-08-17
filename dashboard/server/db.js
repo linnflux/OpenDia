@@ -718,6 +718,10 @@ export function getAgentById(id) {
   return getDb().prepare("SELECT * FROM agents WHERE id = ?").get(id);
 }
 
+export function getAgentBySlug(slug) {
+  return getDb().prepare("SELECT * FROM agents WHERE slug = ?").get(slug);
+}
+
 export function createAgent({ slug, name }) {
   const result = getDb().prepare(
     "INSERT INTO agents (slug, name) VALUES (?, ?)"

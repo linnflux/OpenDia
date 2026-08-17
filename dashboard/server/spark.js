@@ -36,7 +36,7 @@ import {
 } from "fs";
 import { resolve } from "path";
 
-import { getProjectById, getInboxItemsByProject, getProcessedGmailIds, updateProject } from "./db.js";
+import { getProjectById, getInboxItemsByProject, getProcessedGmailIds, updateProject, getAgentBySlug } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
 import { fetchNotionPage, searchNotionForProject, appendTimerLog } from "./notion.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -356,6 +356,23 @@ function recoverOrphanRuns() {
 
     if (project && result && !result.__parseError) {
       const run = newRun(project, runId, runDir, data.started_by || "");
+      // Restore the agent identity, not just its name: without run.agent a
+      // recovered ODA run loses its --allow-dir memory jail and its pinned
+      // model/budget, so a later round spawns as if a human owned the run
+      // (observed: a recovered scan's round was denied writing the agent's
+      // own memory.md). started_by survives in the timer state file; the
+      // rest lives in the agents table.
+      if ((run.startedBy || "").startsWith("agent:")) {
+        const agent = getAgentBySlug(run.startedBy.slice("agent:".length));
+        if (agent) {
+          run.agent = {
+            slug: agent.slug,
+            name: agent.name,
+            model: agent.model,
+            budgetUsd: agent.run_budget_usd,
+          };
+        }
+      }
       // A run archived before schema 2 carries no `route` and no `recent`, and
       // it never passed through a validator. Adapt it here rather than teaching
       // every downstream reader two shapes.
