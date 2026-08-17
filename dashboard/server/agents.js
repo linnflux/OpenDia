@@ -338,62 +338,58 @@ function startHeartbeat(agent, trigger) {
   return state;
 }
 
-// Quick-win triage: a cheap model pass over the FULL query-match list, so an
-// agent like Eddie only spends real scans on cards it is confident an
-// opendia-routed step can move today. Fail-open: a triage that errors or
-// returns junk falls back to plain roster order — worst case is Leah-style
-// behavior, never a dead heartbeat.
-async function triageQuickWins(agent, rows, state) {
-  const brief = rows.map((r) => {
+// Quick-win triage, first-fit: walk the roster one card at a time and STOP at
+// the first confident hit (or the cap'th) — the operator's model of the
+// agent's behavior, and cheaper than batch-judging the whole list (typically
+// 3-5 single-card haiku calls instead of one 38-card monolith that measured
+// 67s). Judged-and-passed cards are recorded with reasons; unreached cards
+// simply wait for the next heartbeat. A judging error on one card skips it
+// and moves on — never a dead heartbeat.
+const TRIAGE_MAX_JUDGED = 25;
+
+async function triageFirstFit(agent, rows, state, want) {
+  const selected = [];
+  const rejects = [];
+  let judged = 0;
+  for (const r of rows) {
+    if (selected.length >= want) break;
+    if (judged >= TRIAGE_MAX_JUDGED) {
+      pushLog(state, "warn", `Triage stopped after ${judged} judgments — remainder waits for the next heartbeat.`);
+      break;
+    }
     const p = getProjectById(r.id) || {};
-    return {
-      id: r.id,
-      name: r.name,
-      company: r.company_name || null,
-      division: r.division || null,
-      next_step: r.next_step || null,
-      notes: (p.notes || "").slice(0, 200) || null,
-      updated_at: r.updated_at || null,
-    };
-  });
-  const prompt =
-    `You are ${agent.name}, an OpenDia agent triaging cards for quick wins. ` +
-    `For each card below, judge: could a Spark scan plausibly produce an ` +
-    `internal, reversible "opendia"-routed step (a Gmail draft, a card/Notion ` +
-    `update, read-only diagnostics, a single-URL cache purge) that moves the ` +
-    `card forward TODAY? A card needing a human decision, a server change, or ` +
-    `a phone call is NOT a quick win. Respond with ONLY a JSON array: ` +
-    `[{"id": <number>, "quick_win": <bool>, "confidence": <0-100>, "reason": "<one sentence>"}]\n\n` +
-    JSON.stringify(brief, null, 1);
-  try {
-    const text = await runClaude(prompt, { model: "haiku", timeoutMs: 60_000 });
-    const m = text.match(/\[[\s\S]*\]/);
-    const verdicts = JSON.parse(m ? m[0] : text);
-    if (!Array.isArray(verdicts)) throw new Error("triage output is not an array");
-    const byId = new Map(rows.map((r) => [Number(r.id), r]));
-    const selected = [];
-    const rejects = [];
-    for (const v of verdicts) {
-      const row = byId.get(Number(v.id));
-      if (!row) continue;
-      const conf = Number(v.confidence) || 0;
-      if (v.quick_win && conf >= 70) {
-        selected.push({ row, conf });
-      } else {
-        rejects.push({ project_id: row.id, name: row.name, status: "not-selected", reason: v.reason || "not a quick win", confidence: conf });
-      }
+    const prompt =
+      `You are ${agent.name}, an OpenDia agent hunting quick wins. Judge ONE card: ` +
+      `could a Spark scan plausibly produce an internal, reversible "opendia"-routed ` +
+      `step (a Gmail draft, a card/Notion update, read-only diagnostics, a single-URL ` +
+      `cache purge) that moves it forward TODAY? A card needing a human decision, a ` +
+      `server change, or a phone call is NOT a quick win. Respond with ONLY JSON: ` +
+      `{"quick_win": <bool>, "confidence": <0-100>, "reason": "<one sentence>"}\n\n` +
+      JSON.stringify({
+        name: r.name, company: r.company_name || null, division: r.division || null,
+        next_step: r.next_step || null, notes: (p.notes || "").slice(0, 200) || null,
+        updated_at: r.updated_at || null,
+      });
+    judged += 1;
+    let v = null;
+    try {
+      const text = await runClaude(prompt, { model: "haiku", timeoutMs: 60_000 });
+      const m = text.match(/\{[\s\S]*\}/);
+      v = JSON.parse(m ? m[0] : text);
+    } catch (err) {
+      console.error(`agents: triage judgment failed for ${agent.slug} on card ${r.id}: ${err.message}`);
+      rejects.push({ project_id: r.id, name: r.name, status: "not-selected", reason: `triage error: ${err.message}`.slice(0, 120), confidence: null });
+      continue;
     }
-    for (const r of rows) {
-      if (!verdicts.some((v) => Number(v.id) === Number(r.id))) {
-        rejects.push({ project_id: r.id, name: r.name, status: "not-selected", reason: "not judged by triage", confidence: null });
-      }
+    const conf = Number(v?.confidence) || 0;
+    if (v?.quick_win && conf >= 70) {
+      pushLog(state, "info", `Quick win: ${r.name} (${conf}%) — ${String(v.reason || "").slice(0, 100)}`);
+      selected.push(r);
+    } else {
+      rejects.push({ project_id: r.id, name: r.name, status: "not-selected", reason: String(v?.reason || "not a quick win").slice(0, 160), confidence: conf });
     }
-    selected.sort((a, b) => b.conf - a.conf);
-    return { cards: selected.map((s) => s.row), rejects, triaged: true };
-  } catch (err) {
-    pushLog(state, "warn", `Triage failed (${err.message}) — falling back to roster order.`);
-    return { cards: rows, rejects: [], triaged: false };
   }
+  return { cards: selected, rejects };
 }
 
 async function runHeartbeat(agent, state) {
@@ -421,13 +417,13 @@ async function runHeartbeat(agent, state) {
   }
   let triageRejects = [];
   if (agent.roster_mode === "query" && agent.triage) {
-    pushLog(state, "info", `Triaging ${cards.length} match(es) for quick wins…`);
-    const t = await triageQuickWins(agent, cards, state);
+    const want = agent.max_cards_per_heartbeat > 0 ? agent.max_cards_per_heartbeat : cards.length;
+    pushLog(state, "info", `Hunting for a quick win across ${cards.length} match(es)…`);
+    const t = await triageFirstFit(agent, cards, state, want);
     cards = t.cards;
     triageRejects = t.rejects;
-    if (t.triaged) pushLog(state, "info", `Triage kept ${cards.length}, passed on ${t.rejects.length}.`);
-  }
-  if (agent.max_cards_per_heartbeat > 0) {
+    pushLog(state, "info", `Triage: ${cards.length} pick(s) after ${cards.length + t.rejects.length} judgment(s).`);
+  } else if (agent.max_cards_per_heartbeat > 0) {
     cards = cards.slice(0, agent.max_cards_per_heartbeat);
   }
   state.cardsTotal = cards.length;
