@@ -7023,7 +7023,8 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .runroom-live-toggle:hover { color: var(--accent); }
 .runroom-live-body {
-  max-height: 45vh;
+  /* ~4 rows by default; the captured tail is scrollable behind it. */
+  max-height: 6em;
   overflow: auto;
   margin: 0;
   padding: 0.6rem 0.8rem;

@@ -417,20 +417,17 @@ function DialogCard({ session, dialog }) {
   );
 }
 
-// The terminal's narrative, in the room. After any operator send the server
-// anchors the pane's history position and every poll returns what has been
-// printed since, dim chrome already stripped. Expanded while the session
-// works; when the next dialog arrives the decision takes the stage and this
-// folds into a toggle. When work ends with no dialog, it stays open — that
-// closing text IS the announcement the operator came to read.
-function LiveOutput({ live, dialogOpen }) {
-  const [open, setOpen] = useState(!dialogOpen);
+// A small ticker of what the terminal is printing while the session works —
+// something for the operator to watch go by, not a transcript. The server
+// only sends it mid-turn, so it appears with the green orbit and vanishes on
+// its own when the turn ends and the room's real content takes over. A few
+// rows tall; scrolling up through the captured tail pins the view, back to
+// the bottom re-sticks it.
+function LiveOutput({ live }) {
+  const [open, setOpen] = useState(true);
   const boxRef = useRef(null);
-  // Stick to the bottom while the operator is at the bottom; a manual scroll
-  // up pins the view so reading back is never yanked away mid-line.
   const stickRef = useRef(true);
 
-  useEffect(() => { setOpen(!dialogOpen); }, [dialogOpen, live.since]);
   useEffect(() => {
     const el = boxRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
@@ -439,7 +436,7 @@ function LiveOutput({ live, dialogOpen }) {
   return (
     <div className="runroom-live">
       <button className="runroom-live-toggle" onClick={() => setOpen((v) => !v)}>
-        {open ? "▾ Terminal" : `▸ Show terminal output (${live.lines.length} lines)`}
+        {open ? "▾ Terminal" : "▸ Terminal"}
       </button>
       {open && (
         <pre
@@ -447,7 +444,7 @@ function LiveOutput({ live, dialogOpen }) {
           className="runroom-live-body"
           onScroll={(e) => {
             const el = e.currentTarget;
-            stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
           }}
         >{live.lines.join("\n")}</pre>
       )}
@@ -687,10 +684,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
             <ActionRow session={session} step={shown} gate={plan.gate} me={me} />
           )}
           {!finished && plan.live_output?.lines?.length > 0 && (
-            <LiveOutput
-              live={plan.live_output}
-              dialogOpen={plan.gate?.reason === "dialog-open"}
-            />
+            <LiveOutput live={plan.live_output} />
           )}
           {!finished && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
             <DialogCard key={plan.gate.dialog.fingerprint} session={session} dialog={plan.gate.dialog} />
