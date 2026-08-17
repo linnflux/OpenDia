@@ -6728,3 +6728,29 @@ html.vt-no-target::view-transition-old(card-morph) {
   line-height: 1.4;
   margin: 0.1rem 0 0.25rem 0.9rem;
 }
+
+/* Dialog full-context: the wide capture behind an approval decision. */
+.runroom-dialog-context-toggle {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0.1rem 0;
+  margin: 0.25rem 0;
+  cursor: pointer;
+  font-size: 0.74rem;
+  color: var(--accent);
+  text-align: left;
+}
+.runroom-dialog-context-toggle:hover { color: var(--accent-hover); }
+
+.runroom-dialog-context.full {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* Steps-age readout in the room header; drifting = working session, old file. */
+.runroom-plan-age {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+.runroom-plan-age.drifting { color: var(--warning); }

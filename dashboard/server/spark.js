@@ -1441,6 +1441,25 @@ function writeHandoff(project, run, session = null) {
     // Archived v1 runs still carry their prose report; keep it rather than
     // dropping detail the sweep actually produced.
     r.body_md ? `\n## Full report\n\n${r.body_md}` : "",
+    // Without this section a spawned session works from its own plan while
+    // the room keeps displaying the seed step forever — the operator's window
+    // goes stale the moment real work starts. The contract makes the session
+    // the room's author, not just its subject.
+    `\n## Runroom contract`,
+    ``,
+    `This session is bound to the runroom at ~/OpenDia/runrooms/${slug}/plan.json.`,
+    `That file IS the operator's window into this work — file before prose:`,
+    ``,
+    `1. The moment your plan is approved, rewrite plan.json FIRST: replace the`,
+    `   seeded step with your plan's real steps. Keep the existing top-level`,
+    `   fields (runroom_version, title, card_id, card_name, company, division,`,
+    `   tmux_session, created); steps are {n, title, actor: "opendia"|"human",`,
+    `   state: "current"|"pending"|"done"|"failed", detail, note}; set`,
+    `   current_step. (While in plan mode file writes are blocked — expected;`,
+    `   the rewrite happens at approval, before anything else.)`,
+    `2. Update the file at every step transition — started, done (evidence in`,
+    `   the note), failed — before narrating in the pane.`,
+    `3. When the work wraps (/od-stop), set status: "done".`,
     ``,
   ];
   writeFileSync(file, lines.filter((l) => l !== "").join("\n") + "\n");

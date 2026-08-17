@@ -254,9 +254,13 @@ and its timer notes keep the bullet for every step actually carried out.
 - The non-admin gate is untested from a real non-admin identity — loopback is
   unconditionally admin, so it can only be exercised through Tailscale
   identity headers.
-- A spawned runroom session is handed the brief but does not yet adopt the
-  seeded `plan.json` on its own; the plan renders for the operator, and the
-  session picks it up when told to.
+- A spawned runroom session's brief now ends with a **Runroom contract**: on
+  plan approval the session rewrites the seeded `plan.json` into its real
+  steps and keeps the file current at every transition (file before prose),
+  setting `status: "done"` at wrap-up. The room also surfaces drift — a
+  "steps updated N ago" readout warns when a working session isn't keeping
+  the file current — and the dialog card can expand the pane content behind
+  any approval, so a plan is never approved sight-unseen.
 
 ## Layout
 

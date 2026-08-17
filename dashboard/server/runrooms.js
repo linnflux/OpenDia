@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, appendFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { readFileSync, readdirSync, existsSync, appendFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
@@ -23,6 +23,17 @@ const RUNROOMS_DIR = resolve(process.env.HOME, "OpenDia", "runrooms");
 // and are pathless slugs. Reject anything else so a crafted :session can
 // never traverse out of RUNROOMS_DIR.
 const SESSION_RE = /^[A-Za-z0-9._-]+$/;
+
+// Last write to a session's plan.json — the room's staleness signal. A live
+// session that isn't updating the file and a dead one look identical without
+// this; surfacing the age lets the page say which story it's telling.
+function planMtime(session) {
+  try {
+    return statSync(resolve(RUNROOMS_DIR, session, "plan.json")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
 
 function readPlan(session) {
   const p = resolve(RUNROOMS_DIR, session, "plan.json");
@@ -155,6 +166,39 @@ function detectWorking(lines) {
   return null;
 }
 
+// The short context parseDialog extracts (≤12 lines, stops at any rule line)
+// is right for permission prompts but useless for a plan-approval dialog: the
+// TUI wraps the plan body in a ruled box, so the walk stops before a single
+// line of the plan — the operator gets Approve buttons for a document the
+// room never shows. This second, wider capture pulls scrollback and takes
+// everything between the previous input prompt and the option list, box and
+// all, so the room can render what is actually being approved.
+function fullDialogContext(tmuxSession) {
+  let pane;
+  try {
+    pane = execFileSync("tmux", ["capture-pane", "-t", tmuxSession, "-p", "-S", "-250"],
+                        { encoding: "utf8", timeout: 3000 });
+  } catch {
+    return null;
+  }
+  const lines = pane.replace(SGR_RE, "").split("\n");
+  let cursor = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (OPTION_CURSOR_RE.test(lines[i])) { cursor = i; break; }
+  }
+  if (cursor < 0) return null;
+  let start = cursor;
+  while (start - 1 >= 0 && OPTION_LINE_RE.test(lines[start - 1])) start--;
+  const out = [];
+  for (let i = start - 1; i >= 0 && out.length < 160; i--) {
+    if (lines[i].trimStart().startsWith("❯")) break;   // previous input box
+    out.unshift(lines[i].replace(/\s+$/, ""));
+  }
+  while (out.length && !out[0].trim()) out.shift();
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  return out.length ? out : null;
+}
+
 function gateForSession(tmuxSession) {
   let pane;
   try {
@@ -172,7 +216,12 @@ function gateForSession(tmuxSession) {
   // much context arrives — the page should say so instead of looking stuck.
   const planMode = plainLines.slice(-6).some((l) => l.includes("plan mode on"));
   const verdict = classifyPane(pane);
-  if (!verdict.ok) return { ...verdict, working, planMode };
+  if (!verdict.ok) {
+    if (verdict.reason === "dialog-open" && verdict.dialog) {
+      verdict.dialog.context_full = fullDialogContext(tmuxSession);
+    }
+    return { ...verdict, working, planMode };
+  }
   const holder = terminalHolderFor(tmuxSession);
   if (holder) return { ok: false, reason: "terminal-held", holder, working, planMode };
   return { ok: true, working, planMode };
@@ -239,6 +288,7 @@ export function registerRunroomRoutes(app) {
       .filter((r) => r.plan)
       .map(({ session, plan }) => ({
         session,
+        plan_mtime: planMtime(session),
         title: plan.title,
         status: plan.status,
         card_id: plan.card_id,
@@ -264,7 +314,11 @@ export function registerRunroomRoutes(app) {
     if (!plan) return res.status(404).json({ error: "no such runroom" });
     // Piggyback the gate on the poll the page already makes, so the composer
     // can disable itself the moment a dialog opens — before a send bounces.
-    res.json({ ...plan, gate: plan.status === "active" ? gateForSession(plan.tmux_session) : { ok: false, reason: plan.status } });
+    res.json({
+      ...plan,
+      plan_mtime: planMtime(session),
+      gate: plan.status === "active" ? gateForSession(plan.tmux_session) : { ok: false, reason: plan.status },
+    });
   });
 
   app.post("/api/runrooms/:session/send", (req, res) => {

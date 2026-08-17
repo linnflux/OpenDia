@@ -78,6 +78,19 @@ function RoomHeader({ plan, hasActiveTimer }) {
         <span className="runroom-progress">{done}/{total} done</span>
         {hasActiveTimer && <span className="runroom-timer-dot" title="Timer running on this card">&#9679; timer running</span>}
         {plan.created && <span className="runroom-created">opened {plan.created.replace("T", " ")}</span>}
+        {plan.plan_mtime && (() => {
+          // Steps-age readout: a session can be alive and productive while
+          // never touching plan.json — without this line that room is
+          // indistinguishable from one that's simply finished talking.
+          const mins = Math.max(0, Math.round((Date.now() - plan.plan_mtime) / 60000));
+          const rel = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+          const drifting = mins >= 10 && plan.gate?.working;
+          return (
+            <span className={`runroom-plan-age${drifting ? " drifting" : ""}`}>
+              steps updated {rel}{drifting ? " — the session may not be keeping the room current" : ""}
+            </span>
+          );
+        })()}
       </div>
     </header>
   );
@@ -273,6 +286,12 @@ function ActionRow({ session, step, gate, me }) {
 function DialogCard({ session, dialog }) {
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(null);
+  // The short context stops at the dialog's own box rule, so a plan-approval
+  // dialog arrives with buttons and none of the plan. context_full is the
+  // wide scrollback capture; auto-open it exactly when the choice is an
+  // approval, because that is the dialog whose content matters most.
+  const planLike = dialog.options.some((o) => /approve/i.test(o.label));
+  const [showFull, setShowFull] = useState(planLike);
 
   async function answer(choice) {
     if (busy) return;
@@ -298,6 +317,19 @@ function DialogCard({ session, dialog }) {
       <div className="runroom-dialog-label">The session is asking</div>
       {dialog.context.length > 0 && (
         <pre className="runroom-dialog-context">{dialog.context.join("\n")}</pre>
+      )}
+      {dialog.context_full?.length > 0 && (
+        <>
+          <button
+            className="runroom-dialog-context-toggle"
+            onClick={() => setShowFull((v) => !v)}
+          >
+            {showFull ? "▾ Hide full context" : `▸ Show what you're deciding on (${dialog.context_full.length} lines)`}
+          </button>
+          {showFull && (
+            <pre className="runroom-dialog-context full">{dialog.context_full.join("\n")}</pre>
+          )}
+        </>
       )}
       <div className="runroom-dialog-options">
         {dialog.options.map((o) => (
@@ -539,7 +571,7 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me }) {
             <ActionRow session={session} step={shown} gate={plan.gate} me={me} />
           )}
           {!finished && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
-            <DialogCard session={session} dialog={plan.gate.dialog} />
+            <DialogCard key={plan.gate.dialog.fingerprint} session={session} dialog={plan.gate.dialog} />
           )}
           {!finished && <ThinkingStrip working={plan.gate?.working} />}
           {!finished && <Composer session={session} gate={plan.gate} />}
