@@ -341,6 +341,13 @@ export function registerRunroomRoutes(app) {
         current_step: plan.current_step,
         steps_total: (plan.steps || []).length,
         steps_done: (plan.steps || []).filter((s) => s.state === "done").length,
+        // Is the bound session mid-turn right now? Lets the list show the
+        // orbiting ring on rooms being actively worked, not just open.
+        // Computed for ACTIVE rooms only — one capture-pane per active room
+        // per poll, local and cheap at the 1-3 rooms this list carries.
+        working: plan.status === "active"
+          ? !!gateForSession(plan.tmux_session)?.working
+          : false,
       }))
       // Active rooms first, newest first within each group.
       .sort((a, b) =>
