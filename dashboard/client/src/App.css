@@ -7149,6 +7149,43 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .agents-queue-toggle:hover { color: var(--accent-hover); }
 
+/* Operator inbox — done/escalated items, dismissible. Reuses the queue row
+   classes; only the group headings, the payoff line, and the ✓ are new. */
+.agents-inbox-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.agents-inbox-group.esc { color: var(--warning); }
+.agents-inbox-group.ok { color: var(--timer-open); }
+.agents-inbox-clear { margin-left: auto; padding: 0; text-transform: none; letter-spacing: normal; font-weight: 400; }
+.agents-inbox-line {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-inbox-ack {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+.agents-inbox-ack:hover { color: var(--timer-open); border-color: var(--timer-open); }
+
 /* Agent detail — collapsible panel carets (Settings, Matching/Assigned cards). */
 .agents-collapse-caret {
   background: transparent; border: none; color: var(--text-secondary);

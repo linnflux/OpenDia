@@ -21,6 +21,129 @@ const QUEUE_STATUS_LABEL = {
   approved: "approved",
 };
 
+// The operator's end of the pipeline: what got done and what was escalated,
+// as a dismissible inbox. Rows derive from the supervisor's verdict ledger;
+// the ✓ acknowledges an item so the list only ever shows what the operator
+// hasn't dealt with.
+function OperatorInbox({ onOpenProject }) {
+  const [items, setItems] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  const fetchInbox = useCallback(() => {
+    fetch("/api/agents/operator-inbox")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => setItems(d.items || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchInbox();
+    const t = setInterval(fetchInbox, 15000);
+    return () => clearInterval(t);
+  }, [fetchInbox]);
+
+  async function ack(keys) {
+    setItems((prev) => (prev || []).filter((i) => !keys.includes(i.key)));
+    try {
+      await fetch("/api/agents/operator-inbox/ack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keys }),
+      });
+    } catch {
+      fetchInbox();
+    }
+  }
+
+  if (items === null) return null;
+  const needs = items.filter((i) => i.kind === "escalated");
+  const done = items.filter((i) => i.kind === "done");
+
+  const row = (i) => {
+    const open = expanded === i.key;
+    return (
+      <li key={i.key} className={`agents-queue-row status-${i.kind}`}>
+        <div
+          className="agents-queue-rowhead"
+          role="button"
+          tabIndex={0}
+          onClick={() => setExpanded(open ? null : i.key)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(open ? null : i.key); } }}
+        >
+          <span className="agents-queue-when">{fmtQueueTime(i.at)}</span>
+          <button
+            className="agents-queue-cardlink"
+            onClick={(e) => { e.stopPropagation(); onOpenProject?.(i.project_id); }}
+          >
+            #{i.project_id} {i.name}
+          </button>
+          {i.certitude != null && <span className="agents-run-certitude">{i.certitude}%</span>}
+          {i.kind === "done" && i.report_line && (
+            <span className="agents-inbox-line">{i.report_line}</span>
+          )}
+          {i.kind === "escalated" && i.reason && (
+            <span className="agents-inbox-line">{i.reason}</span>
+          )}
+          {i.shadow && <span className="agents-queue-status">shadow</span>}
+          <button
+            className="agents-inbox-ack"
+            title="Dismiss — I've dealt with this"
+            onClick={(e) => { e.stopPropagation(); ack([i.key]); }}
+          >
+            ✓
+          </button>
+        </div>
+        {open && (
+          <div className="agents-queue-detail">
+            {i.note && <div className="agents-run-note">{i.note}</div>}
+            {i.kind === "escalated" && i.wouldApprove && (
+              <div className="agents-queue-meta">Carlos would have approved this on autopilot.</div>
+            )}
+            {i.kind === "done" && (
+              <div className="agents-queue-meta">
+                {[i.reason, i.outcome_summary, i.redispatched ? "redispatched once for a fix" : null]
+                  .filter(Boolean).join(" · ")}
+              </div>
+            )}
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  const group = (label, cls, list) => (
+    <>
+      <div className={`agents-inbox-group ${cls}`}>
+        {label} ({list.length})
+        <button className="agents-queue-toggle agents-inbox-clear" onClick={() => ack(list.map((i) => i.key))}>
+          Clear all
+        </button>
+      </div>
+      <ul className="agents-queue-list">{list.map(row)}</ul>
+    </>
+  );
+
+  return (
+    <section className="agents-panel agents-queue agents-inbox">
+      <div className="agents-queue-head">
+        <h3 className="agents-queue-title">Operator inbox</h3>
+        <span className="agents-queue-sub">
+          {needs.length > 0 ? `${needs.length} need${needs.length === 1 ? "s" : ""} you` : "all caught up"}
+          {done.length > 0 && ` · ${done.length} done`}
+        </span>
+      </div>
+      {needs.length === 0 && done.length === 0 ? (
+        <div className="agents-queue-empty">All clear — done and escalated items land here.</div>
+      ) : (
+        <>
+          {needs.length > 0 && group("Needs your input", "esc", needs)}
+          {done.length > 0 && group("Done", "ok", done)}
+        </>
+      )}
+    </section>
+  );
+}
+
 // The pile the scanners file for the supervisor. There is no queue table —
 // an agent-filed spark run sitting in "proposing" IS the queue item, and the
 // server overlays the supervisor's recent verdicts on top. Pending rows
@@ -337,6 +460,7 @@ export default function Agents({ projects, onOpenProject }) {
         </div>
       )}
 
+      <OperatorInbox onOpenProject={onOpenProject} />
       <SupervisorQueue onOpenProject={onOpenProject} />
     </div>
   );

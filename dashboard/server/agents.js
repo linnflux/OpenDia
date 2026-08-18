@@ -27,6 +27,7 @@ import {
   getAgentProjects, assignAgentProject, unassignAgentProject,
   insertAgentRun, updateAgentRun, getAgentRuns, interruptStaleAgentRuns,
   getProjectById, getProjectsByStatuses, markAgentDigest, getAgentRunsSince,
+  getOperatorAckKeys, ackOperatorItems,
 } from "./db.js";
 import {
   startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT,
@@ -1079,7 +1080,10 @@ export function mountAgents(app) {
         try { detail = JSON.parse(run.detail || "null"); } catch {}
         if (!detail) continue;
         const shadowFor = new Map((detail.reviewed_runs || []).map((r) => [r.project_id, !!r.shadow]));
-        for (const kind of ["approved", "escalated"]) {
+        // Escalated first: a QA-escalated item sits in BOTH arrays (the QA
+        // path never removes it from approved), and the escalation is the
+        // later, binding judgment — it must win the latestVerdict slot.
+        for (const kind of ["escalated", "approved"]) {
           for (const e of detail[kind] || []) {
             const row = { ...e, kind, at: run.started_at, shadow: shadowFor.get(e.project_id) ?? !supervisor.autopilot };
             processed.push(row);
@@ -1123,6 +1127,77 @@ export function mountAgents(app) {
       });
     } catch (err) {
       console.error("GET /api/agents/review-queue error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The operator's terminus of the pipeline: what got DONE and what was
+  // ESCALATED, as a dismissible inbox. Derived from the same verdict ledger
+  // the review-queue reads (7-day window) — the only persisted state is the
+  // acknowledgments, so this view and the supervisor's can never disagree.
+  // "Done" is defined here, deliberately: an approved entry whose project is
+  // NOT also in that pass's escalated[] — QA escalations live in both arrays
+  // and an item that failed QA is not done.
+  app.get("/api/agents/operator-inbox", requireAdmin, (req, res) => {
+    try {
+      const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
+      if (!supervisor) return res.json({ items: [] });
+      const since = new Date(Date.now() - 7 * 24 * 3600 * 1000)
+        .toISOString().slice(0, 19).replace("T", " ");
+      const runs = getAgentRunsSince(supervisor.id, since)
+        .filter((r) => r.trigger === "review")
+        .sort((a, b) => (b.started_at || "").localeCompare(a.started_at || ""));
+      const items = [];
+      for (const run of runs) {
+        let detail = null;
+        try { detail = JSON.parse(run.detail || "null"); } catch {}
+        if (!detail) continue;
+        const shadowFor = new Map((detail.reviewed_runs || []).map((r) => [r.project_id, !!r.shadow]));
+        const escalatedIds = new Set((detail.escalated || []).map((e) => e.project_id));
+        for (const e of detail.escalated || []) {
+          items.push({
+            key: `${run.id}:${e.project_id}:esc`,
+            kind: "escalated", at: run.started_at,
+            project_id: e.project_id, name: e.name,
+            certitude: e.certitude ?? null, reason: e.reason || null,
+            note: e.note || null, wouldApprove: !!e.wouldApprove,
+            shadow: shadowFor.get(e.project_id) ?? !supervisor.autopilot,
+          });
+        }
+        for (const a of detail.approved || []) {
+          if (escalatedIds.has(a.project_id)) continue;
+          items.push({
+            key: `${run.id}:${a.project_id}:ok`,
+            kind: "done", at: run.started_at,
+            project_id: a.project_id, name: a.name,
+            certitude: a.certitude ?? null, reason: a.reason || null,
+            report_line: a.report_line || null,
+            outcome_summary: a.outcome?.summary || a.outcome?.status || null,
+            redispatched: !!a.redispatched,
+            shadow: shadowFor.get(a.project_id) ?? !supervisor.autopilot,
+          });
+        }
+      }
+      const acked = new Set(getOperatorAckKeys());
+      const showAll = req.query.all === "1";
+      const out = items
+        .filter((i) => showAll || !acked.has(i.key))
+        .map((i) => (showAll ? { ...i, acked: acked.has(i.key) } : i))
+        .slice(0, 100);
+      res.json({ items: out });
+    } catch (err) {
+      console.error("GET /api/agents/operator-inbox error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/agents/operator-inbox/ack", requireAdmin, (req, res) => {
+    const keys = Array.isArray(req.body?.keys) ? req.body.keys : [];
+    if (!keys.length) return res.status(400).json({ error: "keys required" });
+    try {
+      res.json({ acked: ackOperatorItems(keys.slice(0, 200)) });
+    } catch (err) {
+      console.error("POST /api/agents/operator-inbox/ack error:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

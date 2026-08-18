@@ -665,6 +665,14 @@ export function ensureAgentsTables() {
       detail      TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, started_at DESC);
+    -- 2026-08-18: operator inbox acknowledgments. The inbox itself is
+    -- DERIVED from the supervisor's agent_runs verdict ledger; the only
+    -- state worth persisting is which items the operator has dismissed.
+    -- key = "<agent_run_id>:<project_id>:<esc|ok>".
+    CREATE TABLE IF NOT EXISTS operator_acks (
+      key      TEXT PRIMARY KEY,
+      acked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
   // Migrate: query rosters + chat modes (added after the original agents schema).
   const cols = db.pragma("table_info(agents)").map((r) => r.name);
@@ -809,6 +817,17 @@ export function getAgentRunsSince(agentId, sinceUtc) {
     WHERE agent_id = ? AND finished_at IS NOT NULL AND finished_at > COALESCE(?, '')
     ORDER BY started_at ASC
   `).all(agentId, sinceUtc);
+}
+
+export function getOperatorAckKeys() {
+  return getDb().prepare("SELECT key FROM operator_acks").all().map((r) => r.key);
+}
+
+export function ackOperatorItems(keys) {
+  const stmt = getDb().prepare("INSERT OR IGNORE INTO operator_acks (key) VALUES (?)");
+  let n = 0;
+  for (const k of keys) n += stmt.run(String(k)).changes;
+  return n;
 }
 
 export function assignAgentProject(agentId, projectId) {
