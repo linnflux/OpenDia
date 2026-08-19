@@ -7327,6 +7327,31 @@ html.vt-no-target::view-transition-old(card-morph) {
 .mailroom-roundup-body pre.runroom-danger { border-color: var(--danger); }
 .mailroom-roundup-body code { font-family: var(--font-mono); }
 
+/* The session's recommended reply — a copyable card, same visual weight as
+   the roundup body it sits under. Not an outgoing-email panel (no draft
+   exists in Gmail yet in this phase): just the text, ready to paste. */
+.mailroom-draft {
+  position: relative; margin-top: 0.9rem;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  background: var(--bg-recessed); padding: 0.9rem 1rem 1.1rem;
+}
+.mailroom-draft-label {
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-faint); margin-bottom: 0.5rem;
+}
+.mailroom-draft-body {
+  margin: 0; white-space: pre-wrap; font-family: var(--font-sans);
+  font-size: 0.9rem; line-height: 1.55; color: var(--text-primary);
+}
+.mailroom-draft-copy {
+  position: absolute; top: 0.7rem; right: 0.8rem;
+  background: var(--badge-bg); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius-xs);
+  font-size: 0.7rem; padding: 0.15rem 0.55rem; cursor: pointer; font-family: inherit;
+}
+.mailroom-draft-copy:hover { color: var(--text-primary); border-color: var(--border-hover); }
+.mailroom-draft-copy.copied { color: #22c55e; border-color: #22c55e; }
+
 .mailroom-suggestions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
 .mailroom-suggestion {
   border: 1px solid var(--border); border-radius: var(--radius-pill);

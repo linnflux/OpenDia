@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { marked } from "marked";
 import {
-  DialogCard, Composer, ThinkingStrip, decorateMarkdown, primeAudio, playDoneChime,
+  DialogCard, Composer, ThinkingStrip, decorateMarkdown, primeAudio, playDoneChime, copyText,
 } from "./runroom/shared.jsx";
 
 // Mailroom — Phase 2 (the view), phases A+B+C: browse the primary inbox
@@ -103,6 +103,32 @@ function FactsStrip({ context, onOpenProject }) {
       {last && (
         <span className="mailroom-facts-recent">last touched {last.date} — {last.task}</span>
       )}
+    </div>
+  );
+}
+
+// The session's recommended reply, as a plain string in this phase (not yet
+// a real Gmail draft — see the skill's "Converse-only" rule). Nick copies it
+// and sends from Gmail himself; no To:/Subject synthesis here, since he's
+// already looking at the thread this sits below and a wrongly-derived
+// recipient on a multi-party thread would be actively misleading.
+function ProposedDraft({ text }) {
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    if (copyText(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }
+
+  return (
+    <div className="mailroom-draft">
+      <div className="mailroom-draft-label">Proposed reply</div>
+      <pre className="mailroom-draft-body">{text}</pre>
+      <button className={`mailroom-draft-copy${copied ? " copied" : ""}`} onClick={copy}>
+        {copied ? "copied" : "copy"}
+      </button>
     </div>
   );
 }
@@ -367,6 +393,9 @@ export default function Mailroom({ me, onOpenProject }) {
               )}
               {mailState?.roundup_md && (
                 <div className="mailroom-roundup-body" ref={roundupRef} dangerouslySetInnerHTML={{ __html: roundupHtml }} />
+              )}
+              {typeof mailState?.proposed_draft === "string" && mailState.proposed_draft.trim() && (
+                <ProposedDraft text={mailState.proposed_draft} />
               )}
               {mailState?.suggestions?.length > 0 && (
                 <div className="mailroom-suggestions">
