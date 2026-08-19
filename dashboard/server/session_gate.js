@@ -151,7 +151,7 @@ function fullDialogContext(tmuxSession) {
   let pane;
   try {
     pane = execFileSync("tmux", ["capture-pane", "-t", tmuxSession, "-p", "-S", "-250"],
-                        { encoding: "utf8", timeout: 3000 });
+                        { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return null;
   }
@@ -213,13 +213,17 @@ export function sessionPlanFile(session, createdIso) {
   return best;
 }
 
+// stderr is dropped on every capture-pane here: a room whose session has died
+// is polled every few seconds for as long as it stays "active", and tmux's
+// "can't find pane" would otherwise land in the service log on each poll — the
+// catch already turns that case into a clean session-gone verdict.
 export function gateForSession(tmuxSession) {
   let pane;
   try {
     // -e keeps SGR escapes: classifyPane needs them to tell a dim ghost
     // suggestion from typed text in the input box.
     pane = execFileSync("tmux", ["capture-pane", "-t", tmuxSession, "-p", "-e"],
-                        { encoding: "utf8", timeout: 3000 });
+                        { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return { ok: false, reason: "session-gone" };
   }
@@ -262,7 +266,7 @@ export function captureLiveTail(tmuxSession) {
   try {
     pane = execFileSync("tmux",
       ["capture-pane", "-t", tmuxSession, "-p", "-e", "-S", String(-LIVE_SCROLLBACK)],
-      { encoding: "utf8", timeout: 3000 });
+      { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return null;
   }
