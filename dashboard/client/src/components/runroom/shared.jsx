@@ -300,7 +300,10 @@ export function LiveOutput({ live }) {
 }
 
 // endpoints.send / endpoints.image are the full POST URLs the caller built
-// (e.g. `/api/runrooms/${session}/send` or `/api/mailroom/send`).
+// (e.g. `/api/runrooms/${session}/send` or `/api/mailroom/send`). endpoints.
+// image is OPTIONAL — a caller with no image channel (the mailroom has none
+// yet) omits it, and the attach/paste/drop affordances quietly no-op rather
+// than posting to a route that doesn't exist.
 export function Composer({ gate, endpoints }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -311,9 +314,10 @@ export function Composer({ gate, endpoints }) {
   // wait patiently, not fail.
   const [attachment, setAttachment] = useState(null);
   const blocked = !gate?.ok;
+  const canAttach = !!endpoints.image;
 
   function attach(file) {
-    if (!file || !file.type.startsWith("image/")) return;
+    if (!canAttach || !file || !file.type.startsWith("image/")) return;
     setAttachment((prev) => {
       if (prev) URL.revokeObjectURL(prev.url);
       return { file, url: URL.createObjectURL(file) };
@@ -328,6 +332,7 @@ export function Composer({ gate, endpoints }) {
   }
 
   function onPaste(e) {
+    if (!canAttach) return; // no image channel here — let a plain paste stand
     const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
     if (!item) return; // plain text pastes stay ordinary
     e.preventDefault();
@@ -376,8 +381,9 @@ export function Composer({ gate, endpoints }) {
 
   return (
     <div className="runroom-composer-wrap"
-         onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) e.preventDefault(); }}
+         onDragOver={(e) => { if (canAttach && [...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) e.preventDefault(); }}
          onDrop={(e) => {
+           if (!canAttach) return;
            const f = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith("image/"));
            if (f) { e.preventDefault(); attach(f); }
          }}>
@@ -398,7 +404,9 @@ export function Composer({ gate, endpoints }) {
           disabled={blocked || sending}
           placeholder={blocked
             ? `sending paused — ${GATE_REASONS[gate?.reason] || gate?.reason || "unavailable"}`
-            : "message the session… (Enter to send · paste or drop an image)"}
+            : canAttach
+            ? "message the session… (Enter to send · paste or drop an image)"
+            : "message the session… (Enter to send)"}
           onChange={(e) => setText(e.target.value)}
           onPaste={onPaste}
           onKeyDown={(e) => {

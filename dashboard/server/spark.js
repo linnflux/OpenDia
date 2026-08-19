@@ -188,7 +188,10 @@ function pushLedger(run, kind, text) {
 // ── run history on disk ────────────────────────────────────────────────────
 
 /** Every run ever done on a card, newest first. Results are never pruned. */
-function runsOnDisk(projectId) {
+// Exported (additive — mountSpark remains the only in-file caller) so the
+// Mailroom's /context route can read a card's latest spark result without
+// duplicating the runs-on-disk lookup.
+export function runsOnDisk(projectId) {
   const dir = `${SPARK_ROOT}/${projectId}`;
   if (!existsSync(dir)) return [];
   const out = [];
@@ -258,7 +261,7 @@ function writeInterrupted(runDir, reason) {
   }
 }
 
-function readRunResult(entry) {
+export function readRunResult(entry) {
   try {
     const raw = JSON.parse(readFileSync(entry.file, "utf8"));
     // interrupted.json has its own shape and no recommendation to adapt.

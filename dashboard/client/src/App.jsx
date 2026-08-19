@@ -17,6 +17,7 @@ import Newsletter from "./components/Newsletter.jsx";
 import Rooms from "./components/Rooms.jsx";
 import Agents from "./components/Agents.jsx";
 import Runroom from "./components/Runroom.jsx";
+import Mailroom from "./components/Mailroom.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
 import { hasTag, toggleTag } from "./tags.js";
@@ -116,7 +117,7 @@ export default function App() {
     fetch("/api/me").then(r => r.ok ? r.json() : null).then(user => {
       setMe(user);
       // Snap non-admins off the billing view if they somehow land on it
-      if (user && !user.is_admin && (view === "billing" || view === "newsletter" || view === "rooms" || view === "agents")) setView("board");
+      if (user && !user.is_admin && (view === "billing" || view === "newsletter" || view === "rooms" || view === "agents" || view === "mailroom")) setView("board");
     }).catch(() => {});
   }, []);
 
@@ -693,6 +694,8 @@ export default function App() {
             <Agents projects={projects} onOpenProject={handleProjectClick} />
           ) : view === "runrooms" ? (
             <Runroom activeTimerIds={activeTimerIds} me={me} onOpenProject={handleProjectClick} />
+          ) : view === "mailroom" && me?.is_admin ? (
+            <Mailroom me={me} onOpenProject={handleProjectClick} />
           ) : (
             <Clients
               projects={projects}

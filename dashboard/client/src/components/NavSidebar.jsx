@@ -82,6 +82,13 @@ const NAV_ICONS = {
       <path d="M5.5 10.5h4" />
     </svg>
   ),
+  // An envelope: the inbox-browse view.
+  mailroom: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="3" width="12" height="9" rx="1.5" />
+      <path d="M2 4l5.5 4.5L13 4" />
+    </svg>
+  ),
 };
 
 export default function NavSidebar({

@@ -34,7 +34,10 @@ function slugify(name) {
     .slice(0, 24) || "card";
 }
 
-function sessionExists(name) {
+// Exported (additive — resolveFreeSession remains the only in-file caller)
+// so the Mailroom's fixed-name ensure-session route can check for the
+// standing `mailroom` session without reimplementing the tmux probe.
+export function sessionExists(name) {
   try {
     execFileSync("tmux", ["has-session", "-t", name], { stdio: "ignore" });
     return true;

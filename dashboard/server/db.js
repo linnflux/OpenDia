@@ -452,6 +452,17 @@ export function getInboxItemById(id) {
   return getDb().prepare("SELECT * FROM inbox_items WHERE id = ?").get(id);
 }
 
+// The Mailroom's first resolution step for /context: if a thread already
+// went through the inbox pipeline, its project match (if any) is already
+// known and nothing needs re-guessing from the sender address. Most recent
+// row wins on the rare thread with more than one inbox_items entry.
+export function getInboxItemByThreadId(threadId) {
+  ensureInboxTable();
+  return getDb().prepare(
+    "SELECT * FROM inbox_items WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1"
+  ).get(threadId);
+}
+
 export function getProcessedGmailIds() {
   ensureInboxTable();
   return new Set(
