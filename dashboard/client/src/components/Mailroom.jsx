@@ -159,7 +159,7 @@ function ProposedDraft({ text, onSentReport }) {
   );
 }
 
-export default function Mailroom({ me, onOpenProject }) {
+export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
   const [threads, setThreads] = useState(null); // null = loading
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(null); // full unhandled-inbox count
@@ -376,12 +376,13 @@ export default function Mailroom({ me, onOpenProject }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: s.id }),
     }).catch(() => {});
-    // "Spark the task": the gateway when a reply is blocked on task work.
-    // Open the card modal (SparkPanel lives inside it) alongside the normal
-    // delivery — the session records the acceptance in the state file, and
-    // the mailroom thread deliberately stays in the list until the work is
-    // done and Nick re-selects it for a fresh roundup.
-    if (s.kind === "spark" && s.card_id) onOpenProject?.(s.card_id);
+    // "Spark the task": the Mail → Plan edge of the loop — a reply is blocked
+    // on task work, so the thread hands off to the card's Planroom alongside
+    // the normal delivery. The session records the acceptance in the state
+    // file, and the mailroom thread deliberately stays in the list until the
+    // work is done and Nick re-selects it for a fresh roundup. Falls back to
+    // the card modal for a host that has no planroom navigation.
+    if (s.kind === "spark" && s.card_id) (onOpenPlanroom || onOpenProject)?.(s.card_id);
   }
 
   async function reportSentToSession() {

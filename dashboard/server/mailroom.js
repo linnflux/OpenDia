@@ -9,6 +9,7 @@ import {
 } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
 import { runsOnDisk, readRunResult } from "./spark.js";
+import { readPlanroom } from "./planroom_build.js";
 import {
   gateForSession, deliver, MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR, firstNameOf,
 } from "./session_gate.js";
@@ -222,6 +223,7 @@ export function registerMailroomRoutes(app) {
 
     let recentTime = [];
     let spark = null;
+    let planroom = null;
     if (project) {
       const fresh = getProjectById(project.id);
       if (fresh) project = fresh;
@@ -232,6 +234,24 @@ export function registerMailroomRoutes(app) {
       if (entry) {
         const r = readRunResult(entry);
         if (r) spark = { where_it_stands: r.where_it_stands, next_step: r.next_step, certitude: r.certitude };
+      }
+      // The standing plan, if any — the Mail → Plan edge needs to know whether
+      // the card already HAS a plan (and whether a room is working it) before
+      // offering to spark one. `spark` above stays exactly as it was; this is
+      // an additive key.
+      const plan = readPlanroom(project.id);
+      if (plan) {
+        const open = plan.current_step != null ? (plan.steps || []).find((st) => st.n === plan.current_step) : null;
+        planroom = {
+          status: plan.status,
+          sparked_at: plan.planroom?.sparked_at || plan.created,
+          sparked_by: plan.planroom?.sparked_by || "",
+          certitude: plan.planroom?.certitude?.pct ?? null,
+          route: plan.planroom?.route || null,
+          open_step: open ? open.title : null,
+          adopted_by: plan.adopted_by?.tmux_session || null,
+          url: `/?planroom=${project.id}`,
+        };
       }
     }
 
@@ -247,6 +267,7 @@ export function registerMailroomRoutes(app) {
       })),
       recent_time: recentTime,
       spark,
+      planroom,
     });
   });
 

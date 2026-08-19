@@ -716,7 +716,11 @@ export default function App() {
           ) : view === "runrooms" ? (
             <Runroom activeTimerIds={activeTimerIds} me={me} onOpenProject={handleProjectClick} initialSession={runroomSession} />
           ) : view === "mailroom" && me?.is_admin ? (
-            <Mailroom me={me} onOpenProject={handleProjectClick} />
+            <Mailroom
+              me={me}
+              onOpenProject={handleProjectClick}
+              onOpenPlanroom={(cardId) => { setPlanroomCard(cardId); setView("planrooms"); }}
+            />
           ) : (
             <Clients
               projects={projects}
