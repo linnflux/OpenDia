@@ -46,7 +46,10 @@ import {
   etNow, durationStr, minutesBetween, listRunningTimers,
   findTimerForSession, startTimerForProject, closeTimerEntry, setEntryEstimate
 } from "./timerfile.js";
-import { resolveFreeSession, writeSeedPlan, spawnSession, relocatePlan } from "./runroom_build.js";
+import { resolveFreeSession, spawnSession, relocatePlan } from "./runroom_build.js";
+import {
+  readPlanroom, writePlanroomFromRun, adoptIntoRunroom, markPlanroomAdopted, markStepDone,
+} from "./planroom_build.js";
 
 const HOME = process.env.HOME || "/home/linnflux";
 const CLAUDE_BIN = resolve(HOME, ".local", "bin", "claude");
@@ -137,7 +140,7 @@ function freshFronts() {
   return Object.fromEntries(FRONTS.map((f) => [f, { state: "pending", detail: null }]));
 }
 
-function publicRun(run) {
+export function publicRun(run) {
   if (!run) return null;
   return {
     id: run.id,
@@ -1124,6 +1127,10 @@ export async function startScan(project, startedBy, opts = {}) {
     }
     startSparkTimer(run, project);
     applyCardNextStep(run, project);
+    // The scan's whole output becomes the card's standing plan — the thing a
+    // runroom adopts. ODA sweeps come through here too, so every card an
+    // agent touches gets a planroom for free.
+    persistPlanroom(run, project);
     emit(run, "result", run.result);
     offerNextStep(run);
   });
@@ -1385,7 +1392,17 @@ function applyRoundResult(run, data) {
     };
     applyCardNextStep(run, run.project);
     persistResult(run);
+    persistPlanroom(run, run.project);
     emit(run, "result", run.result);
+  }
+}
+
+/** Best-effort, like persistResult: the plan on screen is already right. */
+function persistPlanroom(run, project) {
+  try {
+    writePlanroomFromRun(run, project);
+  } catch (err) {
+    console.error("spark: could not write the planroom:", err.message);
   }
 }
 
@@ -1427,18 +1444,40 @@ function stopProc(run) {
  * before spawning, and the brief has to land under that name rather than under
  * whatever the card happens to point at right now.
  */
-function writeHandoff(project, run, session = null) {
+function writeHandoff(project, run, session = null, { plan = null } = {}) {
   const dir = `${HOME}/OpenDia/handoffs`;
   mkdirSync(dir, { recursive: true });
   const slug = (session || project.tmux_session || `card-${project.id}`).replace(/[^\w.-]/g, "-");
   const file = `${dir}/${slug}.md`;
-  const r = run.result || {};
-  const step = r.next_step;
+  // A live run's report outranks the standing plan; with no run (the
+  // "adopt from the planroom" path) the plan's own snapshot is the report.
+  const r = run?.result || plan?.planroom || {};
+  const step = r.next_step || (plan?.planroom ? {
+    text: plan.title, why: null, first_action: plan.planroom.first_action,
+    estimated_minutes: plan.planroom.estimated_minutes,
+  } : null);
+  const outcomes = run?.outcomes || [];
+  const steps = plan?.steps || [];
   const lines = [
     `# ${project.name} — Spark handoff`,
     ``,
     `Card #${project.id} · ${project.company_name || ""} · ${project.division || ""}`,
-    `Spark run ${run.id} · ${new Date().toISOString()}`,
+    run ? `Spark run ${run.id} · ${new Date().toISOString()}` : `Adopted from the planroom · ${new Date().toISOString()}`,
+    ``,
+    // dispatch_spawn.sh prompts the session with "start with the On start
+    // command". Without this section a Spark-opened session booted with no
+    // timer and no instruction to pick up the plan it was spawned for.
+    `## On start`,
+    ``,
+    `Run: /od-go ${project.id}`,
+    ``,
+    `Spark's own timer is already closed — that command opens this session's.`,
+    `Then read ~/OpenDia/runrooms/${slug}/plan.json. You are ADOPTING that plan,`,
+    `not seeding one: it came from the card's planroom, and the operator has`,
+    `already seen it. Set claude_session_id to your session id, keep`,
+    `adopted_from, and keep the steps — refine them in place (split, append,`,
+    `skip), never replace the set wholesale without marking each changed step`,
+    `"changed". Then work the plan file-before-prose, per the runroom contract.`,
     ``,
     `## Where things stand`,
     ``,
@@ -1447,39 +1486,37 @@ function writeHandoff(project, run, session = null) {
     ``,
     `## Next step`,
     ``,
-    step?.text || "(none recorded)",
+    step?.text || "(none recorded — the plan has no open step; decide what is next)",
     step?.why ? `\nWhy: ${step.why}` : "",
     step?.first_action ? `\nFirst action: \`${step.first_action}\`` : "",
     step?.estimated_minutes ? `\nEstimated: ${step.estimated_minutes} minutes` : "",
+    ``,
+    steps.length ? `## The plan as adopted\n` : "",
+    ...steps.map((st) => `${st.n}. [${st.state}] ${st.title}${st.actor === "human" ? " (hands-on)" : ""}`),
     ``,
     (r.recent || []).length ? `## Recent activity\n` : "",
     ...(r.recent || []).slice(0, 10).map((x) =>
       `- ${x.date || "undated"}${x.front ? ` · ${x.front}` : ""} — ${x.text}`),
     r.risk ? `\n## Risk\n\n${r.risk}` : "",
-    run.outcomes.length ? `\n## What Spark already did\n` : "",
-    ...run.outcomes.map((c) => `- [${c.status}] ${c.summary}${c.evidence ? ` (${c.evidence})` : ""}`),
+    outcomes.length ? `\n## What Spark already did\n` : "",
+    ...outcomes.map((c) => `- [${c.status}] ${c.summary}${c.evidence ? ` (${c.evidence})` : ""}`),
     // Archived v1 runs still carry their prose report; keep it rather than
     // dropping detail the sweep actually produced.
     r.body_md ? `\n## Full report\n\n${r.body_md}` : "",
-    // Without this section a spawned session works from its own plan while
-    // the room keeps displaying the seed step forever — the operator's window
-    // goes stale the moment real work starts. The contract makes the session
-    // the room's author, not just its subject.
     `\n## Runroom contract`,
     ``,
     `This session is bound to the runroom at ~/OpenDia/runrooms/${slug}/plan.json.`,
     `That file IS the operator's window into this work — file before prose:`,
     ``,
-    `1. The moment your plan is approved, rewrite plan.json FIRST: replace the`,
-    `   seeded step with your plan's real steps. Keep the existing top-level`,
-    `   fields (runroom_version, title, card_id, card_name, company, division,`,
-    `   tmux_session, created); steps are {n, title, actor: "opendia"|"human",`,
-    `   state: "current"|"pending"|"done"|"failed", detail, note}; set`,
-    `   current_step. (While in plan mode file writes are blocked — expected;`,
-    `   the rewrite happens at approval, before anything else.)`,
+    `1. The steps in it are the adopted plan, not a seed. Keep the existing`,
+    `   top-level fields (runroom_version, title, card_id, card_name, company,`,
+    `   division, tmux_session, created, adopted_from); steps are {n, title,`,
+    `   actor: "opendia"|"human", state: "current"|"pending"|"done"|"failed"|`,
+    `   "skipped"|"changed", detail, note}; keep current_step honest. (While`,
+    `   in plan mode file writes are blocked — expected; refine at approval.)`,
     `2. Update the file at every step transition — started, done (evidence in`,
     `   the note), failed — before narrating in the pane.`,
-    `3. When the work wraps (/od-stop), set status: "done".`,
+    `3. When the work wraps (/od-stop), set status: "completed".`,
     ``,
     `## Working with the operator`,
     ``,
@@ -1496,8 +1533,12 @@ function writeHandoff(project, run, session = null) {
 }
 
 /**
- * Hand the next step to a human: seed a runroom plan, open a session on it, and
- * get Spark's timer out of the way.
+ * Hand the plan to a human: a runroom ADOPTS the card's standing plan, a
+ * session opens on it, and Spark's timer gets out of the way.
+ *
+ * `run` may be null — the planroom's own "Open a runroom" works from the
+ * standing plan with nothing live, which is what makes "standing" mean
+ * something (come back tomorrow, open the room, no re-spark).
  *
  * The ordering here is the whole function. The /runroom contract says room work
  * bills to the timer the session already runs and never opens a second one — so
@@ -1510,31 +1551,50 @@ function writeHandoff(project, run, session = null) {
  * minutes are billed honestly, and retrying costs one click. The reverse failure
  * — two open timers on one card — is the mess /timer-merge exists to clean up.
  */
-async function openRunroom(project, run) {
-  const session = resolveFreeSession(project.tmux_session || project.name);
-  const brief = writeHandoff(project, run, session);
-  const plan = writeSeedPlan({ session, project, run });
-  pushLedger(run, "handoff", `Runroom seeded at ${plan}`);
-  pushLedger(run, "handoff", `Opening session "${session}" — this timer closes so the session owns the clock.`);
+export async function openRunroom(project, run) {
+  // The standing plan is the thing being adopted. A run recovered from before
+  // planrooms existed has none yet — write it now so the handoff is uniform.
+  let plan = readPlanroom(project.id);
+  if (!plan && run) {
+    persistPlanroom(run, project);
+    plan = readPlanroom(project.id);
+  }
+  if (!plan) {
+    const err = new Error("this card has no plan to adopt — spark it first");
+    err.status = 409;
+    throw err;
+  }
 
-  await wrapUp(run);
+  const session = resolveFreeSession(project.tmux_session || project.name);
+  const brief = writeHandoff(project, run, session, { plan });
+  const planFile = adoptIntoRunroom({ plan, session, project, runId: run?.id || null });
+  if (run) {
+    pushLedger(run, "handoff", `Runroom adopted the plan at ${planFile}`);
+    pushLedger(run, "handoff", `Opening session "${session}" — this timer closes so the session owns the clock.`);
+    await wrapUp(run);
+  }
 
   let final;
   try {
     final = spawnSession(session, brief);
   } catch (err) {
     throw new Error(
-      `the plan was written to ${plan} but the session did not start (${err.message}). ` +
+      `the plan was adopted at ${planFile} but the session did not start (${err.message}). ` +
       `Open it by hand with: tmux new-session -s ${session}`
     );
   }
 
-  let planFile = plan;
+  let livePlan = planFile;
   if (final !== session) {
-    // Something took the name between the check and the spawn.
+    // Something took the name between the check and the spawn. Move the plan,
+    // and make the planroom's pointer follow it.
     const moved = relocatePlan(session, final);
-    if (moved) planFile = moved;
-    else console.error(`spark: runroom plan for "${session}" is orphaned — the session spawned as "${final}"`);
+    if (moved) {
+      livePlan = moved;
+      markPlanroomAdopted(project.id, { session: final, planFile: moved });
+    } else {
+      console.error(`spark: runroom plan for "${session}" is orphaned — the session spawned as "${final}"`);
+    }
   }
 
   try {
@@ -1543,7 +1603,7 @@ async function openRunroom(project, run) {
     console.error("spark: could not point the card at the runroom session:", err.message);
   }
 
-  return { session: final, plan: planFile, brief };
+  return { session: final, plan: livePlan, brief };
 }
 
 // ── routes ─────────────────────────────────────────────────────────────────
@@ -1691,6 +1751,7 @@ export function mountSpark(app) {
       if (!step) return res.status(409).json({ error: "this run has no next step to mark done" });
       run.outcomes.push({
         status: "done",
+        by: "human",
         summary: `Operator reports the step done${note ? `: ${note}` : "."}`,
         evidence: note || "operator attestation",
         minutes: 0,
@@ -1698,6 +1759,11 @@ export function mountSpark(app) {
       });
       run.stepsRun += 1;
       pushLedger(run, "done", `Operator reports the step done${note ? ` — ${note}` : "."}`);
+      // The step is no longer open: clear it from the result so the plan's
+      // current step closes too, then repersist both.
+      if (run.result) run.result = { ...run.result, next_step: null };
+      persistResult(run);
+      persistPlanroom(run, project);
       await wrapUp(run);
       return res.json({ ok: true, started: false, done: true });
     }
@@ -1723,7 +1789,7 @@ export function mountSpark(app) {
         return res.json({ ok: true, started: false, ...room });
       } catch (err) {
         console.error("spark: runroom failed:", err.message);
-        return res.status(500).json({ error: `could not open the runroom: ${err.message}` });
+        return res.status(err.status || 500).json({ error: `could not open the runroom: ${err.message}` });
       }
     }
 
@@ -1818,6 +1884,8 @@ export function mountSpark(app) {
       updateProject(project.id, { next_step: done });
       fetch(`http://127.0.0.1:${PORT}/api/calendar/sync`, { method: "POST" }).catch(() => {});
     } catch {}
+    // The standing plan agrees: its open step is done, by a human.
+    try { markStepDone(project.id, { note, by: req.user?.login || "" }); } catch {}
     res.json({ ok: true, next_step: done });
   });
 

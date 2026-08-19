@@ -21,7 +21,7 @@ import {
 // runroom/shared.jsx — Mailroom.jsx binds to a different session over the
 // same modal-gate machinery and reuses them unchanged.
 
-function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
+export function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
   const wordmark = DIVISION_WORDMARKS[plan.division];
   const colors = DIVISION_COLORS[plan.division] || { bg: "#6b7280", text: "#fff" };
   const total = (plan.steps || []).length;
@@ -317,10 +317,14 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
   );
 }
 
-export default function Runroom({ activeTimerIds, me, onOpenProject }) {
+export default function Runroom({ activeTimerIds, me, onOpenProject, initialSession = null }) {
   const [rooms, setRooms] = useState(null); // null = loading
-  const [selected, setSelected] = useState(null);
-  const [autoOpened, setAutoOpened] = useState(false);
+  // A caller that just opened a room (the Spark/Planroom handoff) names it;
+  // otherwise the single-active-room heuristic below decides. Before this the
+  // session name SparkPanel passed was dropped and two active rooms landed the
+  // operator on the list.
+  const [selected, setSelected] = useState(initialSession);
+  const [autoOpened, setAutoOpened] = useState(!!initialSession);
 
   // Prime the audio context on the first real gesture anywhere in the view,
   // so the completion chime is allowed to sound later.

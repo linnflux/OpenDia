@@ -1,4 +1,12 @@
-# Spark — the next-step tab on a project card
+# Spark and the Planroom — the Plan stage of PlanRunMail
+
+OpenDia's working loop is **Plan → Run → Mail**, with mail arriving restarting
+it. A **Runroom** is a plan walked by a live session (Run). The **Mailroom** is
+where mail lands and turns back into plans (Mail). **Spark** is the verb that
+produces a plan, and the **Planroom** is where that plan stands: one per card,
+in the room layout, beside Runrooms in the nav. "Spark a planroom."
+
+## Spark — the next-step scan on a project card
 
 A card's **Details** tab shows stored fields, which are a snapshot rather than
 state, and its **Terminal** tab mirrors a tmux session. Neither answers the
@@ -98,19 +106,69 @@ Runs archived before schema 2 carry per-action tiers (`performed`/`handoff`, or
 integers `1`/`2`/`3` from before that). They are coerced on read — `performed`
 and `1` to `opendia`, everything else to `human` — so old reports still render.
 
-## Runrooms
+## The Planroom — one standing plan per card
 
-A `human` step is not a dead end. **Open a runroom** seeds a plan, opens a
-session on it, and gets out of the way:
+Every validated scan writes `~/OpenDia/planrooms/<cardId>/plan.json` — and
+rewrites it after every round — so the file always says what Spark believes
+right now. ODA sweeps call the same scan, so every card an agent touches gets a
+planroom for free (`sparked_by: "agent:<slug>"`).
+
+- **Own root, keyed by card.** Not under `~/OpenDia/spark/<card>/` — the ODA
+  "last scanned" signal is the mtime of everything there. Not under
+  `~/OpenDia/runrooms/` — that root means "one dir = one tmux session".
+- **Runroom-v1 schema plus an extension.** The room renderers draw it untouched;
+  `room_type: "planroom"` and a `planroom: {spark_run_id, sparked_at, sparked_by,
+  certitude, where_it_stands, recent[], risk, fronts[], route, …}` block carry
+  the report. `status` is `active` or `adopted`.
+- **A scan replaces the plan; rounds within a run accumulate.** `steps[]` is a
+  pure function of the run — each outcome a round produced, then the open next
+  step as `current`. Spark's claim is *what to do next, now*; a step from last
+  week's scan was not re-verified by this one. The previous plan is archived as
+  `plan-<created>.json`; history is `recent[]` plus the run archive.
+- **No session, no composer.** A room's entire read surface works from
+  `plan.json` alone; only buttons, composer and dialog need tmux. A planroom is
+  plan-only until handed to Run.
+- The **card-modal Spark tab is a doorway**: certitude, the open step, "Open
+  Planroom", "Spark now". All decisions happen in the Planroom. `?tab=spark`
+  still lands there; `?planroom=<id>` lands on the view directly.
+
+Routes (`dashboard/server/planrooms.js`, read-only like `runrooms.js`):
+`GET /api/planrooms` (the working set — live cards sparked within 7 days;
+`?all=1` for everything), `GET /api/planrooms/:cardId` (plan + live run +
+runroom read-through), `POST /api/planrooms/:cardId/adopt` (open a runroom
+from the standing plan with nothing live). The only writer is
+`planroom_build.js`, mirroring `runroom_build.js`.
+
+## Runrooms — a runroom adopts the plan
+
+A `human` step is not a dead end. **Open a runroom** — from a live spark or from
+the standing plan — makes a runroom **adopt** the card's plan, opens a session
+on it, and gets out of the way:
 
 1. Resolve a free tmux session name (the card's, or a slug of its name, with
    dispatch_spawn.sh's `-2, -3` collision convention).
-2. Write the handoff brief to `~/OpenDia/handoffs/<session>.md`.
-3. Write `~/OpenDia/runrooms/<session>/plan.json` with the step as step 1,
-   archiving any existing plan first.
-4. **Close the Spark timer**, committing its accrued minutes.
+2. Write the handoff brief to `~/OpenDia/handoffs/<session>.md` — including
+   the **`## On start`** section: `Run: /od-go <card>` then "read plan.json,
+   you are adopting it, not seeding it". (`dispatch_spawn.sh` prompts every
+   session with "start with the On start command"; before this the brief had
+   no such section and Spark-opened sessions booted with no timer and no
+   instruction.)
+3. **Copy** the planroom plan into `~/OpenDia/runrooms/<session>/plan.json`
+   with `tmux_session` set and `adopted_from: {planroom_card_id, spark_run_id,
+   at}`, archiving any existing plan first. Rewrite the planroom file as a
+   **pointer**: `status: "adopted"`, `adopted_by`. The runroom file is now the
+   only live document; the Planroom page **reads through** to its steps.
+4. **Close the Spark timer** (if the run had one), committing its accrued
+   minutes.
 5. Spawn the session via `scripts/dispatch_spawn.sh` (opusplan, plan mode).
 6. Point the card's `tmux_session` at it.
+
+Copy, not move — a move makes the card vanish from the Planroom list and leaves
+the next spark nothing to archive. Copy, not symlink — a symlink would let the
+next spark overwrite the *live* runroom plan through it. A rescan on an adopted
+card archives the pointer and writes a fresh plan, but **carries `adopted_by`
+forward while that runroom is still active** — an ODA scan must not sever the
+link to a room someone is working in.
 
 **Step 4 comes before step 5 and that ordering is the whole function.** The
 `/runroom` contract says room work bills to the timer the session already runs
@@ -271,7 +329,11 @@ and its timer notes keep the bullet for every step actually carried out.
 | `scripts/chat_helper.py` | read-only Google Chat client (headless) |
 | `scripts/spark_guard.py` | PreToolUse guard hook |
 | `dashboard/client/src/components/SparkPanel.jsx` | the pane |
-| `dashboard/server/runroom_build.js` | the only writer of a runroom plan |
+| `dashboard/server/planroom_build.js` | the only writer of a planroom; `adoptIntoRunroom` moves a plan into a room |
+| `dashboard/server/planrooms.js` | planroom routes (read-only + adopt) |
+| `dashboard/client/src/components/Planroom.jsx` | the Planroom view — runroom shell around the spark report |
+| `dashboard/client/src/components/SparkDoorway.jsx` | the card-modal tab, reduced to a doorway |
+| `dashboard/server/runroom_build.js` | session resolution + spawn; `writeSeedPlan` superseded by adoption |
 | `scripts/dispatch_spawn.sh` | spawns the tmux session a runroom binds to |
 | `dashboard/client/src/hooks/useSparkRun.js` | run state, owned by `CardModal` so it survives tab switches |
 | `~/.claude/commands/spark.md`, `spark-act.md` | the routines (outside this repo — they reference operator-private material) |

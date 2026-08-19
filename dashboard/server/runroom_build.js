@@ -85,9 +85,11 @@ function stepDetail(step, result) {
 }
 
 /**
- * Write the seed plan. One step, because Spark produces one step — the session
- * that adopts the room is expected to rewrite the steps array as the plan
- * develops, which the /runroom contract already requires of it.
+ * Write a one-step seed plan.
+ *
+ * SUPERSEDED by planroom_build.adoptIntoRunroom: a runroom now adopts the
+ * card's standing plan rather than receiving a seed. Kept exported for any
+ * caller outside spark.js; delete once nothing imports it.
  */
 export function writeSeedPlan({ session, project, run }) {
   const dir = `${RUNROOM_ROOT}/${session}`;

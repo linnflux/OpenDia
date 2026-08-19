@@ -32,6 +32,15 @@ const NAV_ICONS = {
     </svg>
   ),
   // A plan being walked: checklist lines with a position marker on the middle one.
+  planrooms: (
+    // A plan before it moves: the same list as a runroom, first item ticked.
+    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5.5 3h7.5M5.5 7h7.5M5.5 11h7.5" opacity="0.55" />
+      <path d="M1 3.2l1 1 1.6-1.8" />
+      <circle cx="1.8" cy="7" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="1.8" cy="11" r="0.8" fill="currentColor" stroke="none" />
+    </svg>
+  ),
   runrooms: (
     <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M5.5 3h7.5M5.5 7h7.5M5.5 11h7.5" opacity="0.55" />

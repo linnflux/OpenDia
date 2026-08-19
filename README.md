@@ -183,13 +183,17 @@ od-room close <id|all>
 
 Runs as a systemd user service (`opendia-rooms`), stdlib-only Python (Pillow optional, for thumbnails), registry persisted to a JSON file so rooms survive restarts. Served over HTTPS via `tailscale serve`, which terminates TLS with an auto-renewed ts.net certificate — the daemon never touches certs, and requests arriving through the proxy are recognized by their injected identity headers so they can't inherit local-process trust. See [`docs/rooms.md`](docs/rooms.md).
 
-## Spark — the Next-Step Tab
+## Spark and the Planroom — the Plan stage
 
 A project card's Details tab shows stored fields, which are a snapshot rather than state, and its Terminal tab mirrors a tmux session. Neither answers the question actually being asked when a card is reopened after three quiet weeks: **what changed, whose court is the ball in, and what happens next?**
 
 **Spark** is a third tab that answers it, and then makes it easy to act on. Press Go and it sweeps six fronts for that card — recent work sessions, the Notion task, email (including an `in:draft` check, because an unsent draft is a silent blocker), Google Voice relay texts, Google Chat, and whether the artifacts on disk actually moved. The report is four things in reading order: where the project stands, what has happened lately with dates, **one** next step, and **how certain it is**, rated 0-100 with a reason that has to name the specific unknown.
 
 One step, not a menu. An earlier version offered up to three tiered actions, which left you doing the deciding Spark was supposed to do. With a single recommendation there is nothing to rank, so the only open question is who carries it out — and that is one field on the step, not a tier on each action.
+
+OpenDia's working loop is **Plan → Run → Mail** — mail arriving restarts it — and Spark is the Plan half. Every scan writes the card's **Planroom**: one standing plan per card at `~/OpenDia/planrooms/<card>/plan.json`, in the same room layout as a Runroom, beside it in the nav. The card's Spark tab became a doorway into it. When a step needs a human, **Open a runroom** makes a Runroom *adopt* that plan — same document, copied in with provenance, the Planroom reading through to the live steps — rather than handing it a one-step seed. Spark is the verb; the Planroom is the noun it fills. "Spark a planroom."
+
+
 
 - **The recommendation lands on the card.** The scan writes its dated one-liner straight into the card's `next_step`, and again after every round. It used to sit in a JSON file unless someone clicked Apply at the bottom of a long scroll, which meant a report that named the right next step routinely failed to put it anywhere anyone would see it.
 - **Routed by who does it.** `"opendia"` gets a **Do it** button — card and Notion updates, drafting a reply, opening a Room, read-only diagnostics — carried out in the same session that did the sweep, so every finding is still in context. `"human"` gets **Open a runroom** instead: servers, live client systems, calendar, money, git, or anything needing a judgement call. Anything unrecognised is read as `"human"`, so the safe default is the one that requires no guessing. Nothing sends email: a drafted reply lands in Gmail as a draft and a human sends it from there.
@@ -487,7 +491,7 @@ Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk)
 | [`docs/session-reaper.md`](docs/session-reaper.md) | Idle session reclamation, protections, disaster recovery |
 | [`docs/mcp-daemons.md`](docs/mcp-daemons.md) | Shared MCP daemons: why stateless, the transport patch, OAuth without a TTY, cutover and rollback |
 | [`docs/rooms.md`](docs/rooms.md) | Standing file-exchange daemon, room lifecycle, security posture |
-| [`docs/spark.md`](docs/spark.md) | Next-step tab: front sweep, certitude rubric, step routing, runrooms and how they're enforced |
+| [`docs/spark.md`](docs/spark.md) | Spark + the Planroom: front sweep, certitude rubric, step routing, the standing plan a runroom adopts |
 
 Reference formats and config templates live in [`examples/`](examples/): a completed [time entry](examples/time-entry.md), a running [timer state file](examples/timer-state.json), and templates for [`.opendia.conf`](examples/opendia.conf.example) and [`.od-fallback.conf`](examples/od-fallback.conf.example).
 

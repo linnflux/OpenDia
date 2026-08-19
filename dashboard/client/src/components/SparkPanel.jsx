@@ -35,13 +35,13 @@ const IDLE_VERBS = [
 // from one number so the panel tells one story about how long a Spark takes.
 const SWEEP_MINUTES = 15;
 
-function certitudeColor(pct) {
+export function certitudeColor(pct) {
   if (pct >= 85) return "var(--timer-open)";
   if (pct >= 60) return "var(--pill-warn-color)";
   return "var(--danger, #ef4444)";
 }
 
-function certitudeBand(pct) {
+export function certitudeBand(pct) {
   if (pct >= 85) return "Clear";
   if (pct >= 60) return "Likely";
   return "Toss-up";
@@ -90,7 +90,7 @@ function SparkFronts({ fronts, order }) {
   );
 }
 
-function SparkThinking({ verb }) {
+export function SparkThinking({ verb }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => setTick((t) => t + 1), 2800);
@@ -385,7 +385,14 @@ function SparkHistory({ spark, open, onToggle }) {
   );
 }
 
-export default function SparkPanel({ spark, project, showToast, onGoToTerminal, onGoToRunroom, isAdmin }) {
+// `standing` is the card's planroom block (the last scan, persisted) — when the
+// panel sits idle it renders THAT report instead of an explainer, with the
+// buttons that act on a standing plan. `onAdopt` opens a runroom from it with
+// nothing live; `onRefresh` lets the host re-fetch the plan after an action.
+export default function SparkPanel({
+  spark, project, showToast, onGoToTerminal, onGoToRunroom, isAdmin,
+  standing = null, onAdopt = null, onRefresh = null,
+}) {
   const [now, setNow] = useState(Date.now());
   const [historyOpen, setHistoryOpen] = useState(false);
   const running = spark.status === "scanning" || spark.status === "acting";
@@ -425,6 +432,7 @@ export default function SparkPanel({ spark, project, showToast, onGoToTerminal, 
       if (!r.ok) return showToast(d?.error || `HTTP ${r.status}`);
       showToast("Recorded — the card now carries the Done note.");
       spark.loadHistory();
+      onRefresh?.();
     } catch (e) {
       showToast(e.message);
     }
@@ -450,6 +458,86 @@ export default function SparkPanel({ spark, project, showToast, onGoToTerminal, 
   // ── idle ────────────────────────────────────────────────────────────────
   if (spark.loading) {
     return <div className="spark-panel"><div className="spark-stage spark-idle">Loading…</div></div>;
+  }
+
+  if (spark.status === "idle" && standing?.certitude) {
+    // The standing plan IS the report: certitude, where it stands, recent,
+    // and the open step — the same read as a live result, minus the decision
+    // row, plus the three things one does with a plan that is just sitting
+    // there: refresh it, hand it to a room, or say it already got done.
+    const pct = standing.certitude?.pct ?? 0;
+    const hasStep = !!standing.step?.text;
+    return (
+      <div className="spark-panel">
+        <div className="spark-stage spark-result">
+          <SparkCertitude certitude={standing.certitude} />
+          {standing.where_it_stands && <p className="spark-stands">{standing.where_it_stands}</p>}
+          {standing.risk && (
+            <div className="spark-risk"><span className="spark-risk-label">Risk</span><span>{standing.risk}</span></div>
+          )}
+          <SparkRecent recent={standing.recent} />
+          <div className="spark-decision is-standing">
+            <div className="spark-section-label">
+              {hasStep ? "Next step" : "No open step"}
+              {standing.owner && <span className="spark-decision-owner">{standing.owner}</span>}
+              {standing.by_when && <span className="spark-decision-when">by {standing.by_when}</span>}
+              {standing.sparked_at && (
+                <span className="spark-decision-when">sparked {fmtDay(standing.sparked_at.slice(0, 10))}{standing.sparked_by ? ` · ${standing.sparked_by.replace(/^agent:/, "")}` : ""}</span>
+              )}
+            </div>
+            {hasStep ? (
+              <>
+                <p className="spark-decision-text">{standing.step.text}</p>
+                {standing.step.why && <p className="spark-decision-why">{standing.step.why}</p>}
+                <p className="spark-decision-cert" style={{ color: certitudeColor(pct) }}>
+                  {pct}% certain
+                  {standing.certitude?.reason && <span className="spark-decision-cert-reason"> — {standing.certitude.reason}</span>}
+                </p>
+                {standing.first_action && (
+                  <button className="spark-decision-action"
+                          onClick={() => { navigator.clipboard?.writeText(standing.first_action); showToast("Copied"); }}
+                          title="Copy">
+                    {standing.first_action}
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="spark-decision-why">{standing.note || "The ball is in someone else's court — spark again when something moves."}</p>
+            )}
+            <div className="spark-decision-buttons">
+              <button className="spark-btn spark-btn-primary" onClick={handleGo} disabled={spark.busy || !isAdmin}
+                      title={isAdmin ? "Refresh the plan with a new scan" : "Spark runs are admin-only"}>
+                {spark.busy ? "Starting…" : "Spark"}
+              </button>
+              {hasStep && onAdopt && (
+                <button className="spark-btn" onClick={onAdopt} disabled={spark.busy || !isAdmin}
+                        title="Opens a working session that adopts this plan as-is">
+                  Open a runroom
+                </button>
+              )}
+              {hasStep && (
+                <button className="spark-btn spark-btn-quiet" onClick={attestDone} disabled={spark.busy || !isAdmin}
+                        title="You already did this step yourself — record it">
+                  I did this
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="spark-footer">
+            <div className="spark-chips">
+              <span className="spark-chip">
+                {(standing.fronts || []).filter((f) => f.state === "checked" || f.state === "done").length} of {spark.frontOrder.length} fronts
+              </span>
+              {standing.route && <span className="spark-chip">{standing.route}</span>}
+            </div>
+            <div className="spark-actions-row">
+              <button className="spark-btn" onClick={() => setHistoryOpen((v) => !v)}>History</button>
+            </div>
+          </div>
+          {historyOpen && <SparkHistory spark={spark} open onToggle={() => setHistoryOpen(false)} />}
+        </div>
+      </div>
+    );
   }
 
   if (spark.status === "idle") {

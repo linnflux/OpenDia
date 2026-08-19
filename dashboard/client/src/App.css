@@ -7415,3 +7415,81 @@ html.vt-no-target::view-transition-old(card-morph) {
   .mailroom-room { flex-direction: column; height: auto; }
   .mailroom-nav { flex-basis: auto; max-height: 320px; }
 }
+
+/* ── Planrooms ─────────────────────────────────────────────────────────────
+   The Plan stage: a runroom's shell (header, rail, main) holding the spark
+   report. Everything structural reuses runroom-* and spark-* rules; only the
+   planroom-specific furniture lives here. */
+
+.planroom-rail-empty {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+/* An adopted plan reads through to its runroom — say so above the report. */
+.planroom-adopted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  background: var(--bg-recessed);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+.planroom-adopted code { font-family: var(--font-mono); font-size: 0.78rem; }
+
+.planroom-list-pct {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 0.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.planroom-all-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-faint);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.planroom-all-toggle:hover { color: var(--text-secondary); }
+
+/* The standing-plan report in SparkPanel — same box as a decision, calmer. */
+.spark-decision.is-standing { border-color: var(--border-subtle); }
+
+/* ── the doorway tab in the card modal ── */
+.spark-doorway { gap: 1rem; align-items: stretch; }
+.spark-doorway-live { font-size: 0.84rem; color: var(--text-muted); }
+.spark-doorway-waiting { color: var(--pill-warn-color); font-weight: 600; }
+.spark-doorway-summary {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.9rem 1.05rem;
+  background: var(--next-step-modal-bg);
+  border: 1px solid var(--next-step-modal-border);
+  border-radius: var(--radius-md);
+}
+.spark-doorway-pct {
+  font-size: 1.6rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.spark-doorway-step { min-width: 0; }
+.spark-doorway-step p {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--next-step-modal-color);
+}
+.spark-doorway-meta { display: flex; gap: 0.4rem; flex-wrap: wrap; }

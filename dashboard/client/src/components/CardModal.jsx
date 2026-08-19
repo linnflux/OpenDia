@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { marked } from "marked";
 import TerminalPanel from "./TerminalPanel.jsx";
-import SparkPanel from "./SparkPanel.jsx";
+import SparkDoorway from "./SparkDoorway.jsx";
 import useSparkRun from "../hooks/useSparkRun.js";
 import { TAGS, hasTag, toggleTag } from "../tags.js";
 import { DIVISION_COLORS, DIVISION_LOGOS, STATUS_OPTIONS as STATUSES } from "../constants.js";
@@ -77,7 +77,7 @@ const INBOX_STATUS_DOT = {
   dismissed: "#475569",
 };
 
-export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab, onGoToRunroom }) {
+export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab, onGoToRunroom, onGoToPlanroom }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
@@ -97,7 +97,7 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
   const [notionTitle, setNotionTitle] = useState(null);
   const [divisionOpen, setDivisionOpen] = useState(false);
   const [tab, setTab] = useState(initialTab || "details");
-  // Owned here, not in SparkPanel: panels unmount on every tab switch, and a
+  // Owned here, not in the doorway: panels unmount on every tab switch, and a
   // run has to survive a glance at Details.
   const spark = useSparkRun(project.id);
   const backdropRef = useRef(null);
@@ -500,13 +500,12 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
         {tab === "terminal" && <TerminalPanel project={project} hasActiveTimer={hasActiveTimer} />}
 
         {tab === "spark" && (
-          <SparkPanel
+          <SparkDoorway
             spark={spark}
             project={project}
             showToast={showToast}
-            onGoToTerminal={() => setTab("terminal")}
-            onGoToRunroom={onGoToRunroom}
             isAdmin={isAdmin}
+            onOpenPlanroom={onGoToPlanroom}
           />
         )}
 

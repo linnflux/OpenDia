@@ -17,6 +17,7 @@ import Newsletter from "./components/Newsletter.jsx";
 import Rooms from "./components/Rooms.jsx";
 import Agents from "./components/Agents.jsx";
 import Runroom from "./components/Runroom.jsx";
+import Planroom from "./components/Planroom.jsx";
 import Mailroom from "./components/Mailroom.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
@@ -53,6 +54,10 @@ export default function App() {
   // Tab the next CardModal opens on — set only by the ?tab= deep link,
   // cleared on close so manual opens default to details.
   const [deepLinkTab, setDeepLinkTab] = useState(null);
+  // Which room a view should open on arrival. Set by the handoffs (Spark →
+  // runroom, doorway → planroom) and the ?planroom= deep link.
+  const [planroomCard, setPlanroomCard] = useState(null);
+  const [runroomSession, setRunroomSession] = useState(null);
   const [selectedInboxItem, setSelectedInboxItem] = useState(null);
   const [pendingClientKey, setPendingClientKey] = useState(null);
   // One of the NAV_ITEMS keys. "tara" used to live here too; it is a filter on
@@ -177,15 +182,22 @@ export default function App() {
   useEffect(() => {
     if (projects.length === 0) return;
     const params = new URLSearchParams(window.location.search);
+    // ?planroom=<id> lands straight on that card's planroom view.
+    const prid = parseInt(params.get("planroom"), 10);
+    if (prid && projects.some((p) => p.id === prid)) {
+      setPlanroomCard(prid);
+      setView("planrooms");
+    }
     const pid = parseInt(params.get("project"), 10);
-    if (!pid) return;
+    if (!pid && !prid) return;
     const tab = params.get("tab");
-    if (projects.some((p) => p.id === pid)) {
+    if (pid && projects.some((p) => p.id === pid)) {
       if (tab) setDeepLinkTab(tab);
       openCardById(pid);
     }
     params.delete("project");
     params.delete("tab");
+    params.delete("planroom");
     const qs = params.toString();
     window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
   }, [projects]);
@@ -692,8 +704,17 @@ export default function App() {
             <Rooms />
           ) : view === "agents" && me?.is_admin ? (
             <Agents projects={projects} onOpenProject={handleProjectClick} />
+          ) : view === "planrooms" ? (
+            <Planroom
+              activeTimerIds={activeTimerIds}
+              me={me}
+              onOpenProject={handleProjectClick}
+              initialCardId={planroomCard}
+              showToast={(t) => { setStatusToast(t); setTimeout(() => setStatusToast(null), 3500); }}
+              onGoToRunroom={(session) => { setRunroomSession(session || null); setView("runrooms"); }}
+            />
           ) : view === "runrooms" ? (
-            <Runroom activeTimerIds={activeTimerIds} me={me} onOpenProject={handleProjectClick} />
+            <Runroom activeTimerIds={activeTimerIds} me={me} onOpenProject={handleProjectClick} initialSession={runroomSession} />
           ) : view === "mailroom" && me?.is_admin ? (
             <Mailroom me={me} onOpenProject={handleProjectClick} />
           ) : (
@@ -730,7 +751,8 @@ export default function App() {
           // Spark opens a runroom in a tmux session; the room itself is a
           // top-level view, so the card gets out of the way rather than
           // stacking a second surface on top of it.
-          onGoToRunroom={() => { handleModalClose(); setView("runrooms"); }}
+          onGoToRunroom={(session) => { handleModalClose(); setRunroomSession(session || null); setView("runrooms"); }}
+          onGoToPlanroom={(cardId) => { handleModalClose(); setPlanroomCard(cardId); setView("planrooms"); }}
         />
       )}
       {selectedInboxItem && (

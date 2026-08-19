@@ -6,6 +6,7 @@ import { PORT, BILLING_MASTER_SHEET_ID, confValue } from "./config.js";
 import { mountTerminal } from "./terminal.js";
 import { mountSpark } from "./spark.js";
 import { registerRunroomRoutes } from "./runrooms.js";
+import { registerPlanroomRoutes } from "./planrooms.js";
 import { registerMailroomRoutes } from "./mailroom.js";
 import { mountAgents } from "./agents.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
@@ -1289,6 +1290,8 @@ mountSpark(app);
 
 // Runrooms: read-only view over ~/OpenDia/runrooms/*/plan.json
 registerRunroomRoutes(app);
+// Planrooms: the standing plan per card that a runroom adopts (also before the catch-all)
+registerPlanroomRoutes(app);
 
 // Mailroom: browse inbox + standing-session conversation (admin)
 registerMailroomRoutes(app);
