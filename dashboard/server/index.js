@@ -251,7 +251,10 @@ app.patch("/api/projects/:id", (req, res) => {
       pushNotionStatus(getProjectById(id), fields.status);
     }
 
-    res.json({ ok: true });
+    // Echo the fresh row: getProjectById re-reads SQLite, so this is a true
+    // read-after-write — the Mailroom card gate compares it to the intended
+    // value. Existing callers ignore the body; non-breaking.
+    res.json({ ok: true, project: getProjectById(id) });
   } catch (err) {
     console.error("PATCH /api/projects/:id error:", err.message);
     res.status(400).json({ error: err.message });

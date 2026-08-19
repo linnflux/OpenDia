@@ -518,6 +518,12 @@ function insertAtTopOfColumn(db, status, projectId) {
 }
 
 export function moveProjectToTop(projectId, newStatus) {
+  // Same guard as updateProject/createProject — without it a bad status is
+  // silently written and the card vanishes from every column (found while
+  // building the Mailroom card gate, which relies on invalid status = 400).
+  if (!VALID_STATUSES.has(newStatus)) {
+    throw new Error(`Invalid status: ${newStatus}`);
+  }
   const db = getDb();
   db.transaction(() => {
     insertAtTopOfColumn(db, newStatus, projectId);
