@@ -7221,7 +7221,16 @@ html.vt-no-target::view-transition-old(card-morph) {
   background: var(--bg-surface); overflow: hidden;
 }
 .mailroom-room.has-selection .mailroom-nav { flex-basis: 280px; }
-.mailroom-nav-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+.mailroom-nav-header {
+  padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem;
+}
+/* The backlog counter — ticks down as handled threads leave the inbox. */
+.mailroom-count {
+  font-size: 0.72rem; font-weight: 600; color: var(--text-secondary);
+  background: var(--badge-bg); border-radius: var(--radius-pill);
+  padding: 0.15rem 0.6rem; white-space: nowrap;
+}
 .mailroom-nav-heading { margin: 0; font-size: 1.1rem; color: var(--text-heading); }
 
 .mailroom-thread-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }

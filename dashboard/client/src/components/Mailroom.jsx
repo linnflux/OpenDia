@@ -159,6 +159,7 @@ function ProposedDraft({ text, onSentReport }) {
 export default function Mailroom({ me, onOpenProject }) {
   const [threads, setThreads] = useState(null); // null = loading
   const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(null); // full unhandled-inbox count
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState(null);
 
@@ -197,13 +198,14 @@ export default function Mailroom({ me, onOpenProject }) {
   }, []);
 
   // ── Browse: initial load + "Show more" ────────────────────────────────
-  const loadThreads = useCallback((offset, append) => {
+  const loadThreads = useCallback((offset, append, limit = PAGE_SIZE) => {
     if (append) setLoadingMore(true);
-    fetch(`/api/mailroom/threads?offset=${offset}&limit=${PAGE_SIZE}`)
+    fetch(`/api/mailroom/threads?offset=${offset}&limit=${limit}`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((page) => {
         setThreads((prev) => (append ? [...(prev || []), ...page.threads] : page.threads));
         setHasMore(!!page.hasMore);
+        setTotal(typeof page.total === "number" ? page.total : null);
         setListError(null);
       })
       .catch((e) => setListError(e.message))
@@ -211,6 +213,26 @@ export default function Mailroom({ me, onOpenProject }) {
   }, []);
 
   useEffect(() => { loadThreads(0, false); }, [loadThreads]);
+
+  // Refresh the visible window every 60s so the count ticks — down as Nick
+  // archives handled threads out of the inbox, up as new mail lands. Not a
+  // cron: a component-scoped interval, torn down on unmount, so it runs
+  // only while the Mailroom tab is actually open. Because the list is
+  // oldest-first and stable, re-fetching the same window keeps "Show more"
+  // depth and never shuffles rows under the cursor — handled threads just
+  // slide out, and new arrivals (newest, so last) stay past the window.
+  const listStateRef = useRef({ count: 0, busy: false });
+  listStateRef.current = { count: threads?.length || 0, busy: loadingMore };
+  useEffect(() => {
+    const t = setInterval(() => {
+      const { count, busy } = listStateRef.current;
+      if (busy) return;
+      // The route clamps limit at 25; cap here too so a deep "Show more"
+      // window shrinks predictably rather than surprising via the server.
+      loadThreads(0, false, Math.min(25, Math.max(PAGE_SIZE, count)));
+    }, 60_000);
+    return () => clearInterval(t);
+  }, [loadThreads]);
 
   // ── Select a thread: fetch its body + facts, ensure the standing session,
   //    then hand it the thread — the "auto-checkup on selection" Nick asked
@@ -376,6 +398,11 @@ export default function Mailroom({ me, onOpenProject }) {
       <aside className="mailroom-nav">
         <header className="mailroom-nav-header">
           <h1 className="mailroom-nav-heading">Mailroom</h1>
+          {typeof total === "number" && (
+            <span className="mailroom-count" title="Primary-inbox threads not yet handled">
+              {total} in inbox
+            </span>
+          )}
         </header>
         {listError && <div className="mailroom-error">{listError}</div>}
         <div className="mailroom-thread-list">
