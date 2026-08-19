@@ -123,9 +123,16 @@ export default function Mailroom({ me, onOpenProject }) {
   const [session, setSession] = useState(null);      // /session payload
   const [ensuring, setEnsuring] = useState(false);
   const [ensureError, setEnsureError] = useState(null);
+  const [selectWaiting, setSelectWaiting] = useState(null); // gate reason, or null
+  const [selectError, setSelectError] = useState(null);
 
   // undefined = no observation yet (never chime on the first poll).
   const wasWorking = useRef(undefined);
+  // A select delivery the gate refused (409 — most commonly a fresh spawn's
+  // own entry-plan approval, unrelated to any thread). Held here instead of
+  // dropped so the poll loop can redeliver it the moment the gate reopens —
+  // the operator's click must not silently go nowhere.
+  const pendingSelectRef = useRef(null); // { threadId, subject } | null
 
   // Prime the completion chime on the first real gesture, same pattern as
   // Runroom.jsx's default export — this view has its own audio context since
@@ -160,10 +167,45 @@ export default function Mailroom({ me, onOpenProject }) {
   //    then hand it the thread — the "auto-checkup on selection" Nick asked
   //    for. Browsing must not fail just because the session couldn't be
   //    reached, so this is best-effort and reported inline, not blocking.
+  // Deliver the roundup-trigger message. The gate refuses while the session
+  // is mid-turn or showing a dialog of its own (most commonly a fresh
+  // spawn's entry-plan approval — unrelated to any thread, one-time per
+  // spawn). That must never fail silently: hold the intent and let the poll
+  // loop redeliver it the instant the gate reopens, rather than requiring
+  // the operator to notice nothing happened and click again.
+  async function deliverSelect(threadId, subject) {
+    try {
+      const r = await fetch(`/api/mailroom/threads/${encodeURIComponent(threadId)}/select`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (d?.gate) {
+          pendingSelectRef.current = { threadId, subject };
+          setSelectWaiting(d.gate.reason || "busy");
+          setSelectError(null);
+        } else {
+          setSelectWaiting(null);
+          setSelectError(d?.error || `HTTP ${r.status}`);
+        }
+      } else {
+        setSelectWaiting(null);
+        setSelectError(null);
+      }
+    } catch (e) {
+      setSelectWaiting(null);
+      setSelectError(e.message);
+    }
+  }
+
   async function selectThread(thread) {
     setSelected({ threadId: thread.threadId, subject: thread.subject });
     setDetail(null); setDetailError(null); setContext(null);
     setMailState(null); setOpenMessages(new Set());
+    setSelectWaiting(null); setSelectError(null);
+    pendingSelectRef.current = null;
     wasWorking.current = undefined;
 
     fetch(`/api/mailroom/threads/${encodeURIComponent(thread.threadId)}`)
@@ -187,16 +229,13 @@ export default function Mailroom({ me, onOpenProject }) {
       const r = await fetch("/api/mailroom/session/ensure", { method: "POST" });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
-      await fetch(`/api/mailroom/threads/${encodeURIComponent(thread.threadId)}/select`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: thread.subject }),
-      });
     } catch (e) {
       setEnsureError(e.message);
-    } finally {
       setEnsuring(false);
+      return;
     }
+    setEnsuring(false);
+    await deliverSelect(thread.threadId, thread.subject);
   }
 
   function toggleMessage(id) {
@@ -224,6 +263,14 @@ export default function Mailroom({ me, onOpenProject }) {
         if (wasWorking.current === true && !nowWorking) playDoneChime();
         wasWorking.current = nowWorking;
         setSession(s);
+        // The gate just opened and a select is still waiting to go out —
+        // redeliver it now. Guard on the still-selected thread in case the
+        // operator moved on to a different one while this was pending.
+        const pending = pendingSelectRef.current;
+        if (pending && s?.gate?.ok && selected?.threadId === pending.threadId) {
+          pendingSelectRef.current = null;
+          deliverSelect(pending.threadId, pending.subject);
+        }
       })
       .catch(() => {});
   }, [selected]);
@@ -309,7 +356,13 @@ export default function Mailroom({ me, onOpenProject }) {
             <div className="mailroom-roundup">
               {ensuring && <div className="mailroom-roundup-status">Starting the mailroom session…</div>}
               {ensureError && <div className="mailroom-error">{ensureError}</div>}
-              {!mailState && !ensuring && !ensureError && (
+              {selectWaiting && (
+                <div className="mailroom-roundup-status">
+                  Waiting on the session ({selectWaiting}) — the roundup will start as soon as it's free.
+                </div>
+              )}
+              {selectError && <div className="mailroom-error">Could not reach the session: {selectError}</div>}
+              {!mailState && !ensuring && !ensureError && !selectWaiting && !selectError && (
                 <div className="mailroom-roundup-status">Running the roundup…</div>
               )}
               {mailState?.roundup_md && (
