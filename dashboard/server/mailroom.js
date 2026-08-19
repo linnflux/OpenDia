@@ -10,7 +10,7 @@ import {
 import { getTimerEntriesForProject } from "./timers.js";
 import { runsOnDisk, readRunResult } from "./spark.js";
 import {
-  gateForSession, deliver, MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR,
+  gateForSession, deliver, MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR, firstNameOf,
 } from "./session_gate.js";
 import { sessionExists, spawnSession } from "./runroom_build.js";
 
@@ -279,6 +279,24 @@ export function registerMailroomRoutes(app) {
     const text = `[mailroom] suggestion ${id} accepted for thread ${threadId}`;
     const { status, body } = deliver({
       tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "suggestion",
+    });
+    res.status(status).json(body);
+  });
+
+  // The "I sent it / scheduled it" button under the proposed reply. Canned
+  // text lives HERE (ACTIONS-registry rule) and restates the verification
+  // obligation the skill's sent-report contract spells out: believe a send
+  // only when a search actually finds it — never on the report alone.
+  app.post("/api/mailroom/threads/:threadId/sent-report", requireAdmin, (req, res) => {
+    const { threadId } = req.params;
+    if (!THREAD_ID_RE.test(threadId)) return res.status(400).json({ error: "bad thread id" });
+    let subject = typeof req.body?.subject === "string" ? req.body.subject : "";
+    subject = subject.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200);
+    mkdirSync(MAILROOM_DIR, { recursive: true });
+    const name = firstNameOf(req.user);
+    const text = `[mailroom] ${name} reports the reply for thread ${threadId}${subject ? ` ("${subject}")` : ""} as sent or scheduled from Gmail. Verify before believing it — narrow in:sent search, subject:"…" fallback if that misses. Verified: write handled {state:"sent-verified", verified_at} into the thread state file and update the matched card (dated next_step, echo-compared). Search empty but ${name} says scheduled: handled {state:"scheduled-attested"} with a re-verify note. Neither: refuse, naming exactly what was searched.`;
+    const { status, body } = deliver({
+      tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "sent-report",
     });
     res.status(status).json(body);
   });

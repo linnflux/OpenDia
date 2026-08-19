@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { marked } from "marked";
 import {
   DialogCard, Composer, ThinkingStrip, decorateMarkdown, primeAudio, playDoneChime, copyText,
+  GATE_REASONS,
 } from "./runroom/shared.jsx";
 
 // Mailroom — Phase 2 (the view), phases A+B+C: browse the primary inbox
@@ -112,14 +113,30 @@ function FactsStrip({ context, onOpenProject }) {
 // and sends from Gmail himself; no To:/Subject synthesis here, since he's
 // already looking at the thread this sits below and a wrongly-derived
 // recipient on a multi-party thread would be actively misleading.
-function ProposedDraft({ text }) {
+//
+// onSentReport delivers the canned "reports sent or scheduled" message
+// (authored server-side) and resolves to {ok, msg} for the flash — the
+// session's verification verdict comes back through the state file's
+// `handled` field on the next poll, not through this response.
+function ProposedDraft({ text, onSentReport }) {
   const [copied, setCopied] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [flash, setFlash] = useState(null); // {ok, msg}
 
   function copy() {
     if (copyText(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
+  }
+
+  async function reportSent() {
+    if (reporting) return;
+    setReporting(true); setFlash(null);
+    const r = await onSentReport();
+    setFlash(r);
+    setReporting(false);
+    if (r.ok) setTimeout(() => setFlash(null), 4000);
   }
 
   return (
@@ -129,6 +146,12 @@ function ProposedDraft({ text }) {
       <button className={`mailroom-draft-copy${copied ? " copied" : ""}`} onClick={copy}>
         {copied ? "copied" : "copy"}
       </button>
+      <div className="mailroom-draft-foot">
+        <button className="mailroom-draft-sent" disabled={reporting} onClick={reportSent}>
+          {reporting ? "…" : "I sent it / scheduled it"}
+        </button>
+        {flash && <span className={`runroom-send-flash ${flash.ok ? "ok" : "err"}`}>{flash.msg}</span>}
+      </div>
     </div>
   );
 }
@@ -324,6 +347,21 @@ export default function Mailroom({ me, onOpenProject }) {
     }).catch(() => {});
   }
 
+  async function reportSentToSession() {
+    try {
+      const r = await fetch(`/api/mailroom/threads/${encodeURIComponent(selected.threadId)}/sent-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: selected.subject }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, msg: GATE_REASONS[d?.gate?.reason] || d?.error || `HTTP ${r.status}` };
+      return { ok: true, msg: "reported — the session is verifying" };
+    } catch (e) {
+      return { ok: false, msg: e.message };
+    }
+  }
+
   const roundupHtml = useMemo(
     () => (mailState?.roundup_md ? marked.parse(mailState.roundup_md) : ""),
     [mailState?.roundup_md]
@@ -395,7 +433,17 @@ export default function Mailroom({ me, onOpenProject }) {
                 <div className="mailroom-roundup-body" ref={roundupRef} dangerouslySetInnerHTML={{ __html: roundupHtml }} />
               )}
               {typeof mailState?.proposed_draft === "string" && mailState.proposed_draft.trim() && (
-                <ProposedDraft text={mailState.proposed_draft} />
+                <ProposedDraft text={mailState.proposed_draft} onSentReport={reportSentToSession} />
+              )}
+              {mailState?.handled?.state && (
+                <div className={`mailroom-handled state-${mailState.handled.state}`}>
+                  {mailState.handled.state === "sent-verified"
+                    ? `✓ Sent — verified${mailState.handled.verified_at ? ` at ${mailState.handled.verified_at}` : ""}`
+                    : mailState.handled.state === "scheduled-attested"
+                    ? "⏱ Scheduled — the session will re-verify"
+                    : mailState.handled.state}
+                  {mailState.handled.verdict && <span className="mailroom-handled-verdict"> · {mailState.handled.verdict}</span>}
+                </div>
               )}
               {mailState?.suggestions?.length > 0 && (
                 <div className="mailroom-suggestions">
