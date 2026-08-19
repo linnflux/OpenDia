@@ -7230,6 +7230,23 @@ html.vt-no-target::view-transition-old(card-morph) {
   font-size: 0.72rem; font-weight: 600; color: var(--text-secondary);
   background: var(--badge-bg); border-radius: var(--radius-pill);
   padding: 0.15rem 0.6rem; white-space: nowrap;
+  position: relative; overflow: hidden;
+}
+/* The fuse: a 2px underline that fills over one poll interval (duration set
+   inline from POLL_MS so it can't drift from the JS timer), holds at full
+   while the refresh is in flight, and restarts via key remount when fresh
+   data lands. scaleX, not width — compositor-only, no layout per frame. */
+.mailroom-count-fuse {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--accent); transform: scaleX(0); transform-origin: left;
+  animation: mailroom-fuse linear forwards;
+}
+@keyframes mailroom-fuse {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mailroom-count-fuse { display: none; }
 }
 .mailroom-nav-heading { margin: 0; font-size: 1.1rem; color: var(--text-heading); }
 

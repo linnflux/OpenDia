@@ -22,6 +22,9 @@ import {
 // nothing here renders an approve/edit panel for them yet.
 
 const PAGE_SIZE = 5;
+// One constant feeds both the refresh interval and the count chip's
+// countdown-underline animation, so the two can never drift apart.
+const POLL_MS = 60_000;
 
 function formatDate(str) {
   if (!str) return "";
@@ -160,6 +163,9 @@ export default function Mailroom({ me, onOpenProject }) {
   const [threads, setThreads] = useState(null); // null = loading
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(null); // full unhandled-inbox count
+  // Bumped on every non-append list load; keys the chip's countdown
+  // underline so its animation restarts exactly when fresh data lands.
+  const [pollEpoch, setPollEpoch] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState(null);
 
@@ -206,6 +212,9 @@ export default function Mailroom({ me, onOpenProject }) {
         setThreads((prev) => (append ? [...(prev || []), ...page.threads] : page.threads));
         setHasMore(!!page.hasMore);
         setTotal(typeof page.total === "number" ? page.total : null);
+        // Restart the countdown on window refreshes only — "Show more" is
+        // the operator paging, not a poll, and must not reset the fuse.
+        if (!append) setPollEpoch((n) => n + 1);
         setListError(null);
       })
       .catch((e) => setListError(e.message))
@@ -230,7 +239,7 @@ export default function Mailroom({ me, onOpenProject }) {
       // The route clamps limit at 25; cap here too so a deep "Show more"
       // window shrinks predictably rather than surprising via the server.
       loadThreads(0, false, Math.min(25, Math.max(PAGE_SIZE, count)));
-    }, 60_000);
+    }, POLL_MS);
     return () => clearInterval(t);
   }, [loadThreads]);
 
@@ -401,6 +410,12 @@ export default function Mailroom({ me, onOpenProject }) {
           {typeof total === "number" && (
             <span className="mailroom-count" title="Primary-inbox threads not yet handled">
               {total} in inbox
+              {/* The fuse: fills over one poll interval, holds at full while
+                  the refresh is in flight, and the key remount snaps it back
+                  to zero the moment fresh data lands. Pure CSS animation —
+                  no timers, no per-frame JS. */}
+              <span key={pollEpoch} className="mailroom-count-fuse"
+                    style={{ animationDuration: `${POLL_MS}ms` }} />
             </span>
           )}
         </header>
