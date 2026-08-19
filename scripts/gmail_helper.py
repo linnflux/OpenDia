@@ -217,14 +217,30 @@ def insert_message(service, subject: str, body: str, label_ids: list[str]) -> di
     ).execute()
 
 
-def send_email(service, to: str, subject: str, body: str, thread_id: str | None = None) -> dict:
-    """Send a plain-text email. Returns the sent message dict."""
+def send_email(service, to: str, subject: str, body: str, thread_id: str | None = None,
+               from_addr: str | None = None, reply_to: str | None = None) -> dict:
+    """
+    Send a plain-text email. Returns the sent message dict.
+
+    from_addr: optional From header. MUST be a verified "send mail as" alias on
+        the authenticated account or Gmail rejects the send. List the valid ones
+        with users().settings().sendAs().list(userId="me"). Accepts either a bare
+        address or a display-name form: 'Some Name <alias@example.com>'. Supplying
+        a display name here overrides the one configured on the alias in Gmail.
+        Omit to send as the account's default address.
+    reply_to: optional Reply-To header. Useful when sending from an automation
+        alias but wanting replies to land on a human's normal mailbox.
+    """
     import base64
     from email.mime.text import MIMEText
 
     msg = MIMEText(body, "plain")
     msg["to"] = to
     msg["subject"] = subject
+    if from_addr:
+        msg["from"] = from_addr
+    if reply_to:
+        msg["reply-to"] = reply_to
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     payload = {"raw": raw}
     if thread_id:
