@@ -140,10 +140,13 @@ export function writeSeedPlan({ session, project, run }) {
 
 /**
  * Spawn the session. dispatch_spawn.sh starts claude in plan mode on opusplan
- * and echoes the name it actually used, which is the value to trust.
+ * by default and echoes the name it actually used, which is the value to
+ * trust. `extraArgs` forwards dispatch_spawn.sh's own [WORK_DIR] [--yolo]
+ * positionals verbatim — additive, existing callers that omit it get the
+ * exact behavior they had before.
  */
-export function spawnSession(session, briefPath) {
-  const out = execFileSync("bash", [SPAWN_SCRIPT, session, briefPath], {
+export function spawnSession(session, briefPath, extraArgs = []) {
+  const out = execFileSync("bash", [SPAWN_SCRIPT, session, briefPath, ...extraArgs], {
     encoding: "utf8",
     timeout: 20_000,
     env: { ...process.env, HOME },

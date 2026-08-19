@@ -222,12 +222,21 @@ export function registerMailroomRoutes(app) {
   // mailroom-ui-plan.md's 2026-08-19 decision — dispatch_spawn.sh has no
   // resume flag, and a failed `claude --resume` in a detached tmux leaves a
   // dead pane this route could not detect anyway.
+  //
+  // --yolo (acceptEdits): decided 2026-08-19, after Nick's first live test
+  // hit dispatch_spawn.sh's plan-mode-by-default head-on — a cold spawn's
+  // very first act was planning its OWN entry sequence and pausing for
+  // approval, unrelated to and blocking whatever thread triggered the spawn.
+  // The skill's hard rules already forbid every consequential action in this
+  // phase (never gmail_send, never gmail_create_draft), so there is nothing
+  // acceptEdits newly exposes — it only removes a one-time approval gate
+  // that had nothing to approve.
   app.post("/api/mailroom/session/ensure", requireAdmin, (_req, res) => {
     if (sessionExists(MAILROOM_SESSION)) return res.json({ session: MAILROOM_SESSION, spawned: false });
     if (!existsSync(MAILROOM_BRIEF)) return res.status(500).json({ error: `brief missing: ${MAILROOM_BRIEF}` });
     let final;
     try {
-      final = spawnSession(MAILROOM_SESSION, MAILROOM_BRIEF);
+      final = spawnSession(MAILROOM_SESSION, MAILROOM_BRIEF, ["--yolo"]);
     } catch (e) {
       return res.status(502).json({ error: `spawn failed: ${e.message}` });
     }
