@@ -198,7 +198,7 @@ export function DialogCard({ dialog, endpoints }) {
   }
 
   return (
-    <div className="runroom-dialog">
+    <div className={`runroom-dialog${dialog.plan_md ? " has-plan" : ""}`}>
       <div className="runroom-dialog-label">The session is asking</div>
       {dialog.context.length > 0 && (
         <pre className="runroom-dialog-context">{dialog.context.join("\n")}</pre>

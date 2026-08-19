@@ -9,7 +9,9 @@ import {
 } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
 import { runsOnDisk, readRunResult } from "./spark.js";
-import { gateForSession, deliver, MAX_SEND_CHARS } from "./session_gate.js";
+import {
+  gateForSession, deliver, MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR,
+} from "./session_gate.js";
 import { sessionExists, spawnSession } from "./runroom_build.js";
 
 // Mailroom — Phase 2 (the view): browse the inbox Gmail-style, select a
@@ -69,6 +71,26 @@ function lookupAlias(fromHeader, subject) {
 }
 
 const KEYMAP = { esc: "Escape", enter: "Enter", up: "Up", down: "Down", left: "Left", right: "Right", space: "Space" };
+
+// The freshness floor sessionPlanFile needs, for a standing session that has
+// no plan.json to read `created` from. Session name prefixes truncate short
+// ("mail" covers both a "mailroom-ui" build session's own plan AND the
+// standing "mailroom" session's), so without a floor a much-older same-
+// prefix plan could outrank the real one whenever the standing session
+// hasn't reached its own ExitPlanMode yet. tmux's own session_created is the
+// natural equivalent of a runroom's `created` timestamp here.
+function tmuxSessionCreatedIso(tmuxSession) {
+  try {
+    const epoch = execFileSync(
+      "tmux", ["display-message", "-p", "-t", tmuxSession, "#{session_created}"],
+      { encoding: "utf8", timeout: 3000 },
+    ).trim();
+    const ms = Number(epoch) * 1000;
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  } catch {
+    return null;
+  }
+}
 
 export function registerMailroomRoutes(app) {
   app.get("/api/mailroom/threads", requireAdmin, async (req, res) => {
@@ -176,7 +198,23 @@ export function registerMailroomRoutes(app) {
 
   app.get("/api/mailroom/session", requireAdmin, (_req, res) => {
     if (!sessionExists(MAILROOM_SESSION)) return res.json({ exists: false });
-    res.json({ exists: true, gate: gateForSession(MAILROOM_SESSION) });
+    const gate = gateForSession(MAILROOM_SESSION);
+    // A plan-approval dialog gets the real plan document: the pane can only
+    // ever show one page of Claude Code's self-redrawing plan box, so the
+    // scrollback fallback (gate.dialog.context_full) genuinely cannot
+    // contain a plan of any length. Same enrichment as runrooms.js's detail
+    // route — see tmuxSessionCreatedIso for why the freshness floor matters
+    // here specifically.
+    if (gate.dialog?.options?.some((o) => /approve/i.test(o.label))) {
+      const found = sessionPlanFile(MAILROOM_SESSION, tmuxSessionCreatedIso(MAILROOM_SESSION));
+      if (found) {
+        try {
+          gate.dialog.plan_file = found.name;
+          gate.dialog.plan_md = readFileSync(resolve(PLANS_DIR, found.name), "utf8").slice(0, 60_000);
+        } catch {}
+      }
+    }
+    res.json({ exists: true, gate });
   });
 
   // Fresh spawn only, deliberately no resume: the mailroom's memory IS the

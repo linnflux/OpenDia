@@ -6826,6 +6826,16 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .runroom-dialog-plan-body pre code { display: block; padding: 0.5rem; overflow-x: auto; }
 
+/* A plan-approval dialog is the highest-stakes, most-frequent decision point
+   in a runroom/mailroom session — give it real document space (up to
+   whatever the pane has, capped generously) instead of squeezing it into
+   the same 640px card a short permission prompt gets, and size the type for
+   actually reading a write-up rather than a two-line question. */
+.runroom-dialog.has-plan { max-width: 900px; }
+.runroom-dialog.has-plan .runroom-dialog-plan-body {
+  max-height: 68vh; font-size: 0.9rem; line-height: 1.6;
+}
+
 /* Expired-recommendation affordance on the idle Spark stage. */
 .spark-expired {
   width: 100%;

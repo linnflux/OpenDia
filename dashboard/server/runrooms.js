@@ -4,7 +4,7 @@ import { execFileSync } from "child_process";
 import express from "express";
 import {
   gateForSession, captureLiveTail, deliver as sendToSession, firstNameOf,
-  MAX_SEND_CHARS,
+  MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR,
 } from "./session_gate.js";
 
 // Runrooms — read-only API over ~/OpenDia/runrooms/<tmux-session>/plan.json.
@@ -51,40 +51,6 @@ function readPlan(session) {
     // state, not an error worth surfacing; the next poll gets the full write.
     return null;
   }
-}
-
-// The TUI's plan-approval dialog is a self-redrawing scrollable box: the
-// terminal buffer only ever holds one viewport page, so no pane capture can
-// show a long plan. The plan itself is a FILE, and a dispatched session's
-// plan file is named from its first prompt — "Read ~/OpenDia/handoffs/
-// <session>.md and follow it…" slugs to read-…-handoffs-<truncated-session>-
-// <word>-<word>.md. Strip prefix and the two-word random suffix; what
-// remains is a (possibly mid-word truncated) prefix of the session name.
-const PLANS_DIR = resolve(process.env.HOME, ".claude", "plans");
-const PLAN_FILE_RE = /^read-.*-handoffs-(.+)-[a-z]+-[a-z]+\.md$/;
-
-function sessionPlanFile(session, createdIso) {
-  let entries;
-  try {
-    entries = readdirSync(PLANS_DIR);
-  } catch {
-    return null;
-  }
-  const slug = String(session).toLowerCase();
-  // Tolerate a stale same-prefix file from an earlier engagement by
-  // requiring the file to be newer than shortly before the room opened.
-  const createdMs = createdIso ? new Date(createdIso).getTime() - 10 * 60 * 1000 : 0;
-  let best = null;
-  for (const name of entries) {
-    const m = name.match(PLAN_FILE_RE);
-    if (!m || !slug.startsWith(m[1])) continue;
-    try {
-      const mtime = statSync(resolve(PLANS_DIR, name)).mtimeMs;
-      if (mtime < createdMs) continue;
-      if (!best || mtime > best.mtime) best = { name, mtime };
-    } catch {}
-  }
-  return best;
 }
 
 // Thin wrapper over session_gate.js's deliver(): a runroom's sends.log lives

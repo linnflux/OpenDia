@@ -1,4 +1,5 @@
-import { appendFileSync } from "fs";
+import { appendFileSync, readdirSync, statSync } from "fs";
+import { resolve } from "path";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { terminalHolderFor } from "./terminal.js";
@@ -170,6 +171,46 @@ function fullDialogContext(tmuxSession) {
   while (out.length && !out[0].trim()) out.shift();
   while (out.length && !out[out.length - 1].trim()) out.pop();
   return out.length ? out : null;
+}
+
+// The TUI's plan-approval dialog is a self-redrawing scrollable box: the
+// terminal buffer only ever holds one viewport page, so no pane capture can
+// show a long plan (the scrollback fallback above genuinely cannot contain
+// it — there is nothing more to capture). The plan itself is a FILE, and a
+// dispatched session's plan file is named from its first prompt — "Read
+// ~/OpenDia/handoffs/<session>.md and follow it…" slugs to read-…-handoffs-
+// <truncated-session>-<word>-<word>.md. Strip prefix and the two-word random
+// suffix; what remains is a (possibly mid-word truncated) prefix of the
+// session name. Generic to any spawned session, not runroom-specific —
+// mailroom.js's standing session uses this too.
+export const PLANS_DIR = resolve(process.env.HOME, ".claude", "plans");
+const PLAN_FILE_RE = /^read-.*-handoffs-(.+)-[a-z]+-[a-z]+\.md$/;
+
+export function sessionPlanFile(session, createdIso) {
+  let entries;
+  try {
+    entries = readdirSync(PLANS_DIR);
+  } catch {
+    return null;
+  }
+  const slug = String(session).toLowerCase();
+  // Tolerate a stale same-prefix file from an earlier engagement by
+  // requiring the file to be newer than shortly before the room/session
+  // opened. Prefixes truncate short ("mail" for both "mailroom-ui" and
+  // "mailroom"), so this floor is what keeps an unrelated same-prefix
+  // session's plan from being served as if it were this one's.
+  const createdMs = createdIso ? new Date(createdIso).getTime() - 10 * 60 * 1000 : 0;
+  let best = null;
+  for (const name of entries) {
+    const m = name.match(PLAN_FILE_RE);
+    if (!m || !slug.startsWith(m[1])) continue;
+    try {
+      const mtime = statSync(resolve(PLANS_DIR, name)).mtimeMs;
+      if (mtime < createdMs) continue;
+      if (!best || mtime > best.mtime) best = { name, mtime };
+    } catch {}
+  }
+  return best;
 }
 
 export function gateForSession(tmuxSession) {
