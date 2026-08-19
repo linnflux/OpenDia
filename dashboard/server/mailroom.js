@@ -5,7 +5,7 @@ import { requireAdmin } from "./auth.js";
 import { listInboxThreadsPage, getThreadFull } from "./gmail.js";
 import {
   getInboxItemByThreadId, getAllClientAliases, matchProjectCandidates,
-  getProjectById,
+  getProjectById, getAllCompanies,
 } from "./db.js";
 import { getTimerEntriesForProject } from "./timers.js";
 import { runsOnDisk, readRunResult } from "./spark.js";
@@ -66,6 +66,68 @@ function lookupAlias(fromHeader, subject) {
     if (row.match_type === "email" && mv === email) return row;
     if (row.match_type === "domain" && mv === domain) return row;
     if (row.match_type === "substring" && mv && subjectLower.includes(mv)) return row;
+  }
+  return null;
+}
+
+// The address to resolve a client from is the COUNTERPARTY's, not the
+// thread starter's — Nick starts plenty of threads, and messages[0].from on
+// those is nick@linnflux.com, which the domain fallback would happily
+// resolve to the Linnflux company and match internal cards (exactly what
+// happened on the Virtru thread's first test). First non-own from-address
+// wins; a thread with none (pure internal) falls back to the starter.
+const OWN_DOMAINS = new Set(["linnflux.com", "bedfordai.com"]);
+
+function counterpartyFrom(messages) {
+  for (const m of messages) {
+    const { domain } = extractEmailAndDomain(m.from);
+    if (domain && !OWN_DOMAINS.has(domain)) return m.from;
+  }
+  return messages[0]?.from || "";
+}
+
+// "https://www.integrity.accountant/" -> "integrity.accountant"
+function normalizeDomain(value) {
+  return (value || "")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[/].*$/, "")
+    .trim();
+}
+
+// Deterministic fallbacks for senders the alias table doesn't know — added
+// 2026-08-19 after a live thread resolved to "no card" while its card sat
+// in_progress: no alias row, AND the company's website field was NULL, AND
+// the subject shared no token with the card name. Order: alias (the
+// designed channel, checked by the caller first) → sender domain vs
+// companies.website → the domain's registrable label as a whole word in a
+// company name (the ≥5-char guard plus whole-word match keeps generic
+// labels from false-positiving).
+function companyFromDomain(fromHeader) {
+  const { domain } = extractEmailAndDomain(fromHeader);
+  if (!domain) return null;
+  const companies = getAllCompanies();
+  for (const c of companies) {
+    const site = normalizeDomain(c.website);
+    if (site && site === domain) return c;
+  }
+  const label = domain.split(".")[0];
+  if (label.length >= 5) {
+    const wordRe = new RegExp(`\\b${label}\\b`, "i");
+    for (const c of companies) {
+      if (wordRe.test(c.name || "") || wordRe.test(c.short_name || "")) return c;
+    }
+    // Domains are often the company name CONCATENATED (an "acmemeter.com"
+    // for a short_name "Acme Meter") — the same convention gmail.js's
+    // searchRecentEmails exploits in the other direction. Compare the label
+    // to the squashed short_name and name.
+    const squash = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    for (const c of companies) {
+      const shortSquash = squash(c.short_name);
+      const nameSquash = squash(c.name);
+      if ((shortSquash && label === shortSquash) || (nameSquash && label === nameSquash)) return c;
+    }
   }
   return null;
 }
@@ -141,11 +203,19 @@ export function registerMailroomRoutes(app) {
         full = { ok: false };
       }
       if (full.ok && full.messages.length) {
-        const first = full.messages[0];
-        const alias = lookupAlias(first.from, first.subject);
-        if (alias) {
-          candidates = matchProjectCandidates(alias.client_hint, alias.division_hint || "", first.subject, 3);
-          if (candidates.length) project = candidates[0]; // best guess; candidates[] stays for a future picker
+        const subject = full.messages[0].subject;
+        const sender = counterpartyFrom(full.messages);
+        const alias = lookupAlias(sender, subject);
+        let clientHint = alias?.client_hint || null;
+        let divisionHint = alias?.division_hint || "";
+        if (!clientHint) {
+          // Alias table missed — try the deterministic domain fallbacks.
+          const company = companyFromDomain(sender);
+          if (company) clientHint = company.short_name || company.name;
+        }
+        if (clientHint) {
+          candidates = matchProjectCandidates(clientHint, divisionHint, subject, 3);
+          if (candidates.length) project = candidates[0]; // best guess; candidates[] stays for the session to weigh
         }
       }
     }

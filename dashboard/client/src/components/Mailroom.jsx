@@ -376,6 +376,12 @@ export default function Mailroom({ me, onOpenProject }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: s.id }),
     }).catch(() => {});
+    // "Spark the task": the gateway when a reply is blocked on task work.
+    // Open the card modal (SparkPanel lives inside it) alongside the normal
+    // delivery — the session records the acceptance in the state file, and
+    // the mailroom thread deliberately stays in the list until the work is
+    // done and Nick re-selects it for a fresh roundup.
+    if (s.kind === "spark" && s.card_id) onOpenProject?.(s.card_id);
   }
 
   async function reportSentToSession() {

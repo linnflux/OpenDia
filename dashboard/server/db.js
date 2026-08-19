@@ -584,8 +584,10 @@ export function getProjectsByNotionIds(notionIds) {
 }
 
 export function getAllCompanies() {
+  // website is additive (the one API caller just serializes the list) —
+  // the Mailroom's sender-domain fallback matches against it.
   return getDb().prepare(`
-    SELECT id, name, short_name
+    SELECT id, name, short_name, website
     FROM companies
     ORDER BY name COLLATE NOCASE ASC
   `).all();

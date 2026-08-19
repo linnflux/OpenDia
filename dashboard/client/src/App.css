@@ -7408,6 +7408,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 .mailroom-suggestion:hover { border-color: var(--border-hover); background: var(--bg-hover); }
 .mailroom-suggestion.kind-reply { border-color: var(--accent); color: var(--accent); }
 .mailroom-suggestion.kind-dispatch { border-color: #f59e0b; }
+.mailroom-suggestion.kind-spark { border-color: #a855f7; color: #a855f7; }
 .mailroom-suggestion.kind-dismiss { color: var(--text-faint); }
 
 @media (max-width: 860px) {
