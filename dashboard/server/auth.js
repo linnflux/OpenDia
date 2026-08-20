@@ -20,20 +20,30 @@ function isLoopback(req) {
 // ingress rules are ever widened beyond the webhook path.
 const CF_PROXY_HEADERS = ["cf-ray", "cf-connecting-ip", "cf-ipcountry", "cdn-loop", "x-forwarded-for"];
 
+// Cloudflare-EXCLUSIVE headers. tailscale serve never sets these, but it DOES
+// set x-forwarded-for on every proxied request — so the tailscale-header branch
+// must test only this CF-only subset, or it would 403 every legitimate login.
+const CF_ONLY_HEADERS = ["cf-ray", "cf-connecting-ip", "cf-ipcountry", "cdn-loop"];
+
 function viaPublicProxy(req) {
   return CF_PROXY_HEADERS.some((h) => req.headers[h]);
+}
+
+function viaCloudflare(req) {
+  return CF_ONLY_HEADERS.some((h) => req.headers[h]);
 }
 
 export function verifyRequest(req) {
   const login = (req.headers["tailscale-user-login"] || "").toLowerCase().trim();
   // Header present → came through tailscale serve; verify domain regardless of source IP.
   if (login) {
-    // ...but tailscale serve reaches us over loopback with no CF headers. If a
-    // request carries this header AND cloudflare-proxy headers, it arrived from
-    // the public internet with a forgeable identity — refuse it outright rather
-    // than trusting the header (Cloudflare does not strip arbitrary request
-    // headers). This mirrors the loopback branch's viaPublicProxy guard.
-    if (viaPublicProxy(req)) return { ok: false, reason: "header-via-public-proxy", login };
+    // ...but if a request carries this header AND Cloudflare's own fingerprint
+    // headers, it arrived through the public tunnel with a forgeable identity —
+    // refuse it rather than trusting the header (Cloudflare does not strip
+    // arbitrary request headers). Check the CF-only subset: tailscale serve
+    // legitimately sets x-forwarded-for, so the broad viaPublicProxy set would
+    // reject every real login.
+    if (viaCloudflare(req)) return { ok: false, reason: "header-via-cloudflare", login };
     const name = req.headers["tailscale-user-name"] || "";
     const domain = login.split("@")[1];
     if (!domain || !ALLOWED_DOMAINS.includes(domain)) return { ok: false, reason: "domain-not-allowed", login };
