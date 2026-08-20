@@ -4,6 +4,10 @@ const ALLOWED_DOMAINS = (process.env.AUTH_ALLOWED_DOMAINS || "linnflux.com")
 const ADMIN_EMAILS = (process.env.AUTH_ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
+// Trusted non-admins allowed to open interactive terminals (see canUseTerminal).
+const TERMINAL_EMAILS = (process.env.AUTH_TERMINAL_EMAILS || "")
+  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+
 function isLoopback(req) {
   const ip = req.socket?.remoteAddress || "";
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
@@ -24,6 +28,12 @@ export function verifyRequest(req) {
   const login = (req.headers["tailscale-user-login"] || "").toLowerCase().trim();
   // Header present → came through tailscale serve; verify domain regardless of source IP.
   if (login) {
+    // ...but tailscale serve reaches us over loopback with no CF headers. If a
+    // request carries this header AND cloudflare-proxy headers, it arrived from
+    // the public internet with a forgeable identity — refuse it outright rather
+    // than trusting the header (Cloudflare does not strip arbitrary request
+    // headers). This mirrors the loopback branch's viaPublicProxy guard.
+    if (viaPublicProxy(req)) return { ok: false, reason: "header-via-public-proxy", login };
     const name = req.headers["tailscale-user-name"] || "";
     const domain = login.split("@")[1];
     if (!domain || !ALLOWED_DOMAINS.includes(domain)) return { ok: false, reason: "domain-not-allowed", login };
@@ -48,4 +58,16 @@ export function requireAdmin(req, res, next) {
     return res.status(403).json({ error: "forbidden", reason: "admin_only" });
   }
   next();
+}
+
+// Interactive terminals hand out a shell running as the dashboard user, which
+// is root-equivalent here (sudo + docker groups). Gate them tighter than the
+// normal authenticated set: admins always; trusted non-admins only if listed
+// in AUTH_TERMINAL_EMAILS. The operator session is dispatch-only and stays
+// admin-only regardless of the allowlist. Pass the verifyRequest() result.
+export function canUseTerminal(auth, tmuxSession) {
+  if (!auth?.ok) return false;
+  if (tmuxSession === "operator") return !!auth.is_admin;
+  if (auth.is_admin) return true;
+  return TERMINAL_EMAILS.includes((auth.login || "").toLowerCase());
 }

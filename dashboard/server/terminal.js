@@ -5,7 +5,7 @@ import { writeFileSync, existsSync, appendFileSync, unlinkSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getProjectById } from "./db.js";
-import { verifyRequest } from "./auth.js";
+import { verifyRequest, canUseTerminal } from "./auth.js";
 import {
   etNow, findTimerForSession, startTimerForProject, closeTimerEntry
 } from "./timerfile.js";
@@ -211,7 +211,7 @@ export function mountTerminal(server, app) {
       return;
     }
     const wsProject = getProjectById(Number(m[1]));
-    if (wsProject?.tmux_session === "operator" && !auth.is_admin) {
+    if (!canUseTerminal(auth, wsProject?.tmux_session)) {
       socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
@@ -395,8 +395,8 @@ export function mountTerminal(server, app) {
     if (!state) return res.status(400).json({ error: "no active viewer — open the Terminal tab first" });
     if (state.holder) return res.status(409).json({ error: "already controlled", controlHolder: { takenAt: state.holder.takenAt } });
 
-    if (project.tmux_session === "operator" && !req.user?.is_admin) {
-      return res.status(403).json({ error: "forbidden", reason: "admin_only" });
+    if (!canUseTerminal(req.user, project.tmux_session)) {
+      return res.status(403).json({ error: "forbidden", reason: "terminal_not_allowed" });
     }
 
     // Start timer if not running. The operator session is dispatch-only:
@@ -453,6 +453,7 @@ export function mountTerminal(server, app) {
     const state = sessions.get(projectId);
     if (!state?.holder) return res.json({ ok: true });
     const { session } = state;
+    if (!canUseTerminal(req.user, session)) return res.status(403).json({ error: "forbidden", reason: "terminal_not_allowed" });
     setTimerAttribution(session, { ended_by: user });
     releaseControl(state, projectId, user);
     res.json({ ok: true, endedBy: user });
@@ -466,6 +467,7 @@ export function mountTerminal(server, app) {
     if (!project) return res.status(404).json({ error: "not found" });
     const { tmux_session: session } = project;
     if (!session) return res.status(400).json({ error: "no tmux session" });
+    if (!canUseTerminal(req.user, session)) return res.status(403).json({ error: "forbidden", reason: "terminal_not_allowed" });
 
     const timerInfo = findTimerForSession(session);
     if (!timerInfo) return res.status(400).json({ error: "no running timer for this session" });
@@ -496,6 +498,7 @@ export function mountTerminal(server, app) {
     const project = getProjectById(Number(projectId));
     if (!project) return res.status(404).json({ error: "not found" });
     const { tmux_session: session } = project;
+    if (!canUseTerminal(req.user, session)) return res.status(403).json({ error: "forbidden", reason: "terminal_not_allowed" });
 
     const timerInfo = findTimerForSession(session);
     if (!timerInfo) return res.status(400).json({ error: "no running timer" });
