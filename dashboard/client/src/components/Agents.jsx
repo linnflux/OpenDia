@@ -287,6 +287,287 @@ function SupervisorQueue({ onOpenProject }) {
   );
 }
 
+function dutySummary(d) {
+  if (d.kind === "routine") {
+    return `routine · every ${d.cadence_days || "∞"}d · card #${d.target_project_id ?? "?"}`;
+  }
+  return [
+    d.roster_mode === "static" ? "assigned cards" : (d.query_status || "any status"),
+    d.roster_mode !== "static" ? d.query_next_step : null,
+    d.query_client_only ? "client-only" : null,
+    d.triage ? "triage" : null,
+    d.max_cards_per_heartbeat > 0 ? `${d.max_cards_per_heartbeat} card/hb` : "all cards",
+  ].filter(Boolean).join(" · ");
+}
+
+// Duties: named, reusable scope-of-work units. The row is machine config,
+// duty.md is the instructions; agents bind to duties and rotate through them
+// one per heartbeat. This panel is where duties are created and edited.
+function DutiesPanel({ agents, onOpenProject }) {
+  const [duties, setDuties] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [fileDraft, setFileDraft] = useState(null); // {id, text}
+
+  const fetchDuties = useCallback(() => {
+    fetch("/api/duties")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(setDuties)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchDuties();
+    const t = setInterval(fetchDuties, 15000);
+    return () => clearInterval(t);
+  }, [fetchDuties]);
+
+  async function patchDuty(id, fields) {
+    await fetch(`/api/duties/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    }).catch(() => {});
+    fetchDuties();
+  }
+
+  async function createNewDuty(e) {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name) return;
+    const r = await fetch("/api/duties", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).catch(() => null);
+    if (r?.ok) {
+      const d = await r.json();
+      setCreating(false); setNewName("");
+      fetchDuties();
+      setExpanded(d.id);
+    }
+  }
+
+  async function openFile(d) {
+    const r = await fetch(`/api/duties/${d.id}/file`).catch(() => null);
+    const j = r?.ok ? await r.json() : { duty_md: "" };
+    setFileDraft({ id: d.id, text: j.duty_md || "" });
+  }
+
+  async function saveFile() {
+    if (!fileDraft) return;
+    await fetch(`/api/duties/${fileDraft.id}/file`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duty_md: fileDraft.text }),
+    }).catch(() => {});
+    setFileDraft(null);
+  }
+
+  async function attach(dutyId, agentId) {
+    if (!agentId) return;
+    await fetch(`/api/agents/${agentId}/duties`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duty_id: dutyId }),
+    }).catch(() => {});
+    fetchDuties();
+  }
+
+  async function detach(dutyId, agentId) {
+    await fetch(`/api/agents/${agentId}/duties/${dutyId}`, { method: "DELETE" }).catch(() => {});
+    fetchDuties();
+  }
+
+  async function removeDuty(d) {
+    if (!window.confirm(`Delete duty "${d.name}"? Its duty.md stays on disk; agents lose the binding.`)) return;
+    await fetch(`/api/duties/${d.id}`, { method: "DELETE" }).catch(() => {});
+    fetchDuties();
+  }
+
+  if (duties === null) return null;
+
+  return (
+    <section className="agents-panel agents-queue agents-duties">
+      <div className="agents-queue-head">
+        <h3 className="agents-queue-title">Duties</h3>
+        <span className="agents-queue-sub">reusable scope-of-work, one per heartbeat in rotation</span>
+        {creating ? (
+          <form className="agents-create-form" onSubmit={createNewDuty}>
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Duty name" />
+            <button type="submit">Create</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</button>
+          </form>
+        ) : (
+          <button className="agents-queue-toggle agents-duties-new" onClick={() => setCreating(true)}>+ New duty</button>
+        )}
+      </div>
+
+      {duties.length === 0 ? (
+        <div className="agents-queue-empty">No duties yet — agents run from their own roster settings until duties exist.</div>
+      ) : (
+        <ul className="agents-queue-list">
+          {duties.map((d) => {
+            const open = expanded === d.id;
+            return (
+              <li key={d.id} className="agents-queue-row">
+                <div
+                  className="agents-queue-rowhead"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { setExpanded(open ? null : d.id); setFileDraft(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(open ? null : d.id); } }}
+                >
+                  <span className="agents-queue-agent">{d.name}</span>
+                  <span className="agents-queue-route">{d.kind}</span>
+                  <span className="agents-inbox-line">{dutySummary(d)}</span>
+                  <span className="agents-queue-status">
+                    {d.agents.length ? d.agents.map((a) => a.name.replace(/ Agent$/, "")).join(", ") : "unattached"}
+                  </span>
+                </div>
+                {open && (
+                  <div className="agents-queue-detail agents-duties-detail">
+                    <div className="agents-field">
+                      <label>Kind</label>
+                      <select value={d.kind} onChange={(e) => patchDuty(d.id, { kind: e.target.value })}>
+                        <option value="sweep">sweep — work a card roster</option>
+                        <option value="routine">routine — recurring procedure on one card</option>
+                      </select>
+                    </div>
+                    {d.kind === "sweep" ? (
+                      <>
+                        <div className="agents-field">
+                          <label>Roster</label>
+                          <select value={d.roster_mode} onChange={(e) => patchDuty(d.id, { roster_mode: e.target.value })}>
+                            <option value="query">query — recompute from the board</option>
+                            <option value="static">static — the agent&rsquo;s assigned cards</option>
+                          </select>
+                        </div>
+                        {d.roster_mode === "query" && (
+                          <>
+                            <div className="agents-field">
+                              <label>Card statuses</label>
+                              <div className="agents-day-chips">
+                                {["in_progress", "wfhuman", "ice", "completed"].map((s) => {
+                                  const cur = String(d.query_status || "").split(",").map((x) => x.trim()).filter(Boolean);
+                                  const on = cur.includes(s);
+                                  return (
+                                    <button
+                                      key={s}
+                                      className={`agents-day-chip${on ? " on" : ""}`}
+                                      onClick={() => patchDuty(d.id, { query_status: (on ? cur.filter((x) => x !== s) : [...cur, s]).join(",") })}
+                                    >
+                                      {s}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div className="agents-field">
+                              <label>Next-step date filter</label>
+                              <select value={d.query_next_step} onChange={(e) => patchDuty(d.id, { query_next_step: e.target.value })}>
+                                <option value="any">any — no date filter</option>
+                                <option value="stale">stale — overdue or undated</option>
+                                <option value="due">due — dated, today or past</option>
+                              </select>
+                            </div>
+                            <label className="switch">
+                              <input type="checkbox" checked={!!d.triage} onChange={(e) => patchDuty(d.id, { triage: e.target.checked })} />
+                              <span className="switch-track" />
+                              Triage quick wins before scanning
+                            </label>
+                            <label className="switch">
+                              <input type="checkbox" checked={!!d.query_client_only} onChange={(e) => patchDuty(d.id, { query_client_only: e.target.checked })} />
+                              <span className="switch-track" />
+                              Client deliverables only
+                            </label>
+                          </>
+                        )}
+                        <div className="agents-field">
+                          <label>Cards / heartbeat (0 = all)</label>
+                          <input
+                            type="number" min="0"
+                            defaultValue={d.max_cards_per_heartbeat}
+                            onBlur={(e) => patchDuty(d.id, { max_cards_per_heartbeat: Number(e.target.value) || 0 })}
+                            autoComplete="off" data-form-type="other"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="agents-field">
+                          <label>Home card #</label>
+                          <input
+                            type="number" min="0"
+                            defaultValue={d.target_project_id ?? ""}
+                            onBlur={(e) => patchDuty(d.id, { target_project_id: Number(e.target.value) || 0 })}
+                            autoComplete="off" data-form-type="other"
+                          />
+                          {d.target_project_id && (
+                            <button className="agents-queue-toggle" onClick={() => onOpenProject?.(d.target_project_id)}>open card →</button>
+                          )}
+                        </div>
+                        <div className="agents-field">
+                          <label>Cadence (days between runs; 0 = every turn)</label>
+                          <input
+                            type="number" min="0"
+                            defaultValue={d.cadence_days}
+                            onBlur={(e) => patchDuty(d.id, { cadence_days: Number(e.target.value) || 0 })}
+                            autoComplete="off" data-form-type="other"
+                          />
+                        </div>
+                        {d.last_run_at && <div className="agents-queue-meta">Last run: {fmtQueueTime(d.last_run_at)}</div>}
+                      </>
+                    )}
+
+                    <div className="agents-field">
+                      <label>Attached agents</label>
+                      <div className="agents-day-chips">
+                        {d.agents.map((a) => (
+                          <span key={a.id} className="agents-day-chip on">
+                            {a.name.replace(/ Agent$/, "")}
+                            <button className="agents-duties-detachx" title="Detach" onClick={() => detach(d.id, a.id)}>×</button>
+                          </span>
+                        ))}
+                        <select value="" onChange={(e) => attach(d.id, e.target.value)}>
+                          <option value="">+ attach…</option>
+                          {(agents || [])
+                            .filter((a) => a.role !== "supervisor" && !d.agents.some((x) => x.id === a.id))
+                            .map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    {fileDraft?.id === d.id ? (
+                      <div className="agents-field agents-duties-file">
+                        <label>duty.md</label>
+                        <textarea
+                          rows={16}
+                          value={fileDraft.text}
+                          onChange={(e) => setFileDraft({ id: d.id, text: e.target.value })}
+                        />
+                        <div>
+                          <button onClick={saveFile}>Save</button>
+                          <button onClick={() => setFileDraft(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button className="agents-queue-toggle" onClick={() => openFile(d)}>▸ Edit instructions (duty.md)</button>
+                    )}
+
+                    <button className="agents-queue-toggle agents-duties-delete" onClick={() => removeDuty(d)}>Delete duty</button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 // Admin roster of OpenDia Agents (ODAs). List view polls like Rooms; clicking
 // a row opens the detail view, which owns its own fetching and live stream.
 export default function Agents({ projects, onOpenProject }) {
@@ -462,6 +743,7 @@ export default function Agents({ projects, onOpenProject }) {
 
       <OperatorInbox onOpenProject={onOpenProject} />
       <SupervisorQueue onOpenProject={onOpenProject} />
+      <DutiesPanel agents={agents} onOpenProject={onOpenProject} />
     </div>
   );
 }

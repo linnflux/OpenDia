@@ -1053,6 +1053,10 @@ export async function startScan(project, startedBy, opts = {}) {
   // ODA context: {slug, name, model, budgetUsd}. Persisted on the run so act
   // rounds (spawnPhase resume) keep the agent's model/budget and guard jail.
   run.agent = opts.agent || null;
+  // The duty this run serves, when the agent works from duties: {slug, name}.
+  // agent.md is identity, duty.md is the task — the preamble sends the
+  // session to both.
+  run.duty = opts.duty || null;
   runs.set(String(project.id), run);
 
   // The brief is built before the spawn so the first fronts light up fast.
@@ -1072,7 +1076,12 @@ export async function startScan(project, startedBy, opts = {}) {
       `${HOME}/OpenDia/agents/${run.agent.slug}/agent.md (your expertise and operating rules) and ` +
       `${HOME}/OpenDia/agents/${run.agent.slug}/memory.md (your scratchpad). Apply that expertise ` +
       `throughout. After writing the result JSON, append any durable learnings to memory.md as ` +
-      `dated bullets, newest first — keep the file under 60 lines, pruning the oldest entries.\n\n`
+      `dated bullets, newest first — keep the file under 60 lines, pruning the oldest entries.\n\n` +
+      (run.duty
+        ? `Your assignment for this run is the duty "${run.duty.name}": read ` +
+          `${HOME}/OpenDia/duties/${run.duty.slug}/duty.md FIRST and follow it — agent.md is your ` +
+          `identity, duty.md is your task and its rules take precedence for this run.\n\n`
+        : "")
     : "";
 
   const proc = spawnPhase(run, {

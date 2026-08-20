@@ -5704,7 +5704,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .runroom-summary-note { color: var(--text-notes); font-size: 0.78rem; }
 
-.runroom-list { max-width: 640px; margin: 1rem auto; display: flex; flex-direction: column; gap: 0.5rem; }
+.runroom-list { max-width: 680px; margin: 1rem auto; display: flex; flex-direction: column; gap: 0.5rem; }
 .runroom-list-item {
   display: flex; align-items: center; gap: 0.7rem; width: 100%;
   padding: 0.7rem 0.9rem; background: var(--bg-card);
@@ -7019,6 +7019,94 @@ html.vt-no-target::view-transition-old(card-morph) {
   }
 }
 
+/* ── Room list card (shared: Runrooms list + Planrooms archive) ──
+   Brand rail on the left (division wordmark, company mark stacked beneath),
+   body on the right: near-full-width title with the state pill top-right,
+   meta line along the bottom. Ring grammar copied from .runroom-list-item. */
+.room-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  align-items: start;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer; font-family: inherit; text-align: left;
+}
+.room-card:hover { border-color: var(--border-hover); background: var(--bg-hover); }
+.room-card-brand {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 0.5rem; min-width: 118px; max-width: 150px;
+}
+.room-card-mark { height: 28px; width: auto; max-width: 140px; object-fit: contain; }
+.room-card-body { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.room-card-top { display: flex; align-items: flex-start; gap: 0.6rem; }
+.room-card-title {
+  flex: 1; min-width: 0;
+  color: var(--text-primary); font-size: 1rem; font-weight: 600; line-height: 1.35;
+}
+.room-card-pct { margin-right: 0.5rem; font-variant-numeric: tabular-nums; }
+.room-card-state {
+  flex: 0 0 auto;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-pill);
+}
+.room-card-state.working { color: #54af4d; border: 1px solid #54af4d; }
+.room-card-state.dialog, .room-card-state.input, .room-card-state.needs {
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}
+.room-card-state.gone { color: var(--danger); border: 1px solid var(--danger); }
+.room-card-state.adopted { color: var(--accent); border: 1px solid var(--accent); }
+.room-card-state.finished { color: var(--text-secondary); border: 1px solid var(--border); }
+.room-card-meta { color: var(--text-secondary); font-size: 0.72rem; }
+
+.company-mark { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.company-mark-badge {
+  flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 0.55rem; font-weight: 700; letter-spacing: 0.02em;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+.company-mark-name {
+  font-size: 0.7rem; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Ring grammar, mirrored from .runroom-list-item.{needs,working,finished}. */
+.room-card.needs { box-shadow: 0 0 0 2px var(--warning); border-color: transparent; }
+.room-card.working {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+    conic-gradient(from var(--rr-angle),
+      #54af4d 0deg, rgba(84, 175, 77, 0.12) 70deg,
+      rgba(84, 175, 77, 0.12) 110deg, #54af4d 180deg,
+      rgba(84, 175, 77, 0.12) 250deg, rgba(84, 175, 77, 0.12) 290deg,
+      #54af4d 360deg) border-box;
+  box-shadow: 0 0 14px -6px rgba(84, 175, 77, 0.55);
+  animation: rr-sweep 2.8s linear infinite;
+}
+.room-card.finished { opacity: 0.65; }
+.room-card.finished:hover { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .room-card.working {
+    animation: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 2px #54af4d;
+  }
+}
+
 /* All-steps-done banner: work over, room not yet closed. */
 .runroom-alldone {
   max-width: 640px;
@@ -7195,6 +7283,38 @@ html.vt-no-target::view-transition-old(card-morph) {
   cursor: pointer;
 }
 .agents-inbox-ack:hover { color: var(--timer-open); border-color: var(--timer-open); }
+
+/* Duties panel — reuses queue rows; only the editor bits are new. */
+.agents-duties-new { margin-left: auto; }
+.agents-duties-detail { display: flex; flex-direction: column; gap: 0.55rem; }
+.agents-duties-detail .agents-field select,
+.agents-duties-detail .agents-field input { max-width: 22rem; }
+.agents-duties-detachx {
+  background: none; border: none; cursor: pointer;
+  color: inherit; font-size: 0.8em; padding: 0 0 0 0.3rem;
+}
+.agents-duties-file textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  background: var(--bg-recessed);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.8rem;
+}
+.agents-duties-file div { display: flex; gap: 0.4rem; margin-top: 0.35rem; }
+.agents-duties-delete { color: var(--danger); }
+.agents-duties-delete:hover { color: var(--danger); }
+.agents-duty-order { color: var(--text-faint); font-size: 0.78rem; }
+.agents-duty-note {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  line-height: 1.45;
+  margin-top: 0.45rem;
+}
+.agents-duty-add select { max-width: 22rem; }
 
 /* Agent detail — collapsible panel carets (Settings, Matching/Assigned cards). */
 .agents-collapse-caret {
@@ -7443,13 +7563,6 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .planroom-adopted code { font-family: var(--font-mono); font-size: 0.78rem; }
 
-.planroom-list-pct {
-  display: inline-block;
-  min-width: 3ch;
-  margin-right: 0.5rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
 .planroom-all-toggle {
   background: none;
   border: none;

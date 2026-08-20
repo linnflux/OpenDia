@@ -28,6 +28,8 @@ import {
   insertAgentRun, updateAgentRun, getAgentRuns, interruptStaleAgentRuns,
   getProjectById, getProjectsByStatuses, markAgentDigest, getAgentRunsSince,
   getOperatorAckKeys, ackOperatorItems,
+  getAllDuties, getDutyById, createDuty, updateDuty, deleteDuty,
+  getAgentDuties, assignDuty, unassignDuty, markDutyRun, bumpDutyCursor,
 } from "./db.js";
 import {
   startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT,
@@ -143,6 +145,41 @@ function readAgentFile(slug, file) {
   try { return readFileSync(path, "utf8"); } catch { return ""; }
 }
 
+// Duty instruction files: ~/OpenDia/duties/<slug>/duty.md. The duty row holds
+// the machine config; duty.md holds the instructions the spark session reads
+// (agent.md is identity, duty.md is the task).
+const DUTIES_ROOT = `${HOME}/OpenDia/duties`;
+
+function dutyDir(slug) {
+  return `${DUTIES_ROOT}/${slug}`;
+}
+
+function scaffoldDutyFile(duty) {
+  const dir = dutyDir(duty.slug);
+  mkdirSync(dir, { recursive: true });
+  const dutyMd = `${dir}/duty.md`;
+  if (!existsSync(dutyMd)) {
+    writeFileSync(dutyMd,
+`---
+name: ${duty.name}
+slug: ${duty.slug}
+description: One-line scope summary
+metadata:
+  type: oda-duty
+---
+# Scope
+(what this duty is — fill in before assigning)
+
+# Rules
+- Scan & propose only. Draft actions; a human approves anything external.
+`);
+  }
+}
+
+function readDutyFile(slug) {
+  try { return readFileSync(`${dutyDir(slug)}/duty.md`, "utf8"); } catch { return ""; }
+}
+
 // ── schedule gate ──────────────────────────────────────────────────────────
 
 // JS getDay() convention: 0=Sun..6=Sat, matching schedule_days.
@@ -239,20 +276,25 @@ function lastSparkAt(projectId) {
 // self-draining: a scan that writes a future-dated next step removes the card
 // from a 'stale' query, and the card re-enters when that date passes. The 24h
 // guard stops a card whose scan produced no date from looping every heartbeat.
-function rosterFor(agent) {
-  if (agent.roster_mode !== "query") return getAgentProjects(agent.id);
-  const statuses = String(agent.query_status || "")
+//
+// cfg is where the roster CONFIG comes from: a duty row when the agent works
+// from duties, or the agent row itself (legacy columns) when it has none —
+// the two carry the same field names by design. Static mode always means the
+// AGENT's assigned cards; assignment stays agent-level.
+function rosterFor(agent, cfg = agent) {
+  if (cfg.roster_mode !== "query") return getAgentProjects(agent.id);
+  const statuses = String(cfg.query_status || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
   let rows = getProjectsByStatuses(statuses);
   const now = etNow();
   const today = `${now.YYYY}-${now.MM}-${now.DD}`;
-  if (agent.query_next_step === "stale") {
+  if (cfg.query_next_step === "stale") {
     // Overdue or undated: the WFHuman-backlog shape.
     rows = rows.filter((r) => {
       const m = NEXT_STEP_DATE_RE.exec(r.next_step || "");
       return !m || m[1] < today;
     });
-  } else if (agent.query_next_step === "due") {
+  } else if (cfg.query_next_step === "due") {
     // Dated, today or past: the quick-win shape. Undated cards are excluded
     // on purpose — an undated In Progress card usually means work in flight.
     rows = rows.filter((r) => {
@@ -260,7 +302,7 @@ function rosterFor(agent) {
       return m && m[1] <= today;
     });
   }
-  if (agent.query_client_only) {
+  if (cfg.query_client_only) {
     // Client deliverables only: a real Company set, and not our own house.
     // OpenDia exists to help Linnflux deliver — internal admin can wait.
     rows = rows.filter((r) => r.company_name && r.company_name !== "Linnflux");
@@ -398,13 +440,70 @@ async function triageFirstFit(agent, rows, state, want) {
   return { cards: selected, rejects };
 }
 
+// Is this duty worth a run right now? Cheap checks only — the sweep roster
+// query and the routine cadence stamp.
+function dutyHasWork(agent, duty) {
+  if (duty.kind === "routine") {
+    if (!duty.target_project_id) return false;
+    if (!getProjectById(duty.target_project_id)) return false;
+    if (duty.last_run_at && duty.cadence_days > 0) {
+      const lastMs = new Date(duty.last_run_at.replace(" ", "T") + "Z").getTime();
+      if (Date.now() - lastMs < duty.cadence_days * 24 * 3600 * 1000) return false;
+    }
+    const existing = getSparkRun(duty.target_project_id);
+    if (existing && !existing.finishedAt) return false;
+    const busy = listRunningTimers().some((t) => t.data.project_id === duty.target_project_id);
+    return !busy;
+  }
+  return rosterFor(agent, duty).length > 0;
+}
+
 async function runHeartbeat(agent, state) {
   if (agent.role === "supervisor") return runSupervisorHeartbeat(agent, state);
-  const assigned = rosterFor(agent);
+
+  // Duties are the unit of work when the agent has any: one duty per
+  // heartbeat, round-robin from duty_cursor, skipping duties with nothing to
+  // do so a quiet duty never wastes the slot. No duties → the legacy path,
+  // driven by the agent's own roster columns, unchanged.
+  const duties = getAgentDuties(agent.id);
+  if (duties.length === 0) return runSweep(agent, state, null);
+
+  const start = agent.duty_cursor % duties.length;
+  for (let i = 0; i < duties.length; i++) {
+    const idx = (start + i) % duties.length;
+    const duty = duties[idx];
+    if (!dutyHasWork(agent, duty)) continue;
+    bumpDutyCursor(agent.id, (idx + 1) % duties.length);
+    pushLog(state, "info", `Duty this heartbeat: ${duty.name} [${duty.slug}].`);
+    if (duty.kind === "routine") return runRoutine(agent, state, duty);
+    return runSweep(agent, state, duty);
+  }
+
+  updateAgentRun(state.runId, { status: "done", summary: "No duty has work right now.", finished: true });
+  markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat: !state.manual });
+  finishHeartbeat(agent, state, "done");
+}
+
+// A routine duty is a one-card sweep against its home card, with a cadence
+// stamp so it re-fires on its rhythm, not every heartbeat. The stamp lands
+// only after the scan actually started and settled — a failed start retries
+// on the next heartbeat instead of silently waiting out a whole cadence.
+async function runRoutine(agent, state, duty) {
+  const project = getProjectById(duty.target_project_id);
+  await runSweep(agent, state, duty, [project]);
+  if (state.cardsDone > 0) markDutyRun(duty.id);
+}
+
+async function runSweep(agent, state, duty, fixedCards = null) {
+  // The duty carries the work config; a duty-less agent works from its own
+  // columns (same field names — that is the migration seam).
+  const cfg = duty || agent;
+  const tag = duty ? `[${duty.slug}] ` : "";
+  const assigned = fixedCards || rosterFor(agent, cfg);
   const touchHeartbeat = !state.manual;
   if (assigned.length === 0) {
-    const emptyMsg = agent.roster_mode === "query"
-      ? "No cards match the roster query." : "No projects assigned.";
+    const emptyMsg = tag + (cfg.roster_mode === "query"
+      ? "No cards match the roster query." : "No projects assigned.");
     updateAgentRun(state.runId, { status: "done", summary: emptyMsg, finished: true });
     markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
     finishHeartbeat(agent, state, "done");
@@ -415,22 +514,22 @@ async function runHeartbeat(agent, state) {
   // left off; a query roster is already ordered stalest-first and self-drains,
   // so rotation would only scramble it.
   let cards;
-  if (agent.roster_mode === "query") {
+  if (fixedCards || cfg.roster_mode === "query") {
     cards = assigned;
   } else {
     const cursor = agent.rotation_cursor % assigned.length;
     cards = [...assigned.slice(cursor), ...assigned.slice(0, cursor)];
   }
   let triageRejects = [];
-  if (agent.roster_mode === "query" && agent.triage) {
-    const want = agent.max_cards_per_heartbeat > 0 ? agent.max_cards_per_heartbeat : cards.length;
+  if (!fixedCards && cfg.roster_mode === "query" && cfg.triage) {
+    const want = cfg.max_cards_per_heartbeat > 0 ? cfg.max_cards_per_heartbeat : cards.length;
     pushLog(state, "info", `Hunting for a quick win across ${cards.length} match(es)…`);
     const t = await triageFirstFit(agent, cards, state, want);
     cards = t.cards;
     triageRejects = t.rejects;
     pushLog(state, "info", `Triage: ${cards.length} pick(s) after ${cards.length + t.rejects.length} judgment(s).`);
-  } else if (agent.max_cards_per_heartbeat > 0) {
-    cards = cards.slice(0, agent.max_cards_per_heartbeat);
+  } else if (cfg.max_cards_per_heartbeat > 0) {
+    cards = cards.slice(0, cfg.max_cards_per_heartbeat);
   }
   state.cardsTotal = cards.length;
   pushLog(state, "info", `Heartbeat started — ${cards.length} card(s), token limit ${agent.heartbeat_token_limit}.`);
@@ -485,6 +584,7 @@ async function runHeartbeat(agent, state) {
           model: agent.model,
           budgetUsd: agent.run_budget_usd,
         },
+        duty: duty ? { slug: duty.slug, name: duty.name } : undefined,
       });
       await waitForScan(sparkRun);
     } catch (err) {
@@ -507,6 +607,7 @@ async function runHeartbeat(agent, state) {
       project_id: card.id,
       name: card.name,
       spark_run_id: sparkRun.id,
+      ...(duty ? { duty: duty.slug } : {}),
       status: sparkRun.error ? "error" : sparkRun.status,
       tokens,
       cost_usd: sparkRun.costUsd || 0,
@@ -533,7 +634,7 @@ async function runHeartbeat(agent, state) {
   }
 
   const proposals = details.reduce((n, d) => n + (d.awaiting || 0), 0);
-  const summary =
+  const summary = tag +
     `Swept ${state.cardsDone}/${cards.length} card(s), ${proposals} next step(s) awaiting a decision` +
     (finalStatus === "budget_exhausted" ? " — token limit hit" : "") +
     (finalStatus === "error" ? " — stopped early" : "") + ".";
@@ -546,7 +647,7 @@ async function runHeartbeat(agent, state) {
     detail: JSON.stringify(details),
     finished: true,
   });
-  const nextCursor = agent.roster_mode === "query"
+  const nextCursor = (fixedCards || cfg.roster_mode === "query")
     ? agent.rotation_cursor
     : (agent.rotation_cursor + ran) % assigned.length;
   markAgentHeartbeat(agent.id, nextCursor, { touchHeartbeat });
@@ -1202,6 +1303,112 @@ export function mountAgents(app) {
     }
   });
 
+  // ── Duties: reusable scope-of-work units. The row is machine config, the
+  // duty.md is the instructions; agents bind via agent_duties and rotate.
+  app.get("/api/duties", requireAdmin, (_req, res) => {
+    try {
+      res.json(getAllDuties());
+    } catch (err) {
+      console.error("GET /api/duties error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/duties", requireAdmin, (req, res) => {
+    const name = (req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "name is required" });
+    const kind = req.body?.kind === "routine" ? "routine" : "sweep";
+    try {
+      const duty = createDuty({ slug: slugify(name), name, kind });
+      scaffoldDutyFile(duty);
+      res.status(201).json(duty);
+    } catch (err) {
+      if (/UNIQUE/.test(err.message)) return res.status(409).json({ error: "a duty with that slug already exists" });
+      console.error("POST /api/duties error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/duties/:id", requireAdmin, (req, res) => {
+    const duty = getDutyById(req.params.id);
+    if (!duty) return res.status(404).json({ error: "duty not found" });
+    const fields = { ...req.body };
+    if (fields.kind !== undefined && !["sweep", "routine"].includes(fields.kind)) {
+      return res.status(400).json({ error: "kind must be sweep or routine" });
+    }
+    if (fields.roster_mode !== undefined && !["query", "static"].includes(fields.roster_mode)) {
+      return res.status(400).json({ error: "roster_mode must be query or static" });
+    }
+    if (fields.query_next_step !== undefined && !["any", "stale", "due"].includes(fields.query_next_step)) {
+      return res.status(400).json({ error: "query_next_step must be any, stale, or due" });
+    }
+    for (const k of ["query_client_only", "triage"]) {
+      if (fields[k] !== undefined) fields[k] = fields[k] ? 1 : 0;
+    }
+    for (const k of ["max_cards_per_heartbeat", "cadence_days", "target_project_id"]) {
+      if (fields[k] !== undefined && fields[k] !== null) {
+        const n = Number(fields[k]);
+        if (!Number.isInteger(n) || n < 0) return res.status(400).json({ error: `${k} must be a non-negative integer` });
+        fields[k] = n === 0 && k === "target_project_id" ? null : n;
+      }
+    }
+    if (fields.target_project_id != null && !getProjectById(fields.target_project_id)) {
+      return res.status(400).json({ error: `no card #${fields.target_project_id}` });
+    }
+    try {
+      updateDuty(duty.id, fields);
+      res.json(getDutyById(duty.id));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/duties/:id", requireAdmin, (req, res) => {
+    const duty = getDutyById(req.params.id);
+    if (!duty) return res.status(404).json({ error: "duty not found" });
+    // The duty.md stays on disk — instructions are cheap to keep and painful
+    // to lose; only the binding and the row go.
+    deleteDuty(duty.id);
+    res.json({ deleted: true });
+  });
+
+  app.get("/api/duties/:id/file", requireAdmin, (req, res) => {
+    const duty = getDutyById(req.params.id);
+    if (!duty) return res.status(404).json({ error: "duty not found" });
+    res.json({ duty_md: readDutyFile(duty.slug) });
+  });
+
+  app.put("/api/duties/:id/file", requireAdmin, (req, res) => {
+    const duty = getDutyById(req.params.id);
+    if (!duty) return res.status(404).json({ error: "duty not found" });
+    const content = req.body?.duty_md;
+    if (typeof content !== "string") return res.status(400).json({ error: "duty_md string required" });
+    try {
+      mkdirSync(dutyDir(duty.slug), { recursive: true });
+      writeFileSync(`${dutyDir(duty.slug)}/duty.md`, content);
+      res.json({ saved: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/agents/:id/duties", requireAdmin, (req, res) => {
+    const agent = getAgentById(req.params.id);
+    if (!agent) return res.status(404).json({ error: "agent not found" });
+    const duty = getDutyById(req.body?.duty_id);
+    if (!duty) return res.status(400).json({ error: "duty_id required" });
+    const position = Number.isInteger(req.body?.position) ? req.body.position : 0;
+    assignDuty(agent.id, duty.id, position);
+    res.json({ duties: getAgentDuties(agent.id) });
+  });
+
+  app.delete("/api/agents/:id/duties/:dutyId", requireAdmin, (req, res) => {
+    const agent = getAgentById(req.params.id);
+    if (!agent) return res.status(404).json({ error: "agent not found" });
+    unassignDuty(agent.id, req.params.dutyId);
+    res.json({ duties: getAgentDuties(agent.id) });
+  });
+
   app.post("/api/agents", requireAdmin, (req, res) => {
     const name = (req.body?.name || "").trim();
     if (!name) return res.status(400).json({ error: "name is required" });
@@ -1227,6 +1434,7 @@ export function mountAgents(app) {
       memory_md: memoryMd,
       memory_lines: memoryMd ? memoryMd.split("\n").length : 0,
       runs: getAgentRuns(agent.id, 25),
+      duties: getAgentDuties(agent.id),
       live: publicLive(live.get(agent.id)),
     });
   });

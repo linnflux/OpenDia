@@ -692,6 +692,36 @@ export function ensureAgentsTables() {
       key      TEXT PRIMARY KEY,
       acked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    -- 2026-08-20: Duties — named, reusable scope-of-work units attachable to
+    -- one or more agents. The agent row keeps identity (persona, schedule,
+    -- model, budgets); a duty carries the work: either a card-roster sweep
+    -- (the config that used to live on the agent columns) or a recurring
+    -- routine procedure aimed at a home card. slug is immutable — it is the
+    -- filesystem path of the instruction file ~/OpenDia/duties/<slug>/duty.md.
+    CREATE TABLE IF NOT EXISTS duties (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug                    TEXT NOT NULL UNIQUE,
+      name                    TEXT NOT NULL,
+      kind                    TEXT NOT NULL DEFAULT 'sweep',
+      roster_mode             TEXT NOT NULL DEFAULT 'query',
+      query_status            TEXT,
+      query_next_step         TEXT NOT NULL DEFAULT 'any',
+      query_client_only       INTEGER NOT NULL DEFAULT 0,
+      triage                  INTEGER NOT NULL DEFAULT 0,
+      max_cards_per_heartbeat INTEGER NOT NULL DEFAULT 1,
+      target_project_id       INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+      cadence_days            INTEGER NOT NULL DEFAULT 0,
+      last_run_at             TEXT,
+      created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at              TEXT
+    );
+    CREATE TABLE IF NOT EXISTS agent_duties (
+      agent_id    INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      duty_id     INTEGER NOT NULL REFERENCES duties(id) ON DELETE CASCADE,
+      position    INTEGER NOT NULL DEFAULT 0,
+      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (agent_id, duty_id)
+    );
   `);
   // Migrate: query rosters + chat modes (added after the original agents schema).
   const cols = db.pragma("table_info(agents)").map((r) => r.name);
@@ -737,6 +767,11 @@ export function ensureAgentsTables() {
   // client Company set (not Linnflux-internal, not unassigned).
   if (!cols.includes("query_client_only")) {
     db.exec("ALTER TABLE agents ADD COLUMN query_client_only INTEGER NOT NULL DEFAULT 0");
+  }
+  // Duty rotation: which of the agent's duties the next heartbeat starts
+  // from. Distinct from rotation_cursor (static-roster card rotation).
+  if (!cols.includes("duty_cursor")) {
+    db.exec("ALTER TABLE agents ADD COLUMN duty_cursor INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -859,6 +894,92 @@ export function unassignAgentProject(agentId, projectId) {
   return getDb().prepare(
     "DELETE FROM agent_projects WHERE agent_id = ? AND project_id = ?"
   ).run(agentId, projectId).changes > 0;
+}
+
+// ── Duties ────────────────────────────────────────────────────────────────
+
+const DUTY_UPDATABLE_FIELDS = new Set([
+  "name", "kind", "roster_mode", "query_status", "query_next_step",
+  "query_client_only", "triage", "max_cards_per_heartbeat",
+  "target_project_id", "cadence_days",
+]);
+
+export function getAllDuties() {
+  const duties = getDb().prepare("SELECT * FROM duties ORDER BY name COLLATE NOCASE ASC").all();
+  const bindings = getDb().prepare(`
+    SELECT ad.duty_id, ad.position, a.id AS agent_id, a.slug, a.name
+    FROM agent_duties ad JOIN agents a ON a.id = ad.agent_id
+    ORDER BY ad.position ASC, ad.assigned_at ASC
+  `).all();
+  for (const d of duties) {
+    d.agents = bindings.filter((b) => b.duty_id === d.id)
+      .map((b) => ({ id: b.agent_id, slug: b.slug, name: b.name, position: b.position }));
+  }
+  return duties;
+}
+
+export function getDutyById(id) {
+  return getDb().prepare("SELECT * FROM duties WHERE id = ?").get(id);
+}
+
+export function getDutyBySlug(slug) {
+  return getDb().prepare("SELECT * FROM duties WHERE slug = ?").get(slug);
+}
+
+export function createDuty({ slug, name, kind = "sweep" }) {
+  const info = getDb().prepare(
+    "INSERT INTO duties (slug, name, kind) VALUES (?, ?, ?)"
+  ).run(slug, name, kind);
+  return getDutyById(info.lastInsertRowid);
+}
+
+export function updateDuty(id, fields) {
+  const sets = [];
+  const vals = [];
+  for (const [key, val] of Object.entries(fields)) {
+    if (!DUTY_UPDATABLE_FIELDS.has(key)) continue;
+    sets.push(`${key} = ?`);
+    vals.push(val);
+  }
+  if (sets.length === 0) throw new Error("No valid fields to update");
+  sets.push("updated_at = datetime('now')");
+  vals.push(id);
+  return getDb().prepare(`UPDATE duties SET ${sets.join(", ")} WHERE id = ?`).run(...vals).changes > 0;
+}
+
+export function deleteDuty(id) {
+  return getDb().prepare("DELETE FROM duties WHERE id = ?").run(id).changes > 0;
+}
+
+export function getAgentDuties(agentId) {
+  return getDb().prepare(`
+    SELECT d.*, ad.position FROM agent_duties ad
+    JOIN duties d ON d.id = ad.duty_id
+    WHERE ad.agent_id = ?
+    ORDER BY ad.position ASC, ad.assigned_at ASC
+  `).all(agentId);
+}
+
+export function assignDuty(agentId, dutyId, position = 0) {
+  return getDb().prepare(
+    "INSERT OR IGNORE INTO agent_duties (agent_id, duty_id, position) VALUES (?, ?, ?)"
+  ).run(agentId, dutyId, position).changes > 0;
+}
+
+export function unassignDuty(agentId, dutyId) {
+  return getDb().prepare(
+    "DELETE FROM agent_duties WHERE agent_id = ? AND duty_id = ?"
+  ).run(agentId, dutyId).changes > 0;
+}
+
+// Bookkeeping writes — deliberately outside the PATCH allowlist, like
+// markAgentDigest.
+export function markDutyRun(id) {
+  getDb().prepare("UPDATE duties SET last_run_at = datetime('now') WHERE id = ?").run(id);
+}
+
+export function bumpDutyCursor(agentId, value) {
+  getDb().prepare("UPDATE agents SET duty_cursor = ? WHERE id = ?").run(value, agentId);
 }
 
 export function insertAgentRun({ id, agentId, trigger, status, summary = null, detail = null }) {

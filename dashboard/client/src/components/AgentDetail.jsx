@@ -44,6 +44,7 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
   // demand. Editing a file implicitly holds it open.
   const [openFiles, setOpenFiles] = useState({});
   const [liveState, setLiveState] = useState(null);
+  const [allDuties, setAllDuties] = useState([]);
   const esRef = useRef(null);
 
   const fetchAgent = useCallback(() => {
@@ -61,6 +62,25 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
     const t = setInterval(fetchAgent, 15000);
     return () => clearInterval(t);
   }, [fetchAgent]);
+
+  useEffect(() => {
+    fetch("/api/duties").then((r) => (r.ok ? r.json() : []))
+      .then(setAllDuties).catch(() => {});
+  }, [agentId]);
+
+  async function attachDuty(dutyId) {
+    await fetch(`/api/agents/${agentId}/duties`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duty_id: Number(dutyId), position: (agent?.duties || []).length }),
+    }).catch(() => {});
+    fetchAgent();
+  }
+
+  async function detachDuty(dutyId) {
+    await fetch(`/api/agents/${agentId}/duties/${dutyId}`, { method: "DELETE" }).catch(() => {});
+    fetchAgent();
+  }
 
   // Live heartbeat log: connect whenever the agent reports an active run.
   useEffect(() => {
@@ -439,6 +459,47 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
 
         {!isSupervisor && (
         <section className="agents-panel agents-panel-wide">
+          <h3>Duties ({(agent.duties || []).length})</h3>
+          {(agent.duties || []).length === 0 ? (
+            <div className="agents-empty">
+              No duties — this agent runs from its own roster settings below (legacy mode).
+            </div>
+          ) : (
+            <ul className="agents-project-list">
+              {(agent.duties || []).map((d, i) => (
+                <li key={d.id}>
+                  <span className="agents-duty-order">{i + 1}.</span>
+                  <span className="agents-project-link" style={{ cursor: "default" }}>{d.name}</span>
+                  <span className="agents-project-meta">
+                    {d.kind}{d.kind === "routine"
+                      ? ` · every ${d.cadence_days || "∞"}d · card #${d.target_project_id ?? "?"}`
+                      : ` · ${d.query_status || "any status"} · ${d.query_next_step}${d.query_client_only ? " · client-only" : ""}${d.triage ? " · triage" : ""}`}
+                  </span>
+                  <button className="agents-remove-btn" onClick={() => detachDuty(d.id)} title="Detach duty">×</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {allDuties.filter((d) => !(agent.duties || []).some((x) => x.id === d.id)).length > 0 && (
+            <div className="agents-field agents-duty-add">
+              <label>Attach a duty</label>
+              <select value="" onChange={(e) => e.target.value && attachDuty(e.target.value)}>
+                <option value="">— pick a duty —</option>
+                {allDuties
+                  .filter((d) => !(agent.duties || []).some((x) => x.id === d.id))
+                  .map((d) => <option key={d.id} value={d.id}>{d.name} ({d.kind})</option>)}
+              </select>
+            </div>
+          )}
+          <div className="agents-duty-note">
+            One duty runs per heartbeat, rotating in the order above and skipping duties with
+            nothing to do. Duty settings and instructions are edited on the Agents page.
+          </div>
+        </section>
+        )}
+
+        {!isSupervisor && (
+        <section className="agents-panel agents-panel-wide">
           <h3><button className="agents-collapse-caret" title="Collapse / expand" onClick={() => togglePanel("cards")}>{closedPanels.cards ? "▸" : "▾"}</button>
             {isQuery ? `Matching cards (${agent.projects.length} right now)` : `Assigned cards (${agent.projects.length})`}
             <span className="agents-roster-toggle">
@@ -460,7 +521,14 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
             )}
           </h3>
           {!closedPanels.cards && (<>
-          {isQuery && (
+          {(agent.duties || []).length > 0 && isQuery && (
+            <div className="agents-duty-note">
+              This agent works from duties — the query settings below are the legacy
+              fallback and only apply if every duty is detached. Each duty brings its
+              own roster at run time.
+            </div>
+          )}
+          {isQuery && (agent.duties || []).length === 0 && (
             <div className="agents-query-controls">
               <div className="agents-field">
                 <label>Card statuses</label>
