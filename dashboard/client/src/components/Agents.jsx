@@ -435,6 +435,15 @@ function DutiesPanel({ agents, onOpenProject }) {
                         <option value="routine">routine — recurring procedure on one card</option>
                       </select>
                     </div>
+                    <div className="agents-field">
+                      <label>Budget / run (USD; blank = agent default)</label>
+                      <input
+                        type="number" min="0" step="0.5"
+                        defaultValue={d.run_budget_usd ?? ""}
+                        onBlur={(e) => patchDuty(d.id, { run_budget_usd: e.target.value === "" ? null : Number(e.target.value) })}
+                        autoComplete="off" data-form-type="other"
+                      />
+                    </div>
                     {d.kind === "sweep" ? (
                       <>
                         <div className="agents-field">

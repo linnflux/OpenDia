@@ -486,12 +486,23 @@ async function runHeartbeat(agent, state) {
 
 // A routine duty is a one-card sweep against its home card, with a cadence
 // stamp so it re-fires on its rhythm, not every heartbeat. The stamp lands
-// only after the scan actually started and settled — a failed start retries
-// on the next heartbeat instead of silently waiting out a whole cadence.
+// only when the run actually delivered — a proposal sitting on the card. A
+// failed run leaves the cadence unstamped so the next heartbeat retries,
+// and says so in Chat, because a routine that silently waits out a whole
+// cadence after one bad run is a routine that never happened. (The first
+// live audit did exactly that: budget-killed on its final tool call, then
+// stamped as if done — parked for a month with no proposal to show.)
 async function runRoutine(agent, state, duty) {
   const project = getProjectById(duty.target_project_id);
   await runSweep(agent, state, duty, [project]);
-  if (state.cardsDone > 0) markDutyRun(duty.id);
+  const run = getSparkRun(duty.target_project_id);
+  const landed = run && !run.error && run.status === "proposing" && run.result?.next_step;
+  if (landed) {
+    markDutyRun(duty.id);
+  } else {
+    await notifyChat(agent.chat_webhook_url,
+      `${agent.name}: duty "${duty.name}" ran but landed no proposal — retrying next heartbeat.`);
+  }
 }
 
 async function runSweep(agent, state, duty, fixedCards = null) {
@@ -582,7 +593,9 @@ async function runSweep(agent, state, duty, fixedCards = null) {
           slug: agent.slug,
           name: agent.name,
           model: agent.model,
-          budgetUsd: agent.run_budget_usd,
+          // A duty may carry its own run budget (an audit is a bigger job
+          // than a card scan); otherwise the agent's ceiling applies.
+          budgetUsd: duty?.run_budget_usd ?? agent.run_budget_usd,
         },
         duty: duty ? { slug: duty.slug, name: duty.name } : undefined,
       });
@@ -1354,6 +1367,11 @@ export function mountAgents(app) {
     }
     if (fields.target_project_id != null && !getProjectById(fields.target_project_id)) {
       return res.status(400).json({ error: `no card #${fields.target_project_id}` });
+    }
+    if (fields.run_budget_usd !== undefined && fields.run_budget_usd !== null) {
+      const n = Number(fields.run_budget_usd);
+      if (!Number.isFinite(n) || n <= 0) return res.status(400).json({ error: "run_budget_usd must be a positive number (or null to inherit)" });
+      fields.run_budget_usd = n;
     }
     try {
       updateDuty(duty.id, fields);

@@ -773,6 +773,14 @@ export function ensureAgentsTables() {
   if (!cols.includes("duty_cursor")) {
     db.exec("ALTER TABLE agents ADD COLUMN duty_cursor INTEGER NOT NULL DEFAULT 0");
   }
+  // Per-duty run budget: a monthly audit is legitimately a bigger job than a
+  // card scan. NULL = inherit the agent's run_budget_usd. (First audit run
+  // proved this: 23 turns of clean work killed on the last tool call by the
+  // agent's $1.50 card-scan ceiling.)
+  const dutyCols = db.pragma("table_info(duties)").map((r) => r.name);
+  if (!dutyCols.includes("run_budget_usd")) {
+    db.exec("ALTER TABLE duties ADD COLUMN run_budget_usd REAL");
+  }
 }
 
 const AGENT_UPDATABLE_FIELDS = new Set([
@@ -901,7 +909,7 @@ export function unassignAgentProject(agentId, projectId) {
 const DUTY_UPDATABLE_FIELDS = new Set([
   "name", "kind", "roster_mode", "query_status", "query_next_step",
   "query_client_only", "triage", "max_cards_per_heartbeat",
-  "target_project_id", "cadence_days",
+  "target_project_id", "cadence_days", "run_budget_usd",
 ]);
 
 export function getAllDuties() {
