@@ -457,12 +457,13 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
           </>)}
         </section>
 
-        {!isSupervisor && (
         <section className="agents-panel agents-panel-wide">
           <h3>Duties ({(agent.duties || []).length})</h3>
           {(agent.duties || []).length === 0 ? (
             <div className="agents-empty">
-              No duties — this agent runs from its own roster settings below (legacy mode).
+              {isSupervisor
+                ? "No duties — this agent only reviews. Attach one to give quiet heartbeats work."
+                : "No duties — this agent runs from its own roster settings below (legacy mode)."}
             </div>
           ) : (
             <ul className="agents-project-list">
@@ -473,7 +474,9 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
                   <span className="agents-project-meta">
                     {d.kind}{d.kind === "routine"
                       ? ` · every ${d.cadence_days || "∞"}d · card #${d.target_project_id ?? "?"}`
-                      : ` · ${d.query_status || "any status"} · ${d.query_next_step}${d.query_client_only ? " · client-only" : ""}${d.triage ? " · triage" : ""}`}
+                      : d.roster_mode === "parked"
+                        ? " · parked planrooms due back"
+                        : ` · ${d.query_status || "any status"} · ${d.query_next_step}${d.query_client_only ? " · client-only" : ""}${d.triage ? " · triage" : ""}`}
                   </span>
                   <button className="agents-remove-btn" onClick={() => detachDuty(d.id)} title="Detach duty">×</button>
                 </li>
@@ -492,11 +495,11 @@ export default function AgentDetail({ agentId, projects, onOpenProject, onBack }
             </div>
           )}
           <div className="agents-duty-note">
-            One duty runs per heartbeat, rotating in the order above and skipping duties with
-            nothing to do. Duty settings and instructions are edited on the Agents page.
+            {isSupervisor
+              ? "The review queue always comes first — a duty runs only on heartbeats where there is nothing to review. Duty settings and instructions are edited on the Agents page."
+              : "One duty runs per heartbeat, rotating in the order above and skipping duties with nothing to do. Duty settings and instructions are edited on the Agents page."}
           </div>
         </section>
-        )}
 
         {!isSupervisor && (
         <section className="agents-panel agents-panel-wide">
