@@ -36,6 +36,17 @@ function planPath(cardId) {
   return `${PLANROOM_ROOT}/${cardId}/plan.json`;
 }
 
+/**
+ * The date a card is scheduled for, from the next_step calendar contract
+ * ("YYYY-MM-DD: action" or "YYYY-MM-DD HH:MM: action"). Null when undated.
+ * Shared by spark's recheck gate, the park route, and the ODA wake roster so
+ * they can never disagree about what "scheduled" means.
+ */
+export function nextStepDate(nextStep) {
+  const m = String(nextStep || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
 /** The standing plan for a card, or null. Never throws. */
 export function readPlanroom(cardId) {
   try {
@@ -258,6 +269,50 @@ export function markPlanroomAdopted(cardId, { session, planFile }) {
   if (!plan) return null;
   plan.status = "adopted";
   plan.adopted_by = { tmux_session: session, plan_file: planFile, at: etNow().iso };
+  plan.updated = etNow().iso;
+  writeFileSync(planPath(cardId), JSON.stringify(plan, null, 2));
+  return plan;
+}
+
+/**
+ * Park the standing plan until a date — normally the next_step's own date.
+ * A parked plan leaves the working set: the operator has decided nothing
+ * needs doing before then, so the room stops asking. Three things wake it:
+ * the date arriving (the ODA wake duty rechecks it), a delta check finding
+ * new communication, or a fresh full scan replacing the plan outright.
+ */
+export function markPlanroomParked(cardId, { until, by }) {
+  const plan = readPlanroom(cardId);
+  if (!plan) return null;
+  plan.status = "parked";
+  plan.parked = { until, at: etNow().iso, by: by || "" };
+  plan.note = `Parked until ${until} — nothing to do before then.`;
+  plan.updated = etNow().iso;
+  writeFileSync(planPath(cardId), JSON.stringify(plan, null, 2));
+  return plan;
+}
+
+/** Bring a parked plan back into play, with a note saying why it woke. */
+export function unparkPlanroom(cardId, { note } = {}) {
+  const plan = readPlanroom(cardId);
+  if (!plan || plan.status !== "parked") return null;
+  plan.status = "active";
+  delete plan.parked;
+  plan.note = note || "";
+  plan.updated = etNow().iso;
+  writeFileSync(planPath(cardId), JSON.stringify(plan, null, 2));
+  return plan;
+}
+
+/**
+ * A recheck came back clean: nothing new on any front, so the plan itself is
+ * untouched — no rewrite, no archive, no step churn. The stamp is the only
+ * trace, so the list can say "checked, no change" instead of looking stale.
+ */
+export function stampPlanroomChecked(cardId, { runId, by }) {
+  const plan = readPlanroom(cardId);
+  if (!plan?.planroom) return null;
+  plan.planroom.checked = { at: etNow().iso, by: by || "", spark_run_id: runId || null, no_change: true };
   plan.updated = etNow().iso;
   writeFileSync(planPath(cardId), JSON.stringify(plan, null, 2));
   return plan;

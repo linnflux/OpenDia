@@ -177,7 +177,7 @@ function SparkRecent({ recent }) {
  * emphasis moves to Adjust: a step Spark is not confident in is one to correct,
  * not one to point automation at.
  */
-function SparkDecision({ spark, showToast, onGoToRunroom, isAdmin }) {
+function SparkDecision({ spark, showToast, onGoToRunroom, isAdmin, parkUntil = null, onPark = null }) {
   const [adjusting, setAdjusting] = useState(false);
   const [note, setNote] = useState("");
 
@@ -302,6 +302,12 @@ function SparkDecision({ spark, showToast, onGoToRunroom, isAdmin }) {
           <button className="spark-btn spark-btn-quiet" onClick={() => act("stop")} disabled={!canAct}>
             Not now
           </button>
+          {parkUntil && onPark && (
+            <button className="spark-btn spark-btn-quiet" onClick={onPark} disabled={!canAct}
+                    title="Nothing to do before then — closes this proposal, the planroom leaves the working set, and it rechecks itself on the date">
+              Park until {fmtDay(parkUntil)}
+            </button>
+          )}
         </div>
       )}
 
@@ -438,6 +444,34 @@ export default function SparkPanel({
     }
   }
 
+  // The date the card is scheduled for — the freshly proposed one if a result
+  // is live, else the card's own. Parking never needs a date picker: "park"
+  // always means "until the next step's date".
+  const parkUntil = (() => {
+    const src = spark.result?.card_next_step || project.next_step || "";
+    const m = String(src).match(/^(\d{4}-\d{2}-\d{2})/);
+    if (!m) return null;
+    const today = new Date().toLocaleDateString("en-CA");
+    return m[1] > today ? m[1] : null;
+  })();
+
+  async function park() {
+    try {
+      const r = await fetch(`/api/planrooms/${project.id}/park`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return showToast(d?.error || `HTTP ${r.status}`);
+      showToast(`Parked until ${fmtDay(d.until)} — it rechecks itself on the date.`);
+      spark.loadHistory();
+      onRefresh?.();
+    } catch (e) {
+      showToast(e.message);
+    }
+  }
+
   function copyReport() {
     const r = spark.result;
     if (!r) return;
@@ -521,6 +555,12 @@ export default function SparkPanel({
                   I did this
                 </button>
               )}
+              {parkUntil && !standing.adopted && !standing.parked && (
+                <button className="spark-btn spark-btn-quiet" onClick={park} disabled={spark.busy || !isAdmin}
+                        title="Nothing to do before then — the planroom leaves the working set and rechecks itself on the date">
+                  Park until {fmtDay(parkUntil)}
+                </button>
+              )}
             </div>
           </div>
           <div className="spark-footer">
@@ -529,6 +569,10 @@ export default function SparkPanel({
                 {(standing.fronts || []).filter((f) => f.state === "checked" || f.state === "done").length} of {spark.frontOrder.length} fronts
               </span>
               {standing.route && <span className="spark-chip">{standing.route}</span>}
+              {standing.parked && <span className="spark-chip">parked until {fmtDay(standing.parked.until)}</span>}
+              {standing.checked && !standing.parked && (
+                <span className="spark-chip">checked {fmtDay(String(standing.checked.at || "").slice(0, 10))} · no change</span>
+              )}
             </div>
             <div className="spark-actions-row">
               <button className="spark-btn" onClick={() => setHistoryOpen((v) => !v)}>History</button>
@@ -670,6 +714,27 @@ export default function SparkPanel({
   const r = spark.result;
   if (!r) return null;
 
+  // A clean recheck: nothing new arrived, so the standing plan holds and the
+  // run left no other trace — no rewrite, no proposal, nothing billed.
+  if (r.no_change) {
+    return (
+      <div className="spark-panel">
+        <div className="spark-stage spark-result">
+          <p className="spark-stands">Checked — nothing new on any front. The standing plan holds.</p>
+          {r.note && <p className="spark-decision-why">{r.note}</p>}
+          <div className="spark-footer">
+            <div className="spark-chips">
+              <span className="spark-chip">
+                {(r.fronts || []).filter((f) => f.state === "checked" || f.state === "done").length} of {spark.frontOrder.length} fronts
+              </span>
+              <span className="spark-chip">no change · not billed</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const frontsChecked = (r.fronts || []).filter((f) => f.state === "checked" || f.state === "done").length;
   const frontTrouble = (r.fronts || []).filter((f) => f.state === "unavailable").map((f) => f.front);
 
@@ -717,6 +782,8 @@ export default function SparkPanel({
             showToast={showToast}
             onGoToRunroom={onGoToRunroom}
             isAdmin={isAdmin}
+            parkUntil={parkUntil}
+            onPark={park}
           />
         )}
 

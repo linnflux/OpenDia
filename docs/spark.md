@@ -136,8 +136,36 @@ Routes (`dashboard/server/planrooms.js`, read-only like `runrooms.js`):
 `GET /api/planrooms` (the working set — live cards sparked within 7 days;
 `?all=1` for everything), `GET /api/planrooms/:cardId` (plan + live run +
 runroom read-through), `POST /api/planrooms/:cardId/adopt` (open a runroom
-from the standing plan with nothing live). The only writer is
-`planroom_build.js`, mirroring `runroom_build.js`.
+from the standing plan with nothing live), `POST /api/planrooms/:cardId/park`
+(dismiss until a date). The only writer is `planroom_build.js`, mirroring
+`runroom_build.js`.
+
+### Recheck mode — a scheduled card is not re-litigated
+
+A card whose `next_step` date has not arrived — or whose plan is parked — has
+a standing plan that was approved as-is. `startScan` flips such a run to
+**recheck mode** automatically (the gate lives in the server, so the tab, ODA
+sweeps and the mailroom edge all obey it): the brief carries
+`mode: "recheck"` plus the standing plan's summary, the email lookback narrows
+to "since the last spark", and the run's only question is *did anything
+change?* Nothing new → the run writes `{no_change: true}` and ends: **no plan
+rewrite, no card write, no proposal, no timer entry**. The only trace is a
+`planroom.checked` stamp. Something genuinely new → the run escalates into a
+full scan and the fresh result replaces the plan as usual.
+
+### Parked — "nothing to do before then"
+
+**Park until \<date\>** (the next_step's own date — parking never needs a date
+picker) sets the plan to `status: "parked"` with `parked: {until, at, by}` and
+removes it from the working set. If a proposal is live, parking closes it the
+way "Not now" does, folded into the one gesture. Three things wake a parked
+plan: the date arriving (the **Planroom Wake** ODA duty — `roster_mode:
+"parked"` — rechecks each parked plan on its due date, so it reappears
+verified rather than stale; it rides Carlos's supervisor heartbeats, which
+now fall through to the duty loop when the review queue is quiet), a recheck
+finding new communication, or a full scan replacing the plan. A wake that
+comes back clean unparks the plan in place with a "rechecked, no change"
+note.
 
 ## Runrooms — a runroom adopts the plan
 

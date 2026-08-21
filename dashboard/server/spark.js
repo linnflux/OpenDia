@@ -49,6 +49,7 @@ import {
 import { resolveFreeSession, spawnSession, relocatePlan } from "./runroom_build.js";
 import {
   readPlanroom, writePlanroomFromRun, adoptIntoRunroom, markPlanroomAdopted, markStepDone,
+  nextStepDate, unparkPlanroom, stampPlanroomChecked,
 } from "./planroom_build.js";
 
 const HOME = process.env.HOME || "/home/linnflux";
@@ -421,7 +422,7 @@ function recoverOrphanRuns() {
 
 // ── the brief ──────────────────────────────────────────────────────────────
 
-async function buildBrief(project, runId, runDir) {
+async function buildBrief(project, runId, runDir, { maxLookbackDays = null } = {}) {
   let linkedNotion = false;
   if (!project.notion_id) {
     try {
@@ -453,6 +454,9 @@ async function buildBrief(project, runId, runDir) {
     const daysSinceWork = Math.ceil((Date.now() - new Date(timers[0].start).getTime()) / 86400000);
     lookbackDays = Math.min(Math.max(daysSinceWork + 7, 7), 60);
   }
+  // A recheck only cares about what arrived since the standing plan was
+  // written — the wide adaptive window would just re-read known ground.
+  if (maxLookbackDays) lookbackDays = Math.min(lookbackDays, maxLookbackDays);
 
   let emails = [];
   try {
@@ -850,6 +854,27 @@ function validateResult(raw) {
   if (!raw || typeof raw !== "object") return { ok: false, problems: ["no result JSON was produced"] };
   if (raw.__parseError) return { ok: false, problems: [`result.json is not valid JSON: ${raw.__parseError}`] };
 
+  // A recheck that found nothing carries a deliberately minimal contract: the
+  // claim itself plus the fronts actually checked. No step, no prose report —
+  // the standing plan is the report.
+  if (raw.no_change === true) {
+    if (!Array.isArray(raw.fronts) || raw.fronts.length === 0) {
+      return { ok: false, problems: ["no_change result has no fronts"] };
+    }
+    const unknown = raw.fronts.map((f) => f.front).filter((f) => !FRONTS.includes(f));
+    if (unknown.length) return { ok: false, problems: [`unknown front(s): ${unknown.join(", ")}`] };
+    return {
+      ok: true,
+      result: {
+        schema: 2,
+        no_change: true,
+        note: typeof raw.note === "string" ? raw.note.slice(0, 300) : "",
+        generated_at: raw.generated_at || null,
+        fronts: raw.fronts,
+      },
+    };
+  }
+
   const r = adaptResult(raw);
   if (r.schema !== 2) problems.push(`unexpected schema ${JSON.stringify(raw.schema)}`);
 
@@ -1059,15 +1084,48 @@ export async function startScan(project, startedBy, opts = {}) {
   run.duty = opts.duty || null;
   runs.set(String(project.id), run);
 
+  // Recheck gate. A card already scheduled into the future — a dated
+  // next_step that has not arrived, or a plan the operator parked — has a
+  // standing plan that was approved as-is. Sparking it again must not
+  // re-litigate the card: the run becomes a delta check for NEW communication
+  // or status changes only, and a clean check ends without touching the plan,
+  // the card, or the timer ledger. The gate lives here, not in the callers,
+  // so the tab, ODA sweeps, and the mailroom edge all obey it.
+  const standing = readPlanroom(project.id);
+  const today = etNow().iso.slice(0, 10);
+  const due = nextStepDate(project.next_step);
+  const parked = standing?.status === "parked" ? standing.parked : null;
+  run.mode = (parked || (due && due > today)) ? "recheck" : "full";
+
   // The brief is built before the spawn so the first fronts light up fast.
   let brief;
   try {
-    brief = await buildBrief(project, runId, runDir);
+    const sparkedAt = standing?.planroom?.sparked_at || null;
+    const sinceDays = sparkedAt
+      ? Math.min(Math.max(Math.ceil((Date.now() - new Date(sparkedAt).getTime()) / 86400000) + 1, 2), 30)
+      : null;
+    brief = await buildBrief(project, runId, runDir,
+      run.mode === "recheck" ? { maxLookbackDays: sinceDays } : {});
   } catch (err) {
     run.error = { message: `brief build failed: ${err.message}` };
     emit(run, "error", run.error);
     finishRun(run, "error");
     return run;
+  }
+  brief.mode = run.mode;
+  if (run.mode === "recheck") {
+    brief.recheck = {
+      reason: parked ? "parked" : "future_next_step",
+      next_step_due: due,
+      parked_until: parked?.until || null,
+      standing: standing ? {
+        title: standing.title,
+        sparked_at: standing.planroom?.sparked_at || standing.created,
+        certitude: standing.planroom?.certitude || null,
+        where_it_stands: standing.planroom?.where_it_stands || "",
+        route: standing.planroom?.route || null,
+      } : null,
+    };
   }
   writeFileSync(`${runDir}/brief.json`, JSON.stringify(brief, null, 2));
 
@@ -1084,9 +1142,18 @@ export async function startScan(project, startedBy, opts = {}) {
         : "")
     : "";
 
+  const recheckPreamble = run.mode === "recheck"
+    ? `This run is a RECHECK, not a full scan — the card is already scheduled ` +
+      `(${parked ? `plan parked until ${parked.until}` : `next step dated ${due}`}) and its standing ` +
+      `plan was approved as-is. Follow the Recheck mode section of /spark: sweep the fronts for NEW ` +
+      `communication or status changes only; if nothing moved, write the no_change result and stop. ` +
+      `Only a real change earns a full result.\n\n`
+    : "";
+
   const proc = spawnPhase(run, {
     prompt:
       agentPreamble +
+      recheckPreamble +
       `Run /spark ${runDir}/brief.json\n\n` +
       "Invoked headlessly from the OpenDia dashboard Spark tab. There is no interactive user — " +
       "never ask a question and never wait for input. Write the result JSON to the out_path " +
@@ -1134,6 +1201,24 @@ export async function startScan(project, startedBy, opts = {}) {
         };
       }
     }
+    if (run.result.no_change) {
+      // A clean recheck bills nothing, proposes nothing, replaces nothing —
+      // the standing plan was approved as-is and nothing new arrived to
+      // question it. The only trace is the checked stamp. A parked plan whose
+      // date has arrived wakes here: the wake IS the recheck, and coming back
+      // clean means the plan re-enters the working set unchanged.
+      const plan = readPlanroom(project.id);
+      const today = etNow().iso.slice(0, 10);
+      if (plan?.status === "parked" && plan.parked?.until && plan.parked.until <= today) {
+        unparkPlanroom(project.id, { note: `Woke ${today} — rechecked, no change; the standing plan holds.` });
+      }
+      stampPlanroomChecked(project.id, { runId: run.id, by: run.startedBy });
+      pushLedger(run, "done", "Recheck clean — nothing new on any front; the standing plan holds.");
+      emit(run, "result", run.result);
+      await wrapUp(run);
+      return;
+    }
+
     startSparkTimer(run, project);
     applyCardNextStep(run, project);
     // The scan's whole output becomes the card's standing plan — the thing a
@@ -1240,6 +1325,16 @@ async function wrapUp(run) {
   run.status = "wrapping";
   await closeSparkTimer(run, run.project);
   finishRun(run, "done");
+}
+
+/**
+ * Close a proposing run without acting on it — the same move as the decide
+ * route's "stop" intent, exported so the planroom park route can fold a live
+ * proposal into the park in one gesture.
+ */
+export async function dismissRun(run, note) {
+  pushLedger(run, "skip", note || "Closed without acting on the recommendation.");
+  await wrapUp(run);
 }
 
 /**

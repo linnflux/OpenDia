@@ -14,9 +14,10 @@ import { existsSync, readFileSync, statSync } from "fs";
 
 import { requireAdmin } from "./auth.js";
 import { getProjectById } from "./db.js";
-import { listPlanrooms, readPlanroom } from "./planroom_build.js";
+import { listPlanrooms, readPlanroom, markPlanroomParked, nextStepDate } from "./planroom_build.js";
 import { RUNROOM_ROOT } from "./runroom_build.js";
-import { getSparkRun, publicRun, openRunroom } from "./spark.js";
+import { getSparkRun, publicRun, openRunroom, dismissRun } from "./spark.js";
+import { etNow } from "./timerfile.js";
 
 const LIVE_STATUSES = new Set(["in_progress", "wfhuman"]);
 const STALE_DAYS = 7;
@@ -70,9 +71,15 @@ export function registerPlanroomRoutes(app) {
       const live = getSparkRun(cardId);
       const isLive = !!live && !live.finishedAt;
       const stale = mtime < cutoff;
+      const today = etNow().iso.slice(0, 10);
+      // A parked plan is out of the working set by request until its date
+      // arrives; once due it comes back (exempt from the stale drop — parked
+      // plans are deliberately old) and the ODA wake duty rechecks it.
+      const parkedQuiet = plan.status === "parked" && plan.parked?.until > today;
       if (!all) {
         if (!LIVE_STATUSES.has(project.status)) continue;
-        if (stale && !isLive && plan.status !== "adopted") continue;
+        if (parkedQuiet && !isLive) continue;
+        if (stale && !isLive && plan.status !== "adopted" && plan.status !== "parked") continue;
       }
       const steps = plan.steps || [];
       const rr = plan.status === "adopted" ? readThrough(plan) : null;
@@ -88,6 +95,8 @@ export function registerPlanroomRoutes(app) {
         route: plan.planroom?.route || null,
         sparked_at: plan.planroom?.sparked_at || plan.created,
         sparked_by: plan.planroom?.sparked_by || "",
+        parked_until: plan.parked?.until || null,
+        checked_at: plan.planroom?.checked?.at || null,
         updated: plan.updated || plan.created,
         adopted_by: plan.adopted_by || null,
         runroom_status: rr?.status || null,
@@ -118,6 +127,7 @@ export function registerPlanroomRoutes(app) {
         : null;
       plan.planroom.note = plan.note || null;
       plan.planroom.adopted = plan.status === "adopted";
+      plan.planroom.parked = plan.status === "parked" ? plan.parked : null;
     }
     // A card with no plan yet is a valid planroom: empty, with a Spark button.
     res.json({
@@ -132,6 +142,34 @@ export function registerPlanroomRoutes(app) {
       lowCertitude: LOW_CERTITUDE,
       canStart: !!req.user?.is_admin,
     });
+  });
+
+  // Dismiss the planroom until a date — by default the next_step's own date,
+  // so parking never needs a date picker. "Nothing to do before then": the
+  // plan leaves the working set, and if a proposal is live it is closed the
+  // same way "Not now" closes it, folded into the one gesture.
+  app.post("/api/planrooms/:cardId/park", requireAdmin, async (req, res) => {
+    const cardId = parseInt(req.params.cardId, 10);
+    const project = getProjectById(cardId);
+    if (!visibleTo(req, project)) return res.status(404).json({ error: "card not found" });
+    const plan = readPlanroom(cardId);
+    if (!plan) return res.status(409).json({ error: "no standing plan to park" });
+
+    const today = etNow().iso.slice(0, 10);
+    const bodyUntil = String(req.body?.until || "");
+    const until = /^\d{4}-\d{2}-\d{2}$/.test(bodyUntil) ? bodyUntil : nextStepDate(project.next_step);
+    if (!until) return res.status(400).json({ error: "nothing to park until — the card's next step has no date" });
+    if (until <= today) return res.status(400).json({ error: `park date ${until} is not in the future` });
+
+    const live = getSparkRun(cardId);
+    if (live && !live.finishedAt) {
+      if (live.status !== "proposing") {
+        return res.status(409).json({ error: `a spark is ${live.status} on this card — wait for it` });
+      }
+      await dismissRun(live, `Parked until ${until} — closed without acting.`);
+    }
+    markPlanroomParked(cardId, { until, by: req.user?.login || "" });
+    res.json({ ok: true, until });
   });
 
   // Open a runroom from the STANDING plan, no live run required. This is what

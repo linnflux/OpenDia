@@ -40,6 +40,7 @@ import { createInterface } from "readline";
 import { createWriteStream } from "fs";
 import { resolve as resolvePath } from "path";
 import { etNow, listRunningTimers } from "./timerfile.js";
+import { listPlanrooms } from "./planroom_build.js";
 import { notifyChat } from "./chat_notify.js";
 import { runClaude } from "./ai.js";
 
@@ -281,7 +282,29 @@ function lastSparkAt(projectId) {
 // from duties, or the agent row itself (legacy columns) when it has none —
 // the two carry the same field names by design. Static mode always means the
 // AGENT's assigned cards; assignment stays agent-level.
+// The wake roster: cards whose standing plan is parked and due back. The
+// operator dismissed these until a date; the date has arrived, so a delta
+// check decides whether the plan reappears clean or refreshed. A clean check
+// unparks the plan, so the roster self-drains just like a query roster. The
+// 24h rescan guard still applies — a recheck that errors out retries
+// tomorrow, not every heartbeat in the window.
+function parkedRoster() {
+  const now = etNow();
+  const today = `${now.YYYY}-${now.MM}-${now.DD}`;
+  const busyIds = new Set(
+    listRunningTimers().map((t) => t.data.project_id).filter(Boolean)
+  );
+  const guardBefore = Date.now() - RESCAN_GUARD_MS;
+  return listPlanrooms()
+    .filter(({ plan }) => plan.status === "parked" && plan.parked?.until && plan.parked.until <= today)
+    .sort((a, b) => String(a.plan.parked.until).localeCompare(String(b.plan.parked.until)))
+    .map(({ cardId }) => getProjectById(cardId))
+    .filter((p) => p && ["in_progress", "wfhuman"].includes(p.status)
+      && !busyIds.has(p.id) && lastSparkAt(p.id) < guardBefore);
+}
+
 function rosterFor(agent, cfg = agent) {
+  if (cfg.roster_mode === "parked") return parkedRoster();
   if (cfg.roster_mode !== "query") return getAgentProjects(agent.id);
   const statuses = String(cfg.query_status || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
@@ -459,7 +482,14 @@ function dutyHasWork(agent, duty) {
 }
 
 async function runHeartbeat(agent, state) {
-  if (agent.role === "supervisor") return runSupervisorHeartbeat(agent, state);
+  // A supervisor's heartbeat belongs to the review queue first. But a quiet
+  // queue used to end the heartbeat outright — now a supervisor with duties
+  // spends the idle slot there instead, so duties like the planroom wake can
+  // live on a supervisor without ever delaying a review.
+  if (agent.role === "supervisor") {
+    const reviewed = await runSupervisorHeartbeat(agent, state);
+    if (reviewed) return;
+  }
 
   // Duties are the unit of work when the agent has any: one duty per
   // heartbeat, round-robin from duty_cursor, skipping duties with nothing to
@@ -513,8 +543,11 @@ async function runSweep(agent, state, duty, fixedCards = null) {
   const assigned = fixedCards || rosterFor(agent, cfg);
   const touchHeartbeat = !state.manual;
   if (assigned.length === 0) {
-    const emptyMsg = tag + (cfg.roster_mode === "query"
-      ? "No cards match the roster query." : "No projects assigned.");
+    const emptyMsg = tag + (cfg.roster_mode === "static"
+      ? "No projects assigned."
+      : cfg.roster_mode === "parked"
+        ? "No parked planrooms are due back."
+        : "No cards match the roster query.");
     updateAgentRun(state.runId, { status: "done", summary: emptyMsg, finished: true });
     markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
     finishHeartbeat(agent, state, "done");
@@ -522,10 +555,10 @@ async function runSweep(agent, state, duty, fixedCards = null) {
   }
 
   // Static rosters rotate so a budget-exhausted heartbeat resumes where it
-  // left off; a query roster is already ordered stalest-first and self-drains,
-  // so rotation would only scramble it.
+  // left off; query and parked rosters are already ordered and self-drain,
+  // so rotation would only scramble them.
   let cards;
-  if (fixedCards || cfg.roster_mode === "query") {
+  if (fixedCards || cfg.roster_mode !== "static") {
     cards = assigned;
   } else {
     const cursor = agent.rotation_cursor % assigned.length;
@@ -660,7 +693,7 @@ async function runSweep(agent, state, duty, fixedCards = null) {
     detail: JSON.stringify(details),
     finished: true,
   });
-  const nextCursor = (fixedCards || cfg.roster_mode === "query")
+  const nextCursor = (fixedCards || cfg.roster_mode !== "static")
     ? agent.rotation_cursor
     : (agent.rotation_cursor + ran) % assigned.length;
   markAgentHeartbeat(agent.id, nextCursor, { touchHeartbeat });
@@ -835,13 +868,16 @@ async function runSupervisorHeartbeat(agent, state) {
   const reviewables = proposing.filter((r) => !seen.has(reviewKey(r.runId, r.roundsUsed)));
 
   if (reviewables.length === 0) {
+    // Quiet queue. If any duty has work, yield the heartbeat to the duty loop
+    // instead of ending it — the caller falls through.
+    if (getAgentDuties(agent.id).some((d) => dutyHasWork(agent, d))) return false;
     const summary = proposing.length > 0
       ? `Nothing new to review (${proposing.length} already-reviewed run(s) still awaiting Nick).`
       : "Nothing to review.";
     updateAgentRun(state.runId, { status: "done", summary, finished: true });
     markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
     finishHeartbeat(agent, state, "done");
-    return;
+    return true;
   }
 
   const reviewDir = reviewDirFor(agent, state.runId);
@@ -1040,6 +1076,7 @@ async function runSupervisorHeartbeat(agent, state) {
   await notifyChat(agent.chat_webhook_url, lines.join("\n"));
 
   finishHeartbeat(agent, state, finalStatus, summary);
+  return true;
 }
 
 // ── tick ───────────────────────────────────────────────────────────────────
@@ -1349,8 +1386,8 @@ export function mountAgents(app) {
     if (fields.kind !== undefined && !["sweep", "routine"].includes(fields.kind)) {
       return res.status(400).json({ error: "kind must be sweep or routine" });
     }
-    if (fields.roster_mode !== undefined && !["query", "static"].includes(fields.roster_mode)) {
-      return res.status(400).json({ error: "roster_mode must be query or static" });
+    if (fields.roster_mode !== undefined && !["query", "static", "parked"].includes(fields.roster_mode)) {
+      return res.status(400).json({ error: "roster_mode must be query, static, or parked" });
     }
     if (fields.query_next_step !== undefined && !["any", "stale", "due"].includes(fields.query_next_step)) {
       return res.status(400).json({ error: "query_next_step must be any, stale, or due" });
@@ -1464,8 +1501,8 @@ export function mountAgents(app) {
     if (fields.model !== undefined && !VALID_MODELS.has(fields.model)) {
       return res.status(400).json({ error: `model must be one of: ${[...VALID_MODELS].join(", ")}` });
     }
-    if (fields.roster_mode !== undefined && !["static", "query"].includes(fields.roster_mode)) {
-      return res.status(400).json({ error: "roster_mode must be static or query" });
+    if (fields.roster_mode !== undefined && !["static", "query", "parked"].includes(fields.roster_mode)) {
+      return res.status(400).json({ error: "roster_mode must be static, query, or parked" });
     }
     if (fields.query_next_step !== undefined && !["any", "stale", "due"].includes(fields.query_next_step)) {
       return res.status(400).json({ error: "query_next_step must be any, stale, or due" });
