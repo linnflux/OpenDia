@@ -1139,7 +1139,19 @@ export async function startScan(project, startedBy, opts = {}) {
         ? `Your assignment for this run is the duty "${run.duty.name}": read ` +
           `${HOME}/OpenDia/duties/${run.duty.slug}/duty.md FIRST and follow it — agent.md is your ` +
           `identity, duty.md is your task and its rules take precedence for this run.\n\n`
-        : "")
+        : "") +
+      // Off-scope discipline (Nick's rule, 2026-08-23): a scan that surfaces
+      // work OUTSIDE the scanned card's scope must not hijack that card's
+      // next step with it — the next_step/card_next_step you write stay about
+      // THIS card. Genuinely separate work gets its own card.
+      `Scope rule: everything you write to this card (next_step, card_next_step) must be about ` +
+      `THIS card's own scope. If the sweep surfaces genuinely separate work (a different ` +
+      `deliverable, system, or client concern), do NOT overwrite this card's next step with it: ` +
+      `create a new card instead — POST http://localhost:8038/api/projects with ` +
+      `{"name","companyName","divisionName","status":"in_progress"}, then PATCH its next_step ` +
+      `(dated, per the calendar contract) — and mention the new card number in your result. ` +
+      `If the card creation fails, record the finding in your result text instead; never ` +
+      `misfile it on the scanned card.\n\n`
     : "";
 
   const recheckPreamble = run.mode === "recheck"
