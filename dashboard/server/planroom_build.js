@@ -360,3 +360,25 @@ export function dismissPlanroom(cardId, { note, by } = {}) {
   archiveExisting(dir, file);
   return { ok: true };
 }
+
+/**
+ * Eject an adoption: the run is over (closed, abandoned, or dead) and the
+ * plan returns to standing. Refused while the runroom is still live — close
+ * the run first, then eject. Without this, a planroom points at its finished
+ * run until the next re-spark happens to notice.
+ */
+export function ejectPlanroom(cardId, { by } = {}) {
+  const plan = readPlanroom(cardId);
+  if (!plan) return { error: "no planroom on this card" };
+  if (plan.status !== "adopted") return { error: "plan is not in a run" };
+  if (runroomStillActive(plan.adopted_by)) {
+    return { error: `run ${plan.adopted_by.tmux_session} is still active — close it first` };
+  }
+  const session = plan.adopted_by?.tmux_session || "?";
+  plan.status = "active";
+  plan.adopted_by = null;
+  plan.note = `Ejected from run ${session} by ${by || "the operator"} — plan stands again.`;
+  plan.updated = etNow().iso;
+  writeFileSync(planPath(cardId), JSON.stringify(plan, null, 2));
+  return { ok: true };
+}

@@ -14,7 +14,7 @@ import { existsSync, readFileSync, statSync } from "fs";
 
 import { requireAdmin } from "./auth.js";
 import { getProjectById } from "./db.js";
-import { listPlanrooms, readPlanroom, markPlanroomParked, dismissPlanroom, nextStepDate } from "./planroom_build.js";
+import { listPlanrooms, readPlanroom, markPlanroomParked, dismissPlanroom, ejectPlanroom, nextStepDate } from "./planroom_build.js";
 import { RUNROOM_ROOT } from "./runroom_build.js";
 import { getSparkRun, publicRun, openRunroom, dismissRun } from "./spark.js";
 import { etNow } from "./timerfile.js";
@@ -189,6 +189,18 @@ export function registerPlanroomRoutes(app) {
       await dismissRun(live, note || "Dismissed without acting.");
     }
     const r = dismissPlanroom(cardId, { note, by: req.user?.login || "" });
+    if (r.error) return res.status(409).json({ error: r.error });
+    res.json({ ok: true });
+  });
+
+  // Eject a finished adoption back to a standing plan. The Plan surface
+  // only shows standing plans; a run that ended returns here on purpose,
+  // never by drift.
+  app.post("/api/planrooms/:cardId/eject", requireAdmin, (req, res) => {
+    const cardId = parseInt(req.params.cardId, 10);
+    const project = getProjectById(cardId);
+    if (!visibleTo(req, project)) return res.status(404).json({ error: "card not found" });
+    const r = ejectPlanroom(cardId, { by: req.user?.login || "" });
     if (r.error) return res.status(409).json({ error: r.error });
     res.json({ ok: true });
   });
