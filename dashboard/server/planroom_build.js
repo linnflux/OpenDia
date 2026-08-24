@@ -336,3 +336,27 @@ export function markStepDone(cardId, { note, by }) {
   writeFileSync(planPath(cardId), JSON.stringify(plan, null, 2));
   return plan;
 }
+
+/**
+ * The operator dismisses the standing plan outright — the work is done or
+ * moot and nothing here should run. Archives it under the same plan-<created>
+ * convention a re-spark uses, then leaves the card with no planroom, so the
+ * next spark starts clean. Distinct from attestation (which closes only the
+ * open step) and from parking (which keeps the plan for a date).
+ */
+export function dismissPlanroom(cardId, { note, by } = {}) {
+  const plan = readPlanroom(cardId);
+  if (!plan) return { error: "no standing plan to dismiss" };
+  if (plan.status === "adopted" && runroomStillActive(plan.adopted_by)) {
+    return { error: `adopted by ${plan.adopted_by.tmux_session} — close that run first` };
+  }
+  const dir = `${PLANROOM_ROOT}/${cardId}`;
+  const file = planPath(cardId);
+  plan.dismissed = { at: etNow().iso, by: by || "", note: note || "" };
+  plan.updated = etNow().iso;
+  try {
+    writeFileSync(file, JSON.stringify(plan, null, 2));
+  } catch {}
+  archiveExisting(dir, file);
+  return { ok: true };
+}

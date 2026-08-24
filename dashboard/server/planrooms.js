@@ -14,7 +14,7 @@ import { existsSync, readFileSync, statSync } from "fs";
 
 import { requireAdmin } from "./auth.js";
 import { getProjectById } from "./db.js";
-import { listPlanrooms, readPlanroom, markPlanroomParked, nextStepDate } from "./planroom_build.js";
+import { listPlanrooms, readPlanroom, markPlanroomParked, dismissPlanroom, nextStepDate } from "./planroom_build.js";
 import { RUNROOM_ROOT } from "./runroom_build.js";
 import { getSparkRun, publicRun, openRunroom, dismissRun } from "./spark.js";
 import { etNow } from "./timerfile.js";
@@ -170,6 +170,27 @@ export function registerPlanroomRoutes(app) {
     }
     markPlanroomParked(cardId, { until, by: req.user?.login || "" });
     res.json({ ok: true, until });
+  });
+
+  // Dismiss the standing plan outright — done or moot, nothing should run.
+  // Mirrors park's live-run handling: a proposing spark is closed without
+  // acting; a mid-flight one wins and the operator waits.
+  app.post("/api/planrooms/:cardId/dismiss", requireAdmin, async (req, res) => {
+    const cardId = parseInt(req.params.cardId, 10);
+    const project = getProjectById(cardId);
+    if (!visibleTo(req, project)) return res.status(404).json({ error: "card not found" });
+    const note = String(req.body?.note || "").trim().slice(0, 500);
+
+    const live = getSparkRun(cardId);
+    if (live && !live.finishedAt) {
+      if (live.status !== "proposing") {
+        return res.status(409).json({ error: `a spark is ${live.status} on this card — wait for it` });
+      }
+      await dismissRun(live, note || "Dismissed without acting.");
+    }
+    const r = dismissPlanroom(cardId, { note, by: req.user?.login || "" });
+    if (r.error) return res.status(409).json({ error: r.error });
+    res.json({ ok: true });
   });
 
   // Open a runroom from the STANDING plan, no live run required. This is what

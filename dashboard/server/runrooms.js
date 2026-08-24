@@ -223,6 +223,45 @@ export function registerRunroomRoutes(app) {
     res.status(status).json(body);
   });
 
+  // Close the room outright — the work is finished or moot. Room-scoped, so
+  // it does not go through the step-stale check above. With a live session
+  // this stays inside the single-writer contract: a canned message asks the
+  // session to close its own file. When the session is GONE the contract has
+  // no writer left, and a room stuck "active" forever is the worse corruption
+  // — so for that one case this route becomes the writer of last resort.
+  app.post("/api/runrooms/:session/close", (req, res) => {
+    const { session } = req.params;
+    if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
+    const plan = readPlan(session);
+    if (!plan) return res.status(404).json({ error: "no such runroom" });
+    if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+    const note = String(req.body?.note || "").trim().slice(0, 500);
+    const who = firstNameOf(req.user);
+
+    const gate = gateForSession(plan.tmux_session);
+    if (gate.reason === "session-gone") {
+      const allDone = (plan.steps || []).length > 0
+        && plan.steps.every((s) => ["done", "skipped"].includes(s.state));
+      plan.status = allDone ? "completed" : "abandoned";
+      plan.note = `Closed by ${who} after the session died${note ? ` — ${note}` : "."}`;
+      plan.updated = new Date().toISOString();
+      try {
+        writeFileSync(resolve(RUNROOMS_DIR, session, "plan.json"), JSON.stringify(plan, null, 2));
+      } catch (e) {
+        return res.status(500).json({ error: `close failed: ${e.message}` });
+      }
+      try {
+        appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
+          `${new Date().toISOString()} ${req.user?.login || "?"} [close]: server wrote status=${plan.status} (session gone)\n`);
+      } catch {}
+      return res.json({ ok: true, status: plan.status, wrote: "server" });
+    }
+
+    const text = `[runroom] ${who} says this run is finished — the work is done or moot${note ? ` (${note})` : ""}. Verify nothing is half-applied, set each remaining step "done" or "skipped" with a one-line note, set status "completed" (or "abandoned" if the work is moot), and close out per the contract.`;
+    const { status, body } = deliver(session, plan, text, req.user, "close");
+    res.status(status).json(status === 200 ? { ...body, wrote: "session" } : body);
+  });
+
   // A pasted image. The session needs no special channel to receive one —
   // it needs a file path and a nudge to Read it (the Read tool renders
   // images). Raw body, not JSON: the global express.json 1MB limit would
