@@ -142,10 +142,13 @@ export function writeSeedPlan({ session, project, run }) {
 
 /**
  * Spawn the session. dispatch_spawn.sh starts claude in plan mode on opusplan
- * by default and echoes the name it actually used, which is the value to
- * trust. `extraArgs` forwards dispatch_spawn.sh's own [WORK_DIR] [--yolo]
- * positionals verbatim — additive, existing callers that omit it get the
- * exact behavior they had before.
+ * by DEFAULT (the /dispatch operator-handoff path) and echoes the name it
+ * actually used, which is the value to trust. `extraArgs` forwards
+ * dispatch_spawn.sh's own [WORK_DIR] [--yolo] [--model MODEL] positionals
+ * verbatim — additive, existing callers that omit it get the exact behavior
+ * they had before. openRunroom overrides with `["--model", "opus[1m]",
+ * "--yolo"]`: a runroom RUNS an already-vetted plan, so it wants straight Opus
+ * in acceptEdits mode, not opusplan in plan mode.
  */
 export function spawnSession(session, briefPath, extraArgs = []) {
   const out = execFileSync("bash", [SPAWN_SCRIPT, session, briefPath, ...extraArgs], {

@@ -188,7 +188,10 @@ on it, and gets out of the way:
    only live document; the Planroom page **reads through** to its steps.
 4. **Close the Spark timer** (if the run had one), committing its accrued
    minutes.
-5. Spawn the session via `scripts/dispatch_spawn.sh` (opusplan, plan mode).
+5. Spawn the session via `scripts/dispatch_spawn.sh`, overriding its defaults
+   to `opus` in acceptEdits mode (`--model opus[1m] --yolo`). A runroom RUNS a
+   plan already vetted in the planroom, so it does not re-enter plan mode on
+   entry; straight Opus keeps judgment on hand for new operator input.
 6. Point the card's `tmux_session` at it.
 
 Copy, not move — a move makes the card vanish from the Planroom list and leaves

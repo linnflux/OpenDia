@@ -1616,8 +1616,8 @@ function writeHandoff(project, run, session = null, { plan = null } = {}) {
     `   top-level fields (runroom_version, title, card_id, card_name, company,`,
     `   division, tmux_session, created, adopted_from); steps are {n, title,`,
     `   actor: "opendia"|"human", state: "current"|"pending"|"done"|"failed"|`,
-    `   "skipped"|"changed", detail, note}; keep current_step honest. (While`,
-    `   in plan mode file writes are blocked — expected; refine at approval.)`,
+    `   "skipped"|"changed", detail, note}; keep current_step honest. Refine`,
+    `   the steps in place as the real shape emerges.`,
     `2. Update the file at every step transition — started, done (evidence in`,
     `   the note), failed — before narrating in the pane.`,
     `3. When the work wraps (/od-stop), set status: "completed".`,
@@ -1626,10 +1626,13 @@ function writeHandoff(project, run, session = null, { plan = null } = {}) {
     ``,
     `- Clarifying questions go in batches — AskUserQuestion carries up to four`,
     `  at once. Serial single-question dialogs waste the operator's attention.`,
-    `- If the work touches a server: never attempt writes (including the`,
-    `  pre-work snapshot) while planning — plan mode blocks them by policy.`,
-    `  Make "take the pre-work Lightsail snapshot" step 1 of the plan itself,`,
-    `  and take it first thing after approval, before any other change.`,
+    `- Steps with actor: "human" are the operator's to perform, not yours.`,
+    `  Surface the step, then wait for their finished/failed signal from the`,
+    `  runroom pane; do not try to carry out a human step in this session.`,
+    `- If the work touches a server: this session runs in acceptEdits mode, so`,
+    `  nothing will stop a write for you. Make "take the pre-work Lightsail`,
+    `  snapshot" step 1 of the plan and run it as your literal first action,`,
+    `  before any other change. No snapshot, no server writes.`,
     ``,
   ];
   writeFileSync(file, lines.filter((l) => l !== "").join("\n") + "\n");
@@ -1680,7 +1683,12 @@ export async function openRunroom(project, run) {
 
   let final;
   try {
-    final = spawnSession(session, brief);
+    // A runroom adopts a plan already vetted in the planroom, so it RUNS the
+    // plan rather than re-planning it. Straight Opus keeps judgment on hand for
+    // when the operator types new information back into the box; acceptEdits
+    // (--yolo) drops plan mode so entry is calm and ready-to-run. The two
+    // travel together: `opusplan` outside plan mode collapses to Sonnet.
+    final = spawnSession(session, brief, ["--model", "opus[1m]", "--yolo"]);
   } catch (err) {
     throw new Error(
       `the plan was adopted at ${planFile} but the session did not start (${err.message}). ` +
