@@ -12,6 +12,7 @@ import { runsOnDisk, readRunResult } from "./spark.js";
 import { readPlanroom } from "./planroom_build.js";
 import {
   gateForSession, deliver, MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR, firstNameOf,
+  captureLiveTail,
 } from "./session_gate.js";
 import { sessionExists, spawnSession } from "./runroom_build.js";
 
@@ -305,7 +306,11 @@ export function registerMailroomRoutes(app) {
         } catch {}
       }
     }
-    res.json({ exists: true, gate });
+    // Conversational answers never touch the thread state files (the skill's
+    // "needs no file rewrite" rule), so the pane tail is the only place a
+    // free-text answer exists. Same capture runrooms.js uses for its ticker.
+    const live = captureLiveTail(MAILROOM_SESSION);
+    res.json({ exists: true, gate, ...(live ? { live_output: live } : {}) });
   });
 
   // Fresh spawn only, deliberately no resume: the mailroom's memory IS the

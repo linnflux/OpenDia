@@ -81,6 +81,8 @@ const ACTIONS = {
     `[runroom] Step ${n} ("${t}"): ${name} reports it finished. If a cheap check exists (file exists, DNS resolves, HTTP 200), run it before believing it. Then update plan.json: state "done" — or "failed" with the evidence in the step's note — advance current_step, and prepare the next step's detail.`,
   human_failed: (n, t, name) =>
     `[runroom] Step ${n} ("${t}"): ${name} reports it FAILED. Set state "failed" and record what is known in the step's note. Ask for or gather the error, then write next-move guidance into the step's detail — and if the plan needs restructuring, follow the contract's drift rule.`,
+  skip: (n, t, name) =>
+    `[runroom] Step ${n} ("${t}"): ${name} says skip it. Set state "skipped" with the reason in the step's note, advance current_step, and prepare the next step's detail.`,
 };
 
 export function registerRunroomRoutes(app) {
