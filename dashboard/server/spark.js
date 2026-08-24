@@ -1095,7 +1095,9 @@ export async function startScan(project, startedBy, opts = {}) {
   const today = etNow().iso.slice(0, 10);
   const due = nextStepDate(project.next_step);
   const parked = standing?.status === "parked" ? standing.parked : null;
-  run.mode = (parked || (due && due > today)) ? "recheck" : "full";
+  // An operator note re-litigates by definition — the whole point is that
+  // the standing plan is wrong, so the recheck gate must not protect it.
+  run.mode = opts.note ? "full" : (parked || (due && due > today)) ? "recheck" : "full";
 
   // The brief is built before the spawn so the first fronts light up fast.
   let brief;
@@ -1113,6 +1115,10 @@ export async function startScan(project, startedBy, opts = {}) {
     return run;
   }
   brief.mode = run.mode;
+  if (opts.note) {
+    brief.operator_note = opts.note;
+    run.operatorNote = opts.note;
+  }
   if (run.mode === "recheck") {
     brief.recheck = {
       reason: parked ? "parked" : "future_next_step",
@@ -1833,7 +1839,12 @@ export function mountSpark(app) {
     }
 
     try {
-      const run = await startScan(project, req.user?.login || "");
+      // A note is the operator steering the NEXT plan at scan start — it
+      // forces a full scan (never a recheck) and rides the brief, where it
+      // outranks the standing plan. This is how "rewrite" works when no run
+      // is live to adjust.
+      const note = String(req.body?.note || "").trim().slice(0, 1000);
+      const run = await startScan(project, req.user?.login || "", note ? { note } : {});
       res.status(202).json({ runId: run.id, status: run.status });
     } catch (err) {
       console.error("POST /api/projects/:id/spark error:", err.message);
