@@ -1063,16 +1063,18 @@ async function runSupervisorHeartbeat(agent, state) {
   });
   markAgentHeartbeat(agent.id, agent.rotation_cursor, { touchHeartbeat });
 
+  // Terse by design (Nick, 2026-08-23): links and status only. The full
+  // verdict prose — QA report lines, escalation notes — lives in the
+  // Operator inbox and the Supervisor queue; Chat is the ping, not the file.
   const base = (process.env.DASHBOARD_PUBLIC_URL || "").replace(/\/$/, "");
   const link = (pid, name) => base ? `<${base}/?project=${pid}&tab=spark|${name}>` : name;
-  const lines = [`${agent.name} — nightly review: ${summary}`];
+  const lines = [`${agent.name} — ${summary}`];
   for (const a of approved) {
-    lines.push(`✓ ${link(a.project_id, a.name)} — ${a.report_line || a.outcome?.summary || "completed"}`);
+    lines.push(`✓ ${link(a.project_id, a.name)} — ${a.outcome?.status || "done"}${a.redispatched ? " (redispatched)" : ""}`);
   }
   for (const e of escalated) {
-    lines.push(`→ ${link(e.project_id, e.name)} — needs Nick: ${e.note || e.reason}${e.wouldApprove ? " [would approve]" : ""}`);
+    lines.push(`→ ${link(e.project_id, e.name)} — needs you${e.wouldApprove ? " [would approve]" : ""}`);
   }
-  lines.push(`Tokens ${state.tokens.toLocaleString()} · $${state.costUsd.toFixed(2)}`);
   await notifyChat(agent.chat_webhook_url, lines.join("\n"));
 
   finishHeartbeat(agent, state, finalStatus, summary);
