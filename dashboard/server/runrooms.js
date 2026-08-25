@@ -354,8 +354,11 @@ export function registerRunroomRoutes(app) {
 
       const dir = resolve(RUNROOMS_DIR, session, "uploads");
       mkdirSync(dir, { recursive: true });
+      // Collision suffix — two pastes in the same second used to silently
+      // overwrite each other.
       const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-      const path = resolve(dir, `${stamp}.${kind.ext}`);
+      let path = resolve(dir, `${stamp}.${kind.ext}`);
+      for (let n = 2; existsSync(path); n++) path = resolve(dir, `${stamp}-${n}.${kind.ext}`);
       try {
         writeFileSync(path, buf);
       } catch (e) {
