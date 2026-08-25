@@ -223,6 +223,59 @@ export function registerRunroomRoutes(app) {
     res.status(status).json(body);
   });
 
+  // Operator attestation — "I did this step" is ground truth and must not be
+  // hostage to the session's health: a plan-mode or wedged session cannot
+  // edit its own file (one live room absorbed three canned messages without
+  // acting, 8/24). The server writes the fact, then tells the session what
+  // already happened so its next write starts from the file, per the
+  // contract's file-before-prose rule. Completing the last step completes
+  // the room.
+  app.post("/api/runrooms/:session/attest", (req, res) => {
+    const { session } = req.params;
+    if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
+    const plan = readPlan(session);
+    if (!plan) return res.status(404).json({ error: "no such runroom" });
+    if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+    const { step } = req.body || {};
+    if (Number(step) !== Number(plan.current_step)) {
+      return res.status(409).json({ error: "stale step", current_step: plan.current_step });
+    }
+    const s = (plan.steps || []).find((x) => Number(x.n) === Number(step));
+    if (!s) return res.status(400).json({ error: "no such step" });
+    const who = firstNameOf(req.user);
+
+    s.state = "done";
+    s.actor = "human";
+    s.note = `Marked done by ${who} from the room page.`;
+    const next = (plan.steps || []).find((x) => x.n > s.n && !["done", "skipped"].includes(x.state));
+    plan.current_step = next ? next.n : null;
+    const allDone = (plan.steps || []).every((x) => ["done", "skipped"].includes(x.state));
+    if (allDone) {
+      plan.status = "completed";
+      plan.note = `Completed — last step attested done by ${who}.`;
+    }
+    plan.updated = new Date().toISOString();
+    try {
+      writeFileSync(resolve(RUNROOMS_DIR, session, "plan.json"), JSON.stringify(plan, null, 2));
+    } catch (e) {
+      return res.status(500).json({ error: `attest failed: ${e.message}` });
+    }
+    try {
+      appendFileSync(resolve(RUNROOMS_DIR, session, "sends.log"),
+        `${new Date().toISOString()} ${req.user?.login || "?"} [attest]: server wrote step ${s.n} done${allDone ? ", status=completed" : ""}\n`);
+    } catch {}
+    // Best-effort sync so a live session's mental model catches up. A closed
+    // gate (dialog, working, plan mode absorbing text) just skips the notice
+    // — the file is already the truth.
+    try {
+      deliver(session, plan, allDone
+        ? `[runroom] ${who} marked step ${s.n} done in the room; plan.json is already updated and the run is completed. Re-read it before any write.`
+        : `[runroom] ${who} marked step ${s.n} done in the room; plan.json is already updated and current_step is now ${plan.current_step}. Re-read it before your next write, then prepare step ${plan.current_step}'s detail.`,
+        req.user, "attest-notify");
+    } catch {}
+    res.json({ ok: true, status: plan.status, current_step: plan.current_step });
+  });
+
   // Close the room outright — the work is finished or moot. Room-scoped, so
   // it does not go through the step-stale check above. With a live session
   // this stays inside the single-writer contract: a canned message asks the
