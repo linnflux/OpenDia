@@ -1299,9 +1299,9 @@ registerMailroomRoutes(app);
 // OpenDia Agents: scheduled scan-and-propose agents (admin)
 mountAgents(app);
 
-// PlanRunMail — second client, same API, same auth. Mounted before the
-// dashboard catch-all so /prm/* never falls through to the dashboard SPA.
-// Built from its own repo (gitlab.com/bedford-ai/planrunmail), not this one.
+// Second client, same API, same auth. Mounted before the dashboard
+// catch-all so /prm/* never falls through to the dashboard SPA. Built from
+// its own private repo, not this one; PRM_DIST points at its dist.
 const prmDist = process.env.PRM_DIST || resolve(process.env.HOME, "planrunmail", "dist");
 app.use("/prm", express.static(prmDist));
 app.get("/prm/*", (_req, res) => {
