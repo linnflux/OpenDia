@@ -490,7 +490,7 @@ export function insertClientAlias({ match_type, match_value, client_hint, divisi
   `).run(match_type, (match_value || "").toLowerCase(), client_hint, division_hint || null, note || null);
 }
 
-export function ensureProjectForInbox(clientHint, divisionHint, shortSlug, subject) {
+export function ensureProjectForInbox(clientHint, divisionHint, shortSlug, subject, existingProjectId = null) {
   const db = getDb();
   const name = ((shortSlug || "inbox-item").replace(/^[-_]+/, "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())).trim() || "Inbox Item";
 
@@ -508,6 +508,23 @@ export function ensureProjectForInbox(clientHint, divisionHint, shortSlug, subje
       "SELECT id FROM divisions WHERE LOWER(name) = LOWER(?)"
     ).get(divisionHint);
     if (division) divisionId = division.id;
+  }
+
+  // If the inbox item already owns an auto-created card, update it in place
+  // instead of minting another one — otherwise every correction that fails
+  // matchProject strands the previous card as an unreachable wfhuman orphan
+  // (same dedup-before-side-effects rule as Stage A; see card #204).
+  if (existingProjectId) {
+    const existing = db.prepare(
+      "SELECT id, notes FROM projects WHERE id = ?"
+    ).get(existingProjectId);
+    if (existing && (existing.notes || "").startsWith("Auto-created from inbox:")) {
+      db.prepare(`
+        UPDATE projects SET name = ?, company_id = ?, division_id = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(name, companyId, divisionId, existing.id);
+      return existing.id;
+    }
   }
 
   let newId;

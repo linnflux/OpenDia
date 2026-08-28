@@ -1017,7 +1017,7 @@ app.patch("/api/inbox/:id", (req, res) => {
         const matched = matchProject(item.client_hint, item.division_hint, item.short_slug);
         const projectId = matched
           ? matched.id
-          : ensureProjectForInbox(item.client_hint, item.division_hint, item.short_slug, item.subject);
+          : ensureProjectForInbox(item.client_hint, item.division_hint, item.short_slug, item.subject, item.project_id);
         updateInboxItem(id, { project_id: projectId });
       }
     }

@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from classify_email import classify_email
 from inbox_db import (
     create_inbox_item,
+    get_inbox_item_by_gmail_id,
     update_inbox_item,
     ensure_project_for_inbox,
     lookup_alias,
@@ -200,6 +201,36 @@ def _process_thread(
     subject, from_addr, date_str, body = extract_message_text(latest_customer_msg)
     log.info(f"  Subject: {subject!r}  From: {from_addr!r}  history_msgs: {len(prior_msgs)}")
 
+    # canonical gmail_id = latest inbound message ID (unique per thread dispatch)
+    canonical_gmail_id = latest_customer_msg["id"]
+
+    # Dedup BEFORE any side effect (classifier call, project auto-create, queue
+    # insert). A re-applied "OpenDia Inbox" label on an already-ingested message
+    # must not mint another card, burn a Haiku call, or insert another queue
+    # message. unknown_sender is the one status that falls through: it was
+    # parked before classification, so a re-label after the sender is
+    # authorized still needs the full flow.
+    existing = get_inbox_item_by_gmail_id(canonical_gmail_id)
+    if existing and existing["status"] != "unknown_sender":
+        if existing["status"] in ("done", "error", "dismissed"):
+            update_inbox_item(canonical_gmail_id, status="classified")
+            log.info(
+                f"  Resurfaced inbox item id={existing['id']} (was {existing['status']}) — "
+                f"re-labeled in Gmail; no new card, dispatch from the dashboard"
+            )
+        else:
+            log.info(
+                f"  Already in inbox_items id={existing['id']} "
+                f"(status={existing['status']}) — no action"
+            )
+        for stub in stubs:
+            try:
+                modify_message_labels(service, stub["id"], [processed_id], [inbox_id])
+            except Exception:
+                pass
+        log.info(f"  Relabeled {len(stubs)} stub(s) → OpenDia Processed")
+        return
+
     # changes@ is a public address, so the sender must be a known client contact.
     # Checked before classification so an unknown sender costs no model call.
     is_changes_intake = _addressed_to_changes(latest_customer_msg)
@@ -258,9 +289,6 @@ def _process_thread(
         )
         log.info(f"  Auto-created project id={project_id} for client={result['client_hint']!r}")
 
-    # canonical gmail_id = latest inbound message ID (unique per thread dispatch)
-    canonical_gmail_id = latest_customer_msg["id"]
-
     # Build queue payload (everything Stage B needs)
     payload = {
         "gmail_id": canonical_gmail_id,
@@ -290,7 +318,7 @@ def _process_thread(
     log.info(f"  Inserted to queue: {queue_subject!r}")
 
     # Write to DB
-    create_inbox_item(
+    inserted = create_inbox_item(
         gmail_id=canonical_gmail_id,
         thread_id=thread_id,
         from_addr=from_addr,
@@ -306,13 +334,33 @@ def _process_thread(
         project_id=project_id,
         attachment_meta=attachment_meta_json,
     )
-    log.info(f"  Written to inbox_items DB (gmail_id={canonical_gmail_id})")
+    if inserted:
+        log.info(f"  Written to inbox_items DB (gmail_id={canonical_gmail_id})")
+    else:
+        log.info(
+            f"  inbox_items row already existed (gmail_id={canonical_gmail_id}) — "
+            f"insert ignored, updating in place"
+        )
 
-    if is_changes_intake:
+    if is_changes_intake and not inserted:
         # create_inbox_item is INSERT OR IGNORE, so a message that was parked as
         # unknown_sender and is being reprocessed after the sender was authorized
-        # would otherwise keep the parked status forever.
-        update_inbox_item(canonical_gmail_id, status="classified")
+        # keeps its parked row. Write the classification onto it — status alone
+        # would leave the row hintless (no prompt_text, no project) forever.
+        update_inbox_item(
+            canonical_gmail_id,
+            status="classified",
+            client_hint=result["client_hint"],
+            division_hint=result["division_hint"],
+            priority=result["priority"],
+            short_slug=result["short_slug"],
+            prompt_text=result["prompt_text"],
+            requires_server_access=0,
+            estimated_minutes=result.get("estimated_minutes", 15),
+            project_hint=result.get("project_hint", "unknown"),
+            project_id=project_id,
+            attachment_meta=attachment_meta_json,
+        )
 
     # Relabel ALL stubs in this thread: remove OpenDia Inbox, add OpenDia Processed
     for stub in stubs:

@@ -102,7 +102,9 @@ Rules for this session:
 - When replacing, updating, or removing a file on a website, search exhaustively for ALL
   references to the old file (grep the entire site directory, check the database for URLs/paths)
   before considering the task complete. Do not stop after finding the first instance.
-- When done, stop and wait.
+- When done, run the Finish steps at the end of this prompt, then stop. No one
+  returns to this session afterward — anything unfinished when you stop stays
+  unfinished.
 
 """
 
@@ -127,7 +129,9 @@ Rules for this session:
 - Gmail draft formatting: use PLAIN TEXT only. No markdown.
 - Include the preview URL prominently in the Gmail draft.
 - When replacing or removing files, search exhaustively for ALL references.
-- When done, stop and wait.
+- When done, run the Finish steps at the end of this prompt, then stop. No one
+  returns to this session afterward — anything unfinished when you stop stays
+  unfinished.
 
 """
 
@@ -155,7 +159,9 @@ Rules for this session:
 - When replacing, updating, or removing a file on a website, search exhaustively for ALL
   references to the old file (grep the entire site directory, check the database for URLs/paths)
   before considering the task complete. Do not stop after finding the first instance.
-- When done, stop and wait.
+- When done, run the Finish steps at the end of this prompt, then stop. No one
+  returns to this session afterward — anything unfinished when you stop stays
+  unfinished.
 
 """
 
@@ -216,9 +222,31 @@ When you have completed the work above, do these steps IN ORDER:
 4. Create the Gmail draft reply to {from_addr} (re: "{subject}") summarizing
    what you did and any next steps for the operator to review. Use the
    gmail_create_draft MCP tool. DO NOT SEND — draft only. Plain text only,
-   no markdown (see rule in the preamble above).
+   no markdown (see rule in the preamble above). After creating it, list the
+   drafts for that recipient and confirm the draft id you just created is
+   actually present — never report a draft id you have not read back.
 
-5. Stop.
+5. Verification contract — read carefully, it decides whether this task counts
+   as done:
+   - Never end your turn waiting on an external event (a CI pipeline, a
+     watcher, a notification). Nothing will re-invoke you; ending your turn IS
+     the end of this session. If a deploy is in flight, poll it synchronously
+     (sleep, re-check, repeat) until it succeeds or fails, then verify the
+     live result before moving on.
+   - Every claim needs an artifact you verified THIS turn: re-fetch the live
+     page after a deploy, re-list drafts after drafting, re-read the ledger
+     entry after editing it. If you cannot verify something, say so — do not
+     report it as done.
+   - As the FINAL line of your output, print exactly one of:
+       OD-CLOSEOUT-COMPLETE
+     (only when every step above is done and verified), or
+       OD-CLOSEOUT-INCOMPLETE: <one line — what remains and why>
+     The pipeline marks this task done ONLY when it sees OD-CLOSEOUT-COMPLETE
+     as a final line; anything else routes the task to the error queue for
+     operator review. An honest INCOMPLETE is always better than a false
+     COMPLETE.
+
+6. Stop.
 """
 
 OPERATOR_CORRECTION_TEMPLATE = """\
@@ -415,11 +443,20 @@ def _spawn_session(gmail_id: str, client_hint: str, division_hint: str,
     escaped_marker = shlex.quote(marker)
     escaped_state = shlex.quote(state_file)
     escaped_ledger = shlex.quote(ledger_file)
+    # done is earned, not assumed: exit 0 alone proves the claude process ended,
+    # not that the work finished (a session that exits mid-closeout still exits 0).
+    # The outro contract requires the session to print OD-CLOSEOUT-COMPLETE as its
+    # final line only after verifying every closeout artifact; anything else —
+    # nonzero exit, no marker, or an explicit OD-CLOSEOUT-INCOMPLETE — routes to
+    # status=error with the log tail as error_text, surfacing in the dashboard
+    # Active inbox for operator review/re-dispatch. close-timer-stub is a no-op
+    # when the session already closed its own timer.
     shell_cmd = (
         f"{shlex.quote(CLAUDE_BIN)} --print --dangerously-skip-permissions {escaped_prompt} "
         f"> {escaped_log} 2>&1 ; "
         f"EXIT=$? ; cat {escaped_log} ; "
-        f"if [ $EXIT -eq 0 ] ; then {db_script} done {shlex.quote(gmail_id)} ; "
+        f"if [ $EXIT -eq 0 ] && tail -n 5 {escaped_log} | grep -q OD-CLOSEOUT-COMPLETE ; "
+        f"then {db_script} done {shlex.quote(gmail_id)} ; "
         f"else {db_script} close-timer-stub {escaped_marker} {escaped_state} {escaped_ledger} {escaped_log} ; "
         f"{db_script} error {shlex.quote(gmail_id)} {escaped_log} ; fi"
     )

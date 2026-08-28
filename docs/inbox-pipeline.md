@@ -37,6 +37,19 @@ below.
 - **No match → auto-create.** If Stage A can't match an existing dashboard
   project, it creates one in `wfhuman` status ("Auto-created from inbox: …")
   and links the new `inbox_items` row to it.
+- **Dedup before side effects.** Stage A checks `inbox_items` by the latest
+  inbound message's `gmail_id` BEFORE classifying, creating a project, or
+  inserting a queue message. A re-applied label on an already-ingested
+  message resurfaces the existing row (see Controls) — it never mints a
+  second card, burns a classifier call, or inserts a duplicate queue item.
+- **`done` is earned, not assumed.** A dispatched session's exit code alone
+  never marks the item done. The session must end its output with
+  `OD-CLOSEOUT-COMPLETE`, printed only after it has verified every closeout
+  artifact (live page fetched post-deploy, draft re-listed after creation,
+  ledger re-read). A clean exit without the marker — or an explicit
+  `OD-CLOSEOUT-INCOMPLETE: <reason>` — routes the item to `status=error`
+  with the log tail as `error_text`, so it stays visible in the Active inbox
+  for review/re-dispatch instead of silently reading as finished.
 
 ### Dispatch is manual, not automatic
 
@@ -123,7 +136,12 @@ context, not a footnote.
 - Pause Stage A: `touch ~/OpenDia/inbox.disabled` — messages stay labeled
   `OpenDia Inbox` and process on the next tick after the file is removed
 - Resume: `rm ~/OpenDia/inbox.disabled`
-- Replay a failed/skipped item: re-apply the `OpenDia Inbox` label in Gmail
+- Replay a failed/skipped item: re-apply the `OpenDia Inbox` label in Gmail.
+  For a message already in `inbox_items` this resurfaces the existing row
+  (`done`/`error`/`dismissed` → `classified`; same card, no re-classification)
+  and it reappears in the dashboard Active inbox for dispatch. A message not
+  yet in `inbox_items` classifies from scratch. An item mid-flight
+  (`classified`/`dispatched`) is left untouched.
 - View session logs: `~/OpenDia/logs/sessions/<session-name>.log`
 - View alias table: `python3 ~/OpenDia/scripts/inbox_db.py dump-aliases`
 - Stub-close a stale timer manually:
@@ -151,10 +169,10 @@ they're waiting on the Operator to click Dispatch.
 
 1. Scripts (`inbox-tick.sh`, `inbox_stage_a.py`, `inbox_stage_b.py`,
    `inbox_db.py`, `gmail_helper.py`, `classify_email.py`,
-   `check_mail_ingest.py`, `inbox-sweep.sh`) are unversioned in
-   `~/OpenDia/scripts/` — survive box loss only via the nightly Drive backup
-   (`migrate-export.sh`). They are not yet symlinked into the git repo the
-   way `calendar_sync.py` is.
+   `check_mail_ingest.py`, `inbox-sweep.sh`) live in the git repo at
+   `repo/scripts/` with symlinks from `~/OpenDia/scripts/` (cron calls the
+   symlink path). Versioned in git AND on the nightly Drive backup
+   (`migrate-export.sh`).
 2. `~/.config/opendia/inbox.env` (holds `ANTHROPIC_API_KEY`) and OAuth
    tokens at `~/.claude/mcp-credentials/google-workspace/` ride the same
    nightly backup.
@@ -162,7 +180,8 @@ they're waiting on the Operator to click Dispatch.
    exits 1 immediately and logs the fix (`inbox_setup_auth.py` for the OAuth
    case).
 4. Stuck queue: an item can be re-run at any time by re-applying the
-   `OpenDia Inbox` Gmail label (re-classifies from scratch) or, if already
+   `OpenDia Inbox` Gmail label (resurfaces the existing row to `classified`;
+   a never-ingested message classifies from scratch) or, if already
    classified, by clicking Dispatch/Re-dispatch from the dashboard — no data
    is lost by a stalled tick, since nothing auto-expires out of the queue.
 5. Crontab itself: `migrate-export.sh` backs it up; **`migrate-setup.sh`

@@ -117,7 +117,12 @@ def create_inbox_item(gmail_id, thread_id, from_addr, subject,
                       client_hint, division_hint, priority, short_slug, prompt_text,
                       requires_server_access=False, estimated_minutes=15,
                       project_hint=None, project_id=None, attachment_meta=None) -> int:
-    """Insert a new inbox item. Returns the new row id."""
+    """Insert a new inbox item (INSERT OR IGNORE on unique gmail_id).
+
+    Returns 1 if a row was inserted, 0 if the gmail_id already existed and the
+    insert was ignored. (Was previously cur.lastrowid, which is meaningless on
+    the ignore path — callers must not treat the return as a row id.)
+    """
     con = _con()
     try:
         cur = con.execute("""
@@ -132,7 +137,7 @@ def create_inbox_item(gmail_id, thread_id, from_addr, subject,
               1 if requires_server_access else 0, estimated_minutes, project_hint, project_id,
               attachment_meta))
         con.commit()
-        return cur.lastrowid
+        return cur.rowcount
     finally:
         con.close()
 
