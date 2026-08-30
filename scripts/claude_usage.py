@@ -12,6 +12,15 @@ keeps on disk. No daemon, one HTTP call, prints and exits.
     cu --json         raw endpoint response (no bars) — for scripting
     cu --no-color     plain text, no ANSI
     cu --width 30     wider bars (default 20)
+    cu --watch        keep refreshing in place every 2 minutes, Ctrl+C to stop
+    cu --watch --interval 60   same, every 60s instead
+
+--watch redraws in the same terminal (clear + reprint) rather than scrolling,
+and re-reads the credentials file from scratch every tick — so if Claude Code
+refreshes the token in the background mid-watch (it does this on its own),
+the next frame just picks it up. A single failed frame (network blip, an
+expired token with nothing around to refresh it, a rate limit) prints its
+error and keeps watching rather than killing the whole session.
 
 Data source: GET https://api.anthropic.com/api/oauth/usage
 Verified manually against a live token on 2026-08-29 — the `limits[]` array
@@ -193,22 +202,17 @@ def render_row(label, pct, reset_str, width, colorize):
     return f"  {label:<8} {b}  {pct_str}   {reset_str}"
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Show Claude Code usage limits as retro ASCII bars.",
-    )
-    parser.add_argument("--credits", action="store_true", help="also show the extra-usage spend bar")
-    parser.add_argument("--no-color", action="store_true", help="disable ANSI color")
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH, help=f"bar width (default {DEFAULT_WIDTH})")
-    parser.add_argument("--json", action="store_true", help="print the raw endpoint response and exit")
-    args = parser.parse_args()
-
+def render_frame(args):
+    """Fetch usage once and print one frame (bars or --json). May raise
+    SystemExit via die() on a network/credentials failure — the caller
+    decides whether that should end the program (one-shot) or just skip
+    this frame (--watch)."""
     token = load_token()
     data = fetch_usage(token)
 
     if args.json:
         print(json.dumps(data, indent=2))
-        return 0
+        return
 
     now = datetime.now().astimezone()
     colorize = use_color(args)
@@ -231,6 +235,52 @@ def main():
             money = f"${used_amt:.2f} / ${limit_amt:.2f}"
             print(render_row("credits", pct, money, args.width, colorize))
 
+
+def clear_screen():
+    if sys.stdout.isatty():
+        print("\033[H\033[2J", end="")
+
+
+def watch_loop(args):
+    try:
+        while True:
+            clear_screen()
+            try:
+                render_frame(args)
+            except SystemExit:
+                pass  # die() already printed the reason to stderr; keep watching
+            print(f"\n  (refreshing every {args.interval}s — Ctrl+C to stop)")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print()
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Show Claude Code usage limits as retro ASCII bars.",
+    )
+    parser.add_argument("--credits", action="store_true", help="also show the extra-usage spend bar")
+    parser.add_argument("--no-color", action="store_true", help="disable ANSI color")
+    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH, help=f"bar width (default {DEFAULT_WIDTH})")
+    parser.add_argument("--json", action="store_true", help="print the raw endpoint response and exit")
+    parser.add_argument("--watch", action="store_true", help="keep refreshing in place instead of exiting")
+    parser.add_argument(
+        "--interval", type=int, default=120,
+        help="seconds between refreshes in --watch mode (default 120 = 2 min)",
+    )
+    args = parser.parse_args()
+
+    if args.watch:
+        if args.interval < 30:
+            print(
+                f"warning: --interval {args.interval}s is aggressive — the usage endpoint "
+                "rate-limited at a few seconds apart during testing; 60+ is safer",
+                file=sys.stderr,
+            )
+        return watch_loop(args)
+
+    render_frame(args)
     return 0
 
 
