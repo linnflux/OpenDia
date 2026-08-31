@@ -332,8 +332,13 @@ def main():
                    check=True, capture_output=True)
     os.remove(html_path)
     size = os.path.getsize(pdf_path)
-    if size < 150_000 * len(rows):
-        sys.exit(f"PDF is only {size}B for {len(rows)} posts; the graphics almost certainly did not embed")
+    # Count embedded image XObjects rather than guessing by size: flat-color
+    # graphics compress to a tenth of photo weight, so any byte floor either
+    # false-alarms on those or waves through a photo PDF missing its images.
+    raw = open(pdf_path, "rb").read()
+    embedded = raw.count(b"/Subtype /Image") + raw.count(b"/Subtype/Image")
+    if embedded < len(rows):
+        sys.exit(f"PDF embeds {embedded} images for {len(rows)} posts; graphics did not embed")
     print(f"Wrote {pdf_path}  ({size/1e6:.1f} MB, {len(rows)+1} pages, v{version})")
 
     if not a.upload:
