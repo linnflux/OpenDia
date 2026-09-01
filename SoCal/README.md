@@ -20,8 +20,10 @@ One spreadsheet per client, three tabs:
 - **Batches** — one row per approval cycle (`YYYY-MM`), carrying the PDF
   version/link, send date, stakeholders, approval dates.
 - **Config** (hidden) — every client fact the tools need: names, footer line,
-  pages, channels, brand colors, Drive folder ids, cadence, Meta asset ids.
-  The code reads this tab, never hardcoded constants.
+  pages, channels, brand colors, Drive folder ids, cadence, Meta asset ids,
+  and `image_style` (the house description of what this client's post imagery
+  looks like — a stock-photo brief for one client, an art-direction prompt for
+  another). The code reads this tab, never hardcoded constants.
 
 Status lifecycle: `Draft → Ready → Under Review → Changes Requested/Approved →
 Scheduled → Published`, plus `Do Not Run`. `Published` requires a permalink and
