@@ -1,4 +1,4 @@
-# Linnflux Social
+# Linnflux SoCal
 
 Sheet-driven social media framework: one Google Sheet per client is the single
 source of truth for a monthly batch-approval calendar; everything else — review
