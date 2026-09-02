@@ -9,6 +9,7 @@ import { registerRunroomRoutes } from "./runrooms.js";
 import { registerPlanroomRoutes } from "./planrooms.js";
 import { registerMailroomRoutes } from "./mailroom.js";
 import { mountAgents } from "./agents.js";
+import { registerHandoffRoutes } from "./handoffs.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, createCompany, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns, ensureAgentsTables } from "./db.js";
 import { runDispatch } from "./dispatch.js";
@@ -1324,6 +1325,9 @@ registerMailroomRoutes(app);
 
 // OpenDia Agents: scheduled scan-and-propose agents (admin)
 mountAgents(app);
+
+// Session handoffs + one-click operator actions (admin; loopback = agents)
+registerHandoffRoutes(app);
 
 // Second client, same API, same auth. Mounted before the dashboard
 // catch-all so /prm/* never falls through to the dashboard SPA. Built from

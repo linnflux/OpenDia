@@ -776,6 +776,44 @@ export function ensureAgentsTables() {
       assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (agent_id, duty_id)
     );
+    -- 2026-09-02: session handoffs — messages an agent routes to the tmux
+    -- session that owns a piece of work (git-hygiene nudges being the first
+    -- writer). The server owns delivery: try now, retry from tick(), escalate
+    -- to an operator_action when the target can't take it. finding_key is the
+    -- dedupe handle ("git:<repo>|<session>|<kind>").
+    CREATE TABLE IF NOT EXISTS handoffs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      finding_key     TEXT NOT NULL,
+      target_session  TEXT NOT NULL,
+      message         TEXT NOT NULL,
+      source          TEXT,
+      status          TEXT NOT NULL DEFAULT 'pending',
+      attempts        INTEGER NOT NULL DEFAULT 0,
+      last_error      TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      last_attempt_at TEXT,
+      sent_at         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(status, created_at);
+    -- 2026-09-02: one-click operator actions. Unlike operator_acks (which
+    -- overlay a DERIVED inbox), these are first-class rows: an agent files a
+    -- concrete executable action ('git_push') or an FYI ('notice') with full
+    -- evidence, and the Operator inbox renders an Approve/Dismiss button.
+    -- action is JSON ({repo, remote, branch, head_sha} for git_push).
+    CREATE TABLE IF NOT EXISTS operator_actions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind        TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      body        TEXT,
+      action      TEXT,
+      source      TEXT,
+      finding_key TEXT,
+      status      TEXT NOT NULL DEFAULT 'open',
+      result      TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_operator_actions_status ON operator_actions(status, created_at);
   `);
   // Migrate: query rosters + chat modes (added after the original agents schema).
   const cols = db.pragma("table_info(agents)").map((r) => r.name);
@@ -1042,6 +1080,83 @@ export function markDutyRun(id) {
 
 export function bumpDutyCursor(agentId, value) {
   getDb().prepare("UPDATE agents SET duty_cursor = ? WHERE id = ?").run(value, agentId);
+}
+
+// ── Session handoffs + operator actions ───────────────────────────────────
+
+// Dedupe rules live here, not in the route: a pending row with the same
+// finding_key absorbs the new message (the finding got fresher, the debt
+// didn't multiply); a row already SENT within the last day suppresses a
+// re-send outright (a re-run scan must not double-nudge the same session).
+export function createHandoff({ findingKey, targetSession, message, source }) {
+  const db = getDb();
+  const pending = db.prepare(
+    "SELECT * FROM handoffs WHERE finding_key = ? AND status = 'pending'"
+  ).get(findingKey);
+  if (pending) {
+    db.prepare("UPDATE handoffs SET message = ?, target_session = ?, source = ? WHERE id = ?")
+      .run(message, targetSession, source || null, pending.id);
+    return { ...pending, message, target_session: targetSession, deduped: "updated-pending" };
+  }
+  const recentSent = db.prepare(
+    "SELECT id FROM handoffs WHERE finding_key = ? AND status = 'sent' AND sent_at > datetime('now', '-1 day')"
+  ).get(findingKey);
+  if (recentSent) return { id: recentSent.id, deduped: "recently-sent" };
+  const info = db.prepare(
+    "INSERT INTO handoffs (finding_key, target_session, message, source) VALUES (?, ?, ?, ?)"
+  ).run(findingKey, targetSession, message, source || null);
+  return db.prepare("SELECT * FROM handoffs WHERE id = ?").get(info.lastInsertRowid);
+}
+
+export function getPendingHandoffs() {
+  return getDb().prepare(
+    "SELECT * FROM handoffs WHERE status = 'pending' ORDER BY created_at ASC"
+  ).all();
+}
+
+export function recordHandoffAttempt(id, { status, error }) {
+  getDb().prepare(`
+    UPDATE handoffs SET status = ?, attempts = attempts + 1, last_error = ?,
+      last_attempt_at = datetime('now'),
+      sent_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE sent_at END
+    WHERE id = ?
+  `).run(status, error || null, status, id);
+}
+
+export function createOperatorAction({ kind, title, body, action, source, findingKey }) {
+  const db = getDb();
+  if (findingKey) {
+    const open = db.prepare(
+      "SELECT id FROM operator_actions WHERE finding_key = ? AND status = 'open'"
+    ).get(findingKey);
+    if (open) {
+      db.prepare("UPDATE operator_actions SET title = ?, body = ?, action = ?, source = ? WHERE id = ?")
+        .run(title, body || null, action ? JSON.stringify(action) : null, source || null, open.id);
+      return db.prepare("SELECT * FROM operator_actions WHERE id = ?").get(open.id);
+    }
+  }
+  const info = db.prepare(`
+    INSERT INTO operator_actions (kind, title, body, action, source, finding_key)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(kind, title, body || null, action ? JSON.stringify(action) : null, source || null, findingKey || null);
+  return db.prepare("SELECT * FROM operator_actions WHERE id = ?").get(info.lastInsertRowid);
+}
+
+export function getOperatorActionById(id) {
+  return getDb().prepare("SELECT * FROM operator_actions WHERE id = ?").get(id);
+}
+
+export function listOpenOperatorActions() {
+  return getDb().prepare(
+    "SELECT * FROM operator_actions WHERE status = 'open' ORDER BY created_at DESC LIMIT 50"
+  ).all();
+}
+
+export function resolveOperatorAction(id, status, result) {
+  return getDb().prepare(`
+    UPDATE operator_actions SET status = ?, result = ?, resolved_at = datetime('now')
+    WHERE id = ? AND status = 'open'
+  `).run(status, result || null, id).changes > 0;
 }
 
 export function insertAgentRun({ id, agentId, trigger, status, summary = null, detail = null }) {

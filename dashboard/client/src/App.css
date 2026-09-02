@@ -7299,6 +7299,38 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .agents-inbox-ack:hover { color: var(--timer-open); border-color: var(--timer-open); }
 
+/* One-click operator actions (handoffs.js rows) */
+.agents-inbox-approve {
+  flex: 0 0 auto;
+  background: var(--warning-soft, rgba(255, 180, 0, 0.12));
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-xs);
+  color: var(--warning);
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.agents-inbox-approve:hover:not(:disabled) { filter: brightness(1.15); }
+.agents-inbox-approve:disabled { opacity: 0.6; cursor: default; }
+.agents-inbox-action-title { color: var(--text); }
+.agents-inbox-evidence {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border-radius: var(--radius-xs);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.agents-queue-status.action-result-done { color: var(--timer-open); }
+.agents-queue-status.action-result-failed { color: var(--danger, #e5534b); }
+
 /* Duties panel — reuses queue rows; only the editor bits are new. */
 .agents-duties-new { margin-left: auto; }
 .agents-duties-detail { display: flex; flex-direction: column; gap: 0.55rem; }

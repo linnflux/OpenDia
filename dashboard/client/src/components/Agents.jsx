@@ -27,12 +27,15 @@ const QUEUE_STATUS_LABEL = {
 // hasn't dealt with.
 function OperatorInbox({ onOpenProject }) {
   const [items, setItems] = useState(null);
+  const [actions, setActions] = useState([]);
   const [expanded, setExpanded] = useState(null);
+  const [busyAction, setBusyAction] = useState(null);
+  const [actionResults, setActionResults] = useState({});
 
   const fetchInbox = useCallback(() => {
     fetch("/api/agents/operator-inbox")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d) => setItems(d.items || []))
+      .then((d) => { setItems(d.items || []); setActions(d.actions || []); })
       .catch(() => {});
   }, []);
 
@@ -55,9 +58,79 @@ function OperatorInbox({ onOpenProject }) {
     }
   }
 
+  // Approve executes the action server-side (a git push, exactly the commits
+  // the evidence shows); Dismiss just closes it. Both keep the row on screen
+  // with its result until the next poll cycle drops it from the open list.
+  async function runAction(a, verb) {
+    setBusyAction(a.id);
+    try {
+      const r = await fetch(`/api/operator-actions/${a.id}/${verb}`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      setActionResults((prev) => ({
+        ...prev,
+        [a.id]: verb === "dismiss" ? { status: "dismissed" }
+          : { status: d.status || (r.ok ? "done" : "failed"), result: d.result || d.error || "" },
+      }));
+    } catch (e) {
+      setActionResults((prev) => ({ ...prev, [a.id]: { status: "failed", result: e.message } }));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   if (items === null) return null;
   const needs = items.filter((i) => i.kind === "escalated");
   const done = items.filter((i) => i.kind === "done");
+
+  const actionRow = (a) => {
+    const key = `action:${a.id}`;
+    const open = expanded === key;
+    const res = actionResults[a.id];
+    return (
+      <li key={key} className={`agents-queue-row status-action${res ? ` action-${res.status}` : ""}`}>
+        <div
+          className="agents-queue-rowhead"
+          role="button"
+          tabIndex={0}
+          onClick={() => setExpanded(open ? null : key)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(open ? null : key); } }}
+        >
+          <span className="agents-queue-when">{fmtQueueTime(a.at)}</span>
+          <span className="agents-inbox-line agents-inbox-action-title">{a.title}</span>
+          {a.source && <span className="agents-queue-status">{a.source}</span>}
+          {res ? (
+            <span className={`agents-queue-status action-result-${res.status}`}>{res.status}</span>
+          ) : (
+            <>
+              {a.kind === "git_push" && (
+                <button
+                  className="agents-inbox-approve"
+                  disabled={busyAction === a.id}
+                  onClick={(e) => { e.stopPropagation(); runAction(a, "approve"); }}
+                >
+                  {busyAction === a.id ? "Pushing…" : "Approve & push"}
+                </button>
+              )}
+              <button
+                className="agents-inbox-ack"
+                title="Dismiss — I've dealt with this"
+                disabled={busyAction === a.id}
+                onClick={(e) => { e.stopPropagation(); runAction(a, "dismiss"); }}
+              >
+                ✓
+              </button>
+            </>
+          )}
+        </div>
+        {(open || res?.result) && (
+          <div className="agents-queue-detail">
+            {a.body && <pre className="agents-inbox-evidence">{a.body}</pre>}
+            {res?.result && <div className="agents-run-note">{res.result}</div>}
+          </div>
+        )}
+      </li>
+    );
+  };
 
   const row = (i) => {
     const open = expanded === i.key;
@@ -128,14 +201,22 @@ function OperatorInbox({ onOpenProject }) {
       <div className="agents-queue-head">
         <h3 className="agents-queue-title">Operator inbox</h3>
         <span className="agents-queue-sub">
-          {needs.length > 0 ? `${needs.length} need${needs.length === 1 ? "s" : ""} you` : "all caught up"}
+          {needs.length + actions.length > 0
+            ? `${needs.length + actions.length} need${needs.length + actions.length === 1 ? "s" : ""} you`
+            : "all caught up"}
           {done.length > 0 && ` · ${done.length} done`}
         </span>
       </div>
-      {needs.length === 0 && done.length === 0 ? (
+      {needs.length === 0 && done.length === 0 && actions.length === 0 ? (
         <div className="agents-queue-empty">All clear — done and escalated items land here.</div>
       ) : (
         <>
+          {actions.length > 0 && (
+            <>
+              <div className="agents-inbox-group esc">Actions ({actions.length})</div>
+              <ul className="agents-queue-list">{actions.map(actionRow)}</ul>
+            </>
+          )}
           {needs.length > 0 && group("Needs your input", "esc", needs)}
           {done.length > 0 && group("Done", "ok", done)}
         </>

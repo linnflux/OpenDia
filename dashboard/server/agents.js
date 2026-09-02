@@ -30,7 +30,9 @@ import {
   getOperatorAckKeys, ackOperatorItems,
   getAllDuties, getDutyById, createDuty, updateDuty, deleteDuty,
   getAgentDuties, assignDuty, unassignDuty, markDutyRun, bumpDutyCursor,
+  listOpenOperatorActions,
 } from "./db.js";
+import { drainPendingHandoffs } from "./handoffs.js";
 import {
   startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT,
   listAgentSparkRuns, superviseDecide,
@@ -1118,6 +1120,9 @@ function sendDigest(agent) {
 }
 
 function tick() {
+  // The same external cron that drives heartbeats redelivers parked session
+  // handoffs — a failure here must never cost a heartbeat.
+  try { drainPendingHandoffs(); } catch (e) { console.error("agents: handoff drain failed:", e.message); }
   const checked = [];
   const started = [];
   const skipped = [];
@@ -1294,7 +1299,15 @@ export function mountAgents(app) {
   app.get("/api/agents/operator-inbox", requireAdmin, (req, res) => {
     try {
       const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
-      if (!supervisor) return res.json({ items: [] });
+      if (!supervisor) {
+        return res.json({
+          items: [],
+          actions: listOpenOperatorActions().map((a) => ({
+            id: a.id, kind: a.kind, title: a.title, body: a.body,
+            source: a.source, at: a.created_at,
+          })),
+        });
+      }
       const since = new Date(Date.now() - 7 * 24 * 3600 * 1000)
         .toISOString().slice(0, 19).replace("T", " ");
       const runs = getAgentRunsSince(supervisor.id, since)
@@ -1337,7 +1350,14 @@ export function mountAgents(app) {
         .filter((i) => showAll || !acked.has(i.key))
         .map((i) => (showAll ? { ...i, acked: acked.has(i.key) } : i))
         .slice(0, 100);
-      res.json({ items: out });
+      // One-click actions ride alongside the derived verdict items: these
+      // are first-class rows (see handoffs.js), resolved by their own
+      // approve/dismiss routes rather than the ack overlay.
+      const actions = listOpenOperatorActions().map((a) => ({
+        id: a.id, kind: a.kind, title: a.title, body: a.body,
+        source: a.source, at: a.created_at,
+      }));
+      res.json({ items: out, actions });
     } catch (err) {
       console.error("GET /api/agents/operator-inbox error:", err.message);
       res.status(500).json({ error: err.message });
