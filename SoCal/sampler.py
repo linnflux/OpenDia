@@ -49,19 +49,61 @@ def saturation(hexcolor):
     return colorsys.rgb_to_hls(r, g, b)[2]
 
 
-def pick_palette(hexes):
-    """accent / ink / bg from a frequency-weighted hex list."""
-    uniq = Counter(h.lower() for h in hexes)
-    if not uniq:
-        return {"accent": "#2e7d32", "ink": "#1d1d1d", "bg": "#ffffff"}
-    # accent: most frequent saturated mid-luminance color
-    sat = [(h, n) for h, n in uniq.items() if saturation(h) > .35 and .15 < luminance(h) < .75]
-    sat.sort(key=lambda x: (-x[1], -saturation(x[0])))
-    accent = sat[0][0] if sat else max(uniq, key=uniq.get)
-    darks = [h for h in uniq if luminance(h) < .2]
-    lights = [h for h in uniq if luminance(h) > .9]
-    ink = max(darks, key=lambda h: uniq[h]) if darks else "#1d1d1d"
-    bg = max(lights, key=lambda h: uniq[h]) if lights else "#ffffff"
+# CSS-only colors that are usually a framework's, not the brand's
+FRAMEWORK_DEFAULTS = {"#007bff", "#0d6efd", "#0056b3", "#2ea3f2", "#17a2b8",
+                      "#28a745", "#dc3545", "#ffc107", "#6c757d", "#f8f9fa", "#212529"}
+
+
+def _bucket(r, g, b):
+    """merge antialiased near-duplicates: quantize channels to 16 levels"""
+    q = lambda v: min(240, (v // 16) * 16 + 8)
+    return f"#{q(r):02x}{q(g):02x}{q(b):02x}"
+
+
+def image_counts(img):
+    """Counter of quantized hex -> pixels, transparency composited on white."""
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        from PIL import Image as _I
+        base = _I.new("RGBA", img.size, (255, 255, 255, 255))
+        base.paste(img, mask=img.split()[-1])
+        img = base
+    img = img.convert("RGB")
+    img.thumbnail((160, 160))
+    return Counter(_bucket(*px) for px in img.getdata())
+
+
+def page_counts(chrome, url, tmpdir):
+    """(full page, header region) color Counters from a rendered screenshot."""
+    from PIL import Image
+    shot = os.path.join(tmpdir, "page.png")
+    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+                    "--hide-scrollbars", "--window-size=1280,2200",
+                    "--virtual-time-budget=8000", f"--screenshot={shot}", url],
+                   check=True, capture_output=True)
+    im = Image.open(shot).convert("RGB")
+    return image_counts(im), image_counts(im.crop((0, 0, im.width, 300)))
+
+
+def choose_palette(page, header, logo, css_hexes):
+    """Rendered pixels are ground truth; the logo is the strongest brand signal;
+    CSS text is a last-resort fallback (framework defaults excluded)."""
+    votes = Counter()
+    for counter, weight in ((page, 1), (header, 3), (logo, 4)):
+        total = sum(counter.values()) or 1
+        for h, n in counter.items():
+            if saturation(h) > .25 and .10 < luminance(h) < .80:
+                votes[h] += weight * n / total
+    accent = votes.most_common(1)[0][0] if votes else None
+    if not accent:
+        css = [h.lower() for h in css_hexes
+               if h.lower() not in FRAMEWORK_DEFAULTS
+               and saturation(h) > .35 and .15 < luminance(h) < .75]
+        accent = Counter(css).most_common(1)[0][0] if css else "#2e7d32"
+    darks = [(n, h) for h, n in page.items() if luminance(h) < .22]
+    lights = [(n, h) for h, n in page.items() if luminance(h) > .85]
+    ink = max(darks)[1] if darks else "#1d1d1d"
+    bg = max(lights)[1] if lights else "#ffffff"
     return {"accent": accent, "ink": ink, "bg": bg}
 
 
@@ -102,12 +144,17 @@ def extract(url):
         css_text += style.get_text()
 
     hexes = HEX.findall(css_text) + HEX.findall(html)
-    palette = pick_palette(hexes)
 
     phone = ""
-    m = PHONE.search(html)
-    if m:
-        phone = "-".join(m.groups())
+    for a in soup.find_all("a", href=re.compile(r"^tel:")):
+        m = PHONE.search(a["href"])
+        if m:
+            phone = "({}) {}-{}".format(*m.groups())
+            break
+    if not phone:
+        m = PHONE.search(soup.get_text(" "))
+        if m:
+            phone = "({}) {}-{}".format(*m.groups())
 
     socials = sorted({a["href"] for a in soup.find_all("a", href=True)
                       if re.search(r"(facebook|instagram|linkedin)\.com/", a["href"])})
@@ -120,7 +167,7 @@ def extract(url):
     corpus = list(dict.fromkeys(corpus))[:40]
 
     return {"url": url, "domain": urlparse(url).netloc.replace("www.", ""),
-            "title": title, "description": desc, "palette": palette,
+            "title": title, "description": desc, "css_hexes": hexes,
             "phone": phone, "socials": socials,
             "logo": find_logo(soup, base), "corpus": corpus}
 
@@ -235,6 +282,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--name", help="company display name (default: from site title)")
     ap.add_argument("--posts", type=int, default=3)
+    ap.add_argument("--accent", help="override accent hex (operator knows best)")
+    ap.add_argument("--ink", help="override ink hex")
+    ap.add_argument("--bg", help="override background hex")
     a = ap.parse_args()
 
     chrome = next((shutil.which(e) for e in ("chromium", "chromium-browser", "google-chrome") if shutil.which(e)), None)
@@ -247,7 +297,7 @@ def main():
     name = a.name or (brief["title"].split("|")[0].split("-")[0].strip() or brief["domain"])
     brief["name"] = name
 
-    logo_uri = None
+    logo_uri, logo_counts = None, Counter()
     if brief["logo"]:
         try:
             blob = fetch(brief["logo"], binary=True)
@@ -255,12 +305,28 @@ def main():
             mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
                     "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "image/png")
             logo_uri = f"data:{mime};base64," + base64.b64encode(blob).decode()
+            if ext != "svg":
+                import io
+                from PIL import Image
+                logo_counts = image_counts(Image.open(io.BytesIO(blob)))
         except Exception as e:
             print(f"  (logo fetch failed: {e}; using text wordmark)")
 
+    print("reading rendered page colors ...")
+    try:
+        full, header = page_counts(chrome, a.url, a.out)
+    except Exception as e:
+        print(f"  (screenshot failed: {e}; falling back to CSS colors)")
+        full, header = Counter(), Counter()
+    palette = choose_palette(full, header, logo_counts, brief["css_hexes"])
+    for k in ("accent", "ink", "bg"):
+        if getattr(a, k):
+            palette[k] = getattr(a, k)
+    brief["palette"] = palette
+
     with open(os.path.join(a.out, "brief.json"), "w") as fh:
         json.dump(brief, fh, indent=2)
-    print(f"  palette {brief['palette']}  phone {brief['phone'] or '-'}  "
+    print(f"  palette {palette}  phone {brief['phone'] or '-'}  "
           f"logo {'yes' if logo_uri else 'wordmark'}  socials {len(brief['socials'])}")
 
     print(f"drafting {a.posts} posts ...")
