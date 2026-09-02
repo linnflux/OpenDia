@@ -10,7 +10,8 @@ import { registerPlanroomRoutes } from "./planrooms.js";
 import { registerMailroomRoutes } from "./mailroom.js";
 import { mountAgents } from "./agents.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
-import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns, ensureAgentsTables } from "./db.js";
+import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, createCompany, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns, ensureAgentsTables } from "./db.js";
+import { runDispatch } from "./dispatch.js";
 import { spawn, execFile } from "child_process";
 import { timingSafeEqual, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
@@ -209,12 +210,37 @@ app.get("/api/projects", (req, res) => {
 
 app.post("/api/projects", (req, res) => {
   try {
-    const { name, companyName, divisionName, status, notionId } = req.body;
+    const { name, companyName, divisionName, status, notionId, goal } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
-    const project = createProject({ name, companyName, divisionName, status, notionId });
+    const project = createProject({ name, companyName, divisionName, status, notionId, goal });
     res.status(201).json(project);
   } catch (err) {
     console.error("POST /api/projects error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// "+ New" quick capture: card + Notion task (+ handoff brief + interactive
+// tmux/claude session when mode is "spawn"). Admin-only — it spawns sessions.
+app.post("/api/dispatch", requireAdmin, async (req, res) => {
+  try {
+    const result = await runDispatch(req.body, req.user?.login || "");
+    scheduleCalendarSync();
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("POST /api/dispatch error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Inline new-client create for the + New modal. Idempotent on name match.
+app.post("/api/companies", requireAdmin, (req, res) => {
+  try {
+    const { name, shortName } = req.body || {};
+    if (!(name || "").trim()) return res.status(400).json({ error: "name is required" });
+    res.status(201).json(createCompany({ name, shortName }));
+  } catch (err) {
+    console.error("POST /api/companies error:", err.message);
     res.status(400).json({ error: err.message });
   }
 });
@@ -299,8 +325,8 @@ app.get("/api/projects/match-candidates", (req, res) => {
     const { client, division, task } = req.query;
     const limit = parseInt(req.query.limit || "3", 10);
     const candidates = matchProjectCandidates(client, division, task, limit);
-    res.json(candidates.map(({ id, name, status, company_name, company_short, division: div, score }) => ({
-      id, name, status, company_name, company_short, division: div, score,
+    res.json(candidates.map(({ id, name, status, company_name, company_short, division: div, tags, goal, score }) => ({
+      id, name, status, company_name, company_short, division: div, tags, goal, score,
     })));
   } catch (err) {
     console.error("GET /api/projects/match-candidates error:", err.message);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { DIVISION_COLORS, DIVISION_WORDMARKS } from "../constants.js";
 import { StateGlyph } from "./runroom/shared.jsx";
+import RoomListCard from "./RoomListCard.jsx";
 import { RoomHeader } from "./Runroom.jsx";
 import SparkPanel from "./SparkPanel.jsx";
 import useSparkRun from "../hooks/useSparkRun.js";
@@ -147,7 +147,7 @@ function PlanroomView({ cardId, activeTimerIds, me, onOpenProject, onBack, showB
 
 // ── the list ────────────────────────────────────────────────────────────────
 
-export default function Planroom({ activeTimerIds, me, onOpenProject, initialCardId = null, onGoToRunroom, showToast }) {
+export default function Planroom({ activeTimerIds, me, onOpenProject, initialCardId = null, onGoToRunroom, showToast, onNewTask = null }) {
   const [rooms, setRooms] = useState(null);
   const [selected, setSelected] = useState(initialCardId);
   const [showAll, setShowAll] = useState(false);
@@ -193,6 +193,9 @@ export default function Planroom({ activeTimerIds, me, onOpenProject, initialCar
           {showAll ? "working set" : "show all"}
         </button>
       </span>
+      {onNewTask && (
+        <button className="planroom-new-btn" onClick={onNewTask}>+ New</button>
+      )}
     </header>
   );
 
@@ -208,40 +211,29 @@ export default function Planroom({ activeTimerIds, me, onOpenProject, initialCar
     );
   }
 
-  // Same wordmark-or-pill fallback the runroom list uses, same ring grammar:
+  // Shared card (RoomListCard), same ring grammar as the runroom list:
   // working = scanning, needs = a decision is waiting, finished = adopted/stale.
   const item = (r) => {
-    const wordmark = DIVISION_WORDMARKS[r.division];
-    const colors = DIVISION_COLORS[r.division] || { bg: "#6b7280", text: "#fff" };
     const [label, cls] = stateLabel(r);
     const ring = r.live ? (r.live.status === "proposing" ? " needs" : " working") : (r.status === "adopted" || r.stale ? " finished" : "");
     return (
-      <button key={r.card_id} className={`runroom-list-item${ring}`} onClick={() => setSelected(r.card_id)}>
-        <span className="runroom-list-brand">
-          {wordmark ? (
-            <img src={wordmark} alt={r.division} className="runroom-list-mark" />
-          ) : (
-            <span className="runroom-division-pill" style={{ backgroundColor: colors.bg, color: colors.text }}>
-              {r.division || "?"}
-            </span>
-          )}
-        </span>
-        <span className="runroom-list-title">
-          {r.certitude != null && (
-            <span className="planroom-list-pct" style={{ color: r.certitude >= 85 ? "var(--timer-open)" : r.certitude >= 60 ? "var(--pill-warn-color)" : "var(--danger, #ef4444)" }}>
-              {r.certitude}%
-            </span>
-          )}
-          {r.title}
-        </span>
-        {label && <span className={`runroom-list-state ${cls || "input"}`}>{label}</span>}
-        <span className="runroom-list-meta">
-          {r.company} &middot; #{r.card_id}
-          {r.route && <> &middot; {r.route}</>}
-          {" "}&middot; sparked {rel(r.sparked_at)}{r.sparked_by ? ` by ${r.sparked_by.replace(/^agent:/, "")}` : ""}
-          {r.steps_total > 0 && <> &middot; {r.steps_done}/{r.steps_total}</>}
-        </span>
-      </button>
+      <RoomListCard
+        key={r.card_id}
+        ringClass={ring}
+        onClick={() => setSelected(r.card_id)}
+        division={r.division}
+        company={r.company}
+        title={r.title}
+        pct={r.certitude}
+        stateClass={cls}
+        stateLabel={label}
+        metaParts={[
+          `#${r.card_id}`,
+          r.route,
+          `sparked ${rel(r.sparked_at)}${r.sparked_by ? ` by ${r.sparked_by.replace(/^agent:/, "")}` : ""}`,
+          r.steps_total > 0 ? `${r.steps_done}/${r.steps_total} steps` : "",
+        ]}
+      />
     );
   };
 

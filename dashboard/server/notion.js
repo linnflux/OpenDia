@@ -182,6 +182,40 @@ export async function updateNotionTaskStatus(pageId, statusName) {
   return res !== null;
 }
 
+// Tasks DB + operator map, mirrored from the /od-new CLI skill (Step 7) so a
+// task created from the dashboard is indistinguishable from one created in a
+// terminal. Unknown requesters (incl. loopback) attribute to Nick.
+const NOTION_TASKS_DB = "aff52e96-1dfd-438c-8b15-84c446afd054";
+const NOTION_USER_BY_EMAIL = {
+  "nick@linnflux.com": "d6fcd91b-74b8-4514-ac84-08d8d7112d57",
+  "tara.armstrong@linnflux.com": "9448b064-2474-425d-8723-c2421979d3fb",
+};
+
+/**
+ * Create a task page in the Notion Tasks DB.
+ * Returns { id, url } on success, null on failure or missing token.
+ */
+export async function createNotionTask({ name, division, companyNotionId, requesterEmail, dueISO }) {
+  if (!notionToken || !name) return null;
+  const properties = {
+    Name: { title: [{ text: { content: name } }] },
+    Status: { select: { name: "Open" } },
+    Responsible: {
+      people: [{ id: NOTION_USER_BY_EMAIL[requesterEmail] || NOTION_USER_BY_EMAIL["nick@linnflux.com"] }],
+    },
+  };
+  if (division) properties.Type = { multi_select: [{ name: division }] };
+  if (dueISO) properties["Due Date"] = { date: { start: dueISO } };
+  if (companyNotionId) properties.Company = { relation: [{ id: companyNotionId }] };
+  const res = await notionFetch("/pages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent: { database_id: NOTION_TASKS_DB }, properties }),
+  });
+  if (!res?.id) return null;
+  return { id: res.id, url: res.url || `https://www.notion.so/${res.id.replace(/-/g, "")}` };
+}
+
 /**
  * Fetch a Notion page and extract useful info for a project refresh.
  */

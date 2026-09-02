@@ -21,6 +21,7 @@ import Planroom from "./components/Planroom.jsx";
 import Mailroom from "./components/Mailroom.jsx";
 import Today from "./components/Today.jsx";
 import Sweep from "./components/Sweep.jsx";
+import NewTaskModal from "./components/NewTaskModal.jsx";
 import { hasTag, toggleTag } from "./tags.js";
 import { morph, modalElement, cardElement, statusPillElement, visibleRatio } from "./motion.js";
 import { DIVISION_COLORS, STATUS_OPTIONS } from "./constants.js";
@@ -64,6 +65,7 @@ export default function App() {
   // the board (tag = tara), not a destination, so it is `taraOnly` below.
   const [view, setView] = useState("board");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
   const [themes, setThemes] = useState([]);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
@@ -712,6 +714,7 @@ export default function App() {
               initialCardId={planroomCard}
               showToast={(t) => { setStatusToast(t); setTimeout(() => setStatusToast(null), 3500); }}
               onGoToRunroom={(session) => { setRunroomSession(session || null); setView("runrooms"); }}
+              onNewTask={me?.is_admin ? () => setNewTaskOpen(true) : null}
             />
           ) : view === "runrooms" ? (
             <Runroom activeTimerIds={activeTimerIds} me={me} onOpenProject={handleProjectClick} initialSession={runroomSession} />
@@ -781,7 +784,17 @@ export default function App() {
         onNavigate={(key) => { setPaletteOpen(false); setView(key); }}
         isAdmin={!!me?.is_admin}
         onNotify={showToast}
+        onNewTask={me?.is_admin ? () => setNewTaskOpen(true) : null}
       />
+      {newTaskOpen && (
+        <NewTaskModal
+          projects={projects}
+          onClose={() => setNewTaskOpen(false)}
+          showToast={showToast}
+          onOpenCard={(id) => { setNewTaskOpen(false); refresh(); openCardById(id); }}
+          onOpenPlanroom={(id) => { setNewTaskOpen(false); refresh(); setPlanroomCard(id); setView("planrooms"); }}
+        />
+      )}
       {themeModalOpen && (
         <ThemeModal
           themes={themes}

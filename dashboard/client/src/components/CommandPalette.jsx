@@ -105,8 +105,9 @@ async function storeBackground(file) {
 // Destinations come from NAV_ITEMS, the same array the sidebar renders, so the
 // palette can never fall out of sync with the visible navigation. Only the
 // palette-specific commands (theme, refresh, wallpaper) are listed here.
-function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onNavigate, isAdmin, defaultBgs, onSelectDefaultBg }) {
+function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onOpenThemeModal, onNavigate, isAdmin, defaultBgs, onSelectDefaultBg, onNewTask }) {
   return [
+    ...(onNewTask ? [{ id: "new-task", icon: "+", label: "New Task\u2026", action: onNewTask }] : []),
     { id: "refresh", icon: "\u21BB", label: "Refresh Board", action: onRefresh },
     { id: "theme-select", icon: "\u25D0", label: "Select Theme\u2026", action: onOpenThemeModal },
     ...NAV_ITEMS
@@ -136,7 +137,7 @@ function getActions({ onRefresh, onUploadBg, onClearBg, onReposition, hasBg, onO
   ];
 }
 
-export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, onOpenThemeModal, onNavigate, isAdmin, onNotify }) {
+export default function CommandPalette({ open, onClose, onRefresh, projects, companies, onSelectProject, onSelectCompany, onOpenThemeModal, onNavigate, isAdmin, onNotify, onNewTask = null }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
@@ -268,8 +269,9 @@ export default function CommandPalette({ open, onClose, onRefresh, projects, com
       isAdmin,
       defaultBgs,
       onSelectDefaultBg: handleSelectDefaultBg,
+      onNewTask: onNewTask ? () => { onNewTask(); onClose(); } : null,
     }),
-    [bgImage, bgPosition, onRefresh, onClose, onOpenThemeModal, onNavigate, isAdmin, defaultBgs]
+    [bgImage, bgPosition, onRefresh, onClose, onOpenThemeModal, onNavigate, isAdmin, defaultBgs, onNewTask]
   );
 
   const filteredActions = useMemo(() => {

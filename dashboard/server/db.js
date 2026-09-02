@@ -13,7 +13,7 @@ function getDb() {
 }
 
 const GET_ALL_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags, p.goal,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
@@ -27,7 +27,7 @@ const GET_ALL_PROJECTS = `
 const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
 
 const GET_ACTIVE_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags, p.goal,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
@@ -46,8 +46,9 @@ export function getAllProjects({ includeCompleted = false } = {}) {
 
 export function getProjectById(id) {
   return getDb().prepare(`
-    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.tags,
-           c.name AS company_name, c.short_name AS company_short,
+    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.tags, p.goal,
+           p.company_id, c.name AS company_name, c.short_name AS company_short,
+           c.notion_id AS company_notion_id,
            d.name AS division
     FROM projects p
     LEFT JOIN companies c ON p.company_id = c.id
@@ -56,7 +57,7 @@ export function getProjectById(id) {
   `).get(id);
 }
 
-const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id", "tags"]);
+const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id", "tags", "goal"]);
 
 // Migration guard: add columns introduced after the original schema.
 // Safe to call on every startup — no-ops once the column exists.
@@ -64,6 +65,9 @@ export function ensureProjectsColumns() {
   const cols = getDb().pragma("table_info(projects)").map((r) => r.name);
   if (!cols.includes("tags")) {
     getDb().exec("ALTER TABLE projects ADD COLUMN tags TEXT");
+  }
+  if (!cols.includes("goal")) {
+    getDb().exec("ALTER TABLE projects ADD COLUMN goal TEXT");
   }
   // SQLite sorts NULLs FIRST, so a project with no sort_order pins itself to
   // the top of its column and cannot be dragged off it — drag writes 0..n-1
@@ -139,7 +143,7 @@ export function matchProject(client, division, task, project) {
   const projectLower = (project || "").toLowerCase();
 
   const projects = getDb().prepare(`
-    SELECT p.id, p.name, p.status,
+    SELECT p.id, p.name, p.status, p.tags, p.goal,
            c.name AS company_name, c.short_name AS company_short,
            d.name AS division
     FROM projects p
@@ -204,7 +208,7 @@ export function matchProjectCandidates(client, division, task, limit = 3) {
   const taskLower = (task || "").toLowerCase();
 
   const projects = getDb().prepare(`
-    SELECT p.id, p.name, p.status,
+    SELECT p.id, p.name, p.status, p.tags, p.goal,
            c.name AS company_name, c.short_name AS company_short,
            d.name AS division
     FROM projects p
@@ -266,7 +270,7 @@ export function matchProjectCandidates(client, division, task, limit = 3) {
   return [];
 }
 
-export function createProject({ name, companyName, divisionName, status = "in_progress", notionId = null }) {
+export function createProject({ name, companyName, divisionName, status = "in_progress", notionId = null, goal = null }) {
   const db = getDb();
   const sanitizedName = (name || "").replace(/^[-_\s]+/, "").trim();
   if (!sanitizedName) throw new Error("Project name cannot be empty or consist only of dashes/underscores");
@@ -295,9 +299,9 @@ export function createProject({ name, companyName, divisionName, status = "in_pr
   let newId;
   db.transaction(() => {
     const result = db.prepare(`
-      INSERT INTO projects (name, company_id, division_id, status, notion_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    `).run(name, companyId, divisionId, status, notionId);
+      INSERT INTO projects (name, company_id, division_id, status, notion_id, goal, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(name, companyId, divisionId, status, notionId, goal);
     newId = result.lastInsertRowid;
     insertAtTopOfColumn(db, status, newId);
   })();
@@ -608,6 +612,39 @@ export function getAllCompanies() {
     FROM companies
     ORDER BY name COLLATE NOCASE ASC
   `).all();
+}
+
+export function getCompanyById(id) {
+  return getDb().prepare("SELECT * FROM companies WHERE id = ?").get(id);
+}
+
+export function createCompany({ name, shortName = null }) {
+  const db = getDb();
+  const clean = (name || "").trim();
+  if (!clean) throw new Error("Company name cannot be empty");
+  // Idempotent: an existing name/short_name match is returned, not duplicated.
+  const existing = db.prepare(
+    "SELECT * FROM companies WHERE LOWER(name) = LOWER(?) OR LOWER(short_name) = LOWER(?)"
+  ).get(clean, clean);
+  if (existing) return existing;
+  const short = (shortName || "").trim() || clean.split(/\s+/)[0];
+  const result = db.prepare(`
+    INSERT INTO companies (name, short_name, created_at, updated_at)
+    VALUES (?, ?, datetime('now'), datetime('now'))
+  `).run(clean, short);
+  return getCompanyById(result.lastInsertRowid);
+}
+
+// A client's supervisor card: a non-completed card for the same company whose
+// tags include "supervisor" (comma-separated scalar, same convention tags.js
+// reads). The relationship is tag + company, not a schema link.
+export function findSupervisorCard(companyId) {
+  if (!companyId) return null;
+  const rows = getDb().prepare(`
+    SELECT id, name, tmux_session, tags FROM projects
+    WHERE company_id = ? AND status != 'completed' AND tags IS NOT NULL
+  `).all(companyId);
+  return rows.find((r) => r.tags.split(",").map((t) => t.trim()).includes("supervisor")) || null;
 }
 
 export function reorderProjects(status, ids) {
