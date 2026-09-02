@@ -85,6 +85,14 @@ const ACTIONS = {
     `[runroom] Step ${n} ("${t}"): ${name} says skip it. Set state "skipped" with the reason in the step's note, advance current_step, and prepare the next step's detail.`,
 };
 
+// Last time each room was observed mid-turn (working gate), refreshed on
+// every list poll that catches it thinking. Drives the list order: a room
+// bubbles up while it works and HOLDS that rank when it goes idle, displaced
+// only by rooms that worked more recently. In-memory by design (the plan.json
+// registry stays read-only); across a server restart the plan's own mtime
+// seeds the ordering, since a working session rewrites its plan as it goes.
+const lastWorked = new Map();
+
 export function registerRunroomRoutes(app) {
   app.get("/api/runrooms", (_req, res) => {
     let sessions = [];
@@ -114,9 +122,12 @@ export function registerRunroomRoutes(app) {
               : g?.reason === "session-gone" ? "gone" : "input";
           }
         }
+        if (working) lastWorked.set(session, Date.now());
+        const mtime = planMtime(session);
         return {
           session,
-          plan_mtime: planMtime(session),
+          plan_mtime: mtime,
+          activity: Math.max(lastWorked.get(session) || 0, mtime || 0),
           title: plan.title,
           status: plan.status,
           card_id: plan.card_id,
@@ -131,10 +142,14 @@ export function registerRunroomRoutes(app) {
           needs,
         };
       })
-      // Active rooms first; within active, rooms waiting on the operator
-      // outrank rooms that are busy thinking; newest first as the tiebreak.
+      // Active rooms first; within active, most recent activity first —
+      // currently-working rooms carry a just-refreshed timestamp so they top
+      // the list, and a room keeps its rank after it stops thinking until
+      // another room out-works it. Needs-attention then newest as tiebreaks
+      // (only reachable when activity ties, e.g. right after a restart).
       .sort((a, b) =>
         (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1)
+        || (b.activity || 0) - (a.activity || 0)
         || (a.needs ? 0 : 1) - (b.needs ? 0 : 1)
         || (b.created || "").localeCompare(a.created || ""));
     res.json(rooms);
