@@ -39,7 +39,8 @@ a date.
 | `review_pdf.py` | Builds the client review PDF for one batch: `--sheet ID --batch YYYY-MM --out DIR [--upload]`. Uploads to Drive IN PLACE (same file id forever) and records version+link on Batches |
 | `publish.py` | `schedule`: turns Approved rows into natively scheduled Facebook posts. `tick`: timer-driven; publishes Instagram at post time, backfills permalinks, flips rows to Published |
 | `sampler.py` | Sales samples from nothing but a prospect's domain: brand extraction (rendered-page + logo pixel dominants; CSS is fallback only), model-drafted captions, finished cards in their palette/logo. `--accent/--ink/--bg` operator overrides. Every card is audited before a prospect sees it |
-| `onboard.py` | One-command client spin-up: Drive images folder (link-readable), calendar sheet via init_sheet, Config filled from signup facts, per-client wrapper scaffold, printed checklist of the remaining human steps. `--dry-run` first |
+| `onboard.py` | One-command client spin-up: Drive images folder (link-readable), calendar sheet via init_sheet, Config filled from signup facts, per-client wrapper scaffold, registry entry for the admin view, printed checklist of the remaining human steps. `--dry-run` first |
+| `socal_api.py` | JSON bridge behind the admin dashboard's SoCal view: client summaries, calendar rows, Meta analytics, guarded row edits (content edits on approved posts auto-demote to Ready) |
 
 Client-facing docs live in `docs/` (`meta-access.md`: the partner-share
 instructions a new client follows to grant page/IG access).

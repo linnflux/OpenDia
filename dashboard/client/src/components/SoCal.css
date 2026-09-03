@@ -1,0 +1,56 @@
+/* SoCal admin view. Leans on the app's CSS variables where they exist. */
+.socal-wrap { padding: 18px 22px 60px; max-width: 1100px; }
+.socal-h2 { margin: 0 0 14px; font-size: 22px; }
+.socal-h3 { margin: 26px 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; opacity: .75; }
+.socal-loading, .socal-error { padding: 24px 0; opacity: .8; }
+.socal-error { color: #c0392b; }
+.socal-error.small { padding: 6px 0; font-size: 13px; }
+.muted { opacity: .6; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.nowrap { white-space: nowrap; }
+
+.socal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.socal-client { text-align: left; border: 1px solid var(--border, #3a4353); border-radius: 10px;
+  padding: 14px 16px; background: var(--bg-card, #fff); cursor: pointer; font: inherit; color: inherit; }
+.socal-client:hover { border-color: #54af4d; }
+.socal-client-name { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+.socal-client-line { font-size: 13px; margin-top: 4px; line-height: 1.5; }
+
+.socal-chip { display: inline-block; color: #fff; font-size: 10.5px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px; letter-spacing: .3px; vertical-align: middle; }
+
+.socal-detail-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.socal-back { background: none; border: none; color: inherit; opacity: .7; cursor: pointer; font: inherit; padding: 0; }
+.socal-back:hover { opacity: 1; }
+.socal-facts { display: flex; gap: 14px; font-size: 13px; opacity: .75; }
+
+.socal-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.socal-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+  opacity: .55; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border, #3a4353); }
+.socal-table td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--border-subtle, #2e3644); vertical-align: top; }
+.socal-caption { max-width: 460px; white-space: pre-wrap; line-height: 1.45; }
+
+.socal-editable { cursor: pointer; border-bottom: 1px dashed transparent; }
+.socal-editable:hover { border-bottom-color: #54af4d; }
+.socal-editbox textarea { width: 100%; min-width: 340px; font: inherit; padding: 6px; }
+.socal-editbox.inline { display: inline-flex; gap: 4px; }
+.socal-editbox input { font: inherit; padding: 3px 6px; }
+.socal-editbtns { display: flex; gap: 6px; margin-top: 6px; }
+.socal-editbox button { border: 1px solid #54af4d; background: #54af4d; color: #fff;
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; font: inherit; }
+.socal-editbox button.ghost { background: transparent; color: inherit; border-color: var(--border, #3a4353); }
+.socal-editnote { font-size: 12px; opacity: .6; margin-top: 8px; }
+
+.socal-status-select { font: inherit; font-size: 12.5px; border-radius: 6px; padding: 3px 6px;
+  border: 2px solid #888; background: var(--bg-card, #fff); color: inherit; }
+
+.socal-analytics { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+@media (max-width: 800px) { .socal-analytics { grid-template-columns: 1fr; } }
+.socal-analytics h4 { margin: 0 0 8px; }
+.socal-anrow { display: flex; gap: 10px; align-items: baseline; font-size: 13px;
+  padding: 6px 0; border-bottom: 1px solid var(--border-subtle, #2e3644); }
+.socal-anmsg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.socal-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #232a36; color: #f7f8fa; padding: 10px 18px; border-radius: 8px;
+  font-size: 13.5px; box-shadow: 0 4px 18px rgba(0,0,0,.25); z-index: 60; max-width: 80vw; }

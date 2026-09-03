@@ -3,6 +3,12 @@ import { NAV_SECTIONS } from "../constants.js";
 // Nav icons. These lived inline at the top of App.jsx while the top bar owned
 // navigation; they belong with the sidebar now that it does.
 const NAV_ICONS = {
+  socal: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M13 2v9l-5-2H4a2 2 0 0 1 0-4h4l5-3z" />
+      <path d="M5 9v3.5" />
+    </svg>
+  ),
   board: (
     <svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <rect x="1" y="1" width="3.5" height="12" rx="1" fill="currentColor" opacity="0.9" />

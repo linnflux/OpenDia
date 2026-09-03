@@ -19,6 +19,7 @@ Client identifiers live in the sheet and the clients/ dir, never in this repo.
 """
 import argparse
 import datetime as dt
+import json
 import os
 import stat
 import subprocess
@@ -132,6 +133,19 @@ def main():
         fh.write(REVIEW_SH.format(name=a.name, sid=ss["id"], batch=batch_example))
     os.chmod(wrapper, os.stat(wrapper).st_mode | stat.S_IXUSR | stat.S_IXGRP)
     print(f"scaffolded {client_dir}")
+
+    # register for the SoCal admin dashboard
+    reg_path = os.path.expanduser("~/OpenDia/socal-clients.json")
+    try:
+        reg = json.load(open(reg_path)) if os.path.exists(reg_path) else []
+    except Exception:
+        reg = []
+    if not any(c.get("slug") == a.slug for c in reg):
+        reg.append({"slug": a.slug, "name": a.name, "sheet": ss["id"],
+                    "page_id": "", "ig_id": "", "since": dt.date.today().isoformat()})
+        with open(reg_path, "w") as fh:
+            json.dump(reg, fh, indent=2)
+        print("registered in socal-clients.json (fill page_id/ig_id after Meta access)")
     print(CHECKLIST.format(name=a.name))
 
 
