@@ -70,7 +70,7 @@ export function mountSocal(app, requireAdmin) {
     if (!text) return res.status(400).json({ error: "text required" });
     try {
       const out = await bridge(["instruct", "--sheet", c.sheet, "--id", req.params.id,
-                                "--text", text]);
+                                "--text", text, "--slug", c.slug]);
       if (out.error) return res.status(400).json(out);
       cache.delete(`cal:${c.slug}`);
       cache.delete("clients");

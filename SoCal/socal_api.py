@@ -30,9 +30,10 @@ GRAPH = "https://graph.facebook.com/v21.0"
 # fields a dashboard edit may touch, and the lifecycle rule: changing the
 # CONTENT of a post that was already approved un-approves it — an edited post
 # is no longer the approved post.
-EDITABLE = {"Caption", "Post date", "Time", "Title", "Status", "Notes", "Client comments"}
-CONTENT_FIELDS = {"Caption", "Title"}
+EDITABLE = {"Caption", "Post date", "Time", "Title", "Status", "Notes", "Client comments", "Image state"}
+CONTENT_FIELDS = {"Caption", "Title", "Image"}
 APPROVED_STATES = {"Approved", "Scheduled"}
+IMAGE_STATES = {"Final", "Placeholder"}
 
 
 def load_registry():
@@ -40,16 +41,26 @@ def load_registry():
         return json.load(fh)
 
 
-def read_tab_retry(svc, sid, tab, tries=3):
-    """Sheets returns transient 503s often enough to matter for a dashboard."""
+import socket
+socket.setdefaulttimeout(90)  # fail fast instead of hanging on a dead read
+
+
+def retried(fn, tries=3):
+    """Google APIs return transient 503s/timeouts often enough to matter for a
+    dashboard. Safe for our writes too: guarded_write re-applies identical
+    values, so a retry after a half-landed write converges."""
     import time
     for i in range(tries):
         try:
-            return read_tab(svc, sid, tab)
+            return fn()
         except Exception:
             if i == tries - 1:
                 raise
             time.sleep(2 * (i + 1))
+
+
+def read_tab_retry(svc, sid, tab, tries=3):
+    return retried(lambda: read_tab(svc, sid, tab), tries)
 
 
 def meta_get(path, tok, **params):
@@ -90,7 +101,7 @@ def cmd_clients(_a):
 def cmd_calendar(a):
     svc = get_sheets_service()
     head, rows = read_tab_retry(svc, a.sheet, "Calendar")
-    cfg = read_config(svc, a.sheet)
+    cfg = retried(lambda: read_config(svc, a.sheet))
     rows = [{k: v for k, v in r.items() if k != "_row"} for r in rows if r.get("ID")]
     return {"rows": rows, "statuses": STATUSES,
             "config": {k: cfg.get(k, "") for k in
@@ -141,13 +152,17 @@ def cmd_analytics(a):
     return out
 
 
-def apply_updates(svc, sheet, row, head, updates):
-    """Validate + apply field updates to one row with the lifecycle rule."""
-    bad = [f for f in updates if f not in EDITABLE]
+def apply_updates(svc, sheet, row, head, updates, allow=frozenset()):
+    """Validate + apply field updates to one row with the lifecycle rule.
+    `allow` extends EDITABLE for internal flows (e.g. the graphic pipeline
+    setting Image) — never exposed to direct operator field edits."""
+    bad = [f for f in updates if f not in EDITABLE and f not in allow]
     if bad:
         return {"error": f"fields not editable from the dashboard: {bad}"}
     if "Status" in updates and updates["Status"] not in STATUSES:
         return {"error": f"invalid status {updates['Status']!r}"}
+    if "Image state" in updates and updates["Image state"] not in IMAGE_STATES:
+        return {"error": f"invalid image state {updates['Image state']!r}"}
     if "Caption" in updates:
         updates["Caption"] = updates["Caption"].replace("—", ",")  # lint: no em dashes
     demoted = False
@@ -155,7 +170,7 @@ def apply_updates(svc, sheet, row, head, updates):
             and updates.get("Status") is None:
         updates["Status"] = "Ready"
         demoted = True
-    guarded_write(svc, sheet, "Calendar", row["_row"], head, updates, {"ID": row["ID"]})
+    retried(lambda: guarded_write(svc, sheet, "Calendar", row["_row"], head, updates, {"ID": row["ID"]}))
     return {"ok": True, "id": row["ID"], "updated": list(updates),
             "demoted_to_ready": demoted,
             "warning": ("content changed on an approved post; status dropped to Ready — "
@@ -190,7 +205,19 @@ CLIENT CONFIG:
 OPERATOR INSTRUCTION:
 {text}
 
-Return ONLY a JSON object, no fences: {{"updates": {{"Field": "new value", ...}}, "reply": "one or two sentences on what you did or why you did nothing"}}"""
+You can also have a GRAPHIC generated for this post. If the instruction asks to
+create, redo, or change the post's image, include a "graphic" object whose
+"brief" is a complete, self-contained image-generation prompt written in the
+client's image style below. The brief must describe one simple square social
+graphic; do NOT ask for rendered text, logos, or lettering in the image unless
+the operator explicitly asks. Draw subject matter from the post's caption/title
+and the operator's words.
+
+CLIENT IMAGE STYLE:
+{image_style}
+
+Return ONLY a JSON object, no fences:
+{{"updates": {{"Field": "new value", ...}}, "graphic": {{"brief": "..."}} or null, "reply": "one or two sentences on what you did or why you did nothing"}}"""
 
 
 def cmd_instruct(a):
@@ -201,12 +228,13 @@ def cmd_instruct(a):
     row = next((r for r in rows if r.get("ID") == a.id), None)
     if not row:
         return {"error": f"no row with ID {a.id}"}
-    cfg = read_config(svc, a.sheet)
+    cfg = retried(lambda: read_config(svc, a.sheet))
     row_view = {k: v for k, v in row.items() if k != "_row" and v}
     prompt = INSTRUCT_PROMPT.format(
         statuses=", ".join(STATUSES),
         footer=cfg.get("footer_line", ""),
         highlight=(cfg.get("image_style", "")[:200] or "plainspoken small business"),
+        image_style=(cfg.get("image_style", "") or "clean, simple, professional; match the client's website look"),
         row=json.dumps(row_view, indent=1),
         config=json.dumps({k: cfg.get(k, "") for k in
                            ("client_name", "post_weekday", "footer_line")}, indent=1),
@@ -215,20 +243,72 @@ def cmd_instruct(a):
     body = _re.sub(r"^```(json)?|```$", "", out.stdout.strip(), flags=_re.M).strip()
     start, end = body.find("{"), body.rfind("}")
     try:
-        parsed = json.loads(body[start:end + 1])
+        # strict=False: models emit literal newlines inside JSON strings
+        parsed = json.loads(body[start:end + 1], strict=False)
     except Exception:
         return {"error": "assistant returned an unreadable answer", "raw": body[:300]}
     updates = parsed.get("updates") or {}
+    graphic = parsed.get("graphic") or None
     reply = parsed.get("reply") or ""
+    if a.dry:
+        return {"ok": True, "id": a.id, "dry": True, "updates": updates,
+                "graphic_brief": (graphic or {}).get("brief"), "reply": reply}
+
+    graphic_result = None
+    if graphic and graphic.get("brief"):
+        try:
+            graphic_result = make_graphic(a, cfg, graphic["brief"])
+            updates = dict(updates)
+            updates["Image"] = graphic_result["link"]
+            updates["Image state"] = "Placeholder"
+        except Exception as e:
+            return {"error": f"graphic generation failed: {e}", "reply": reply}
+
     if not updates:
         return {"ok": True, "id": a.id, "updated": [], "reply": reply or "No changes made."}
-    if a.dry:
-        return {"ok": True, "id": a.id, "dry": True, "updates": updates, "reply": reply}
-    res = apply_updates(svc, a.sheet, row, head, dict(updates))
+    res = apply_updates(svc, a.sheet, row, head, updates, allow={"Image"})
     if res.get("error"):
         return {"error": res["error"], "reply": reply}
     res["reply"] = reply
+    if graphic_result:
+        res["graphic"] = graphic_result
     return res
+
+
+def make_graphic(a, cfg, brief):
+    """Generate a square post graphic from the brief, upload PNG + JPEG twin
+    to the client's Drive images folder, return {link, file_id, local}."""
+    import subprocess as _sp
+    import datetime as _dt
+    folder = cfg.get("drive_images_folder_id")
+    if not folder:
+        raise RuntimeError("client Config has no drive_images_folder_id")
+    slug = a.slug or "unfiled"
+    outdir = os.path.expanduser(f"~/OpenDia/clients/{slug}/social/graphics/out")
+    os.makedirs(outdir, exist_ok=True)
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    stem = f"{a.id}_{stamp}"
+    png = os.path.join(outdir, stem + ".png")
+    prompt = ("Full-bleed square image filling the entire frame edge to edge, "
+              "no border, no frame, no text, no watermark. " + brief)
+    _sp.run([sys.executable, os.path.expanduser("~/OpenDia/scripts/nano_banana.py"),
+             prompt, "--out", png], check=True, capture_output=True, timeout=180)
+    from PIL import Image
+    jpg = os.path.join(outdir, stem + ".jpg")
+    Image.open(png).convert("RGB").save(jpg, quality=95)
+
+    from drive_upload import get_credentials
+    from googleapiclient.discovery import build as gbuild
+    from googleapiclient.http import MediaFileUpload
+    drive = gbuild("drive", "v3", credentials=get_credentials())
+    kw = dict(supportsAllDrives=True)
+    f = retried(lambda: drive.files().create(body={"name": stem + ".png", "parents": [folder]},
+                                             media_body=MediaFileUpload(png, mimetype="image/png"),
+                                             fields="id,webViewLink", **kw).execute())
+    retried(lambda: drive.files().create(body={"name": stem + ".jpg", "parents": [folder]},
+                                         media_body=MediaFileUpload(jpg, mimetype="image/jpeg"),
+                                         fields="id", **kw).execute())
+    return {"link": f["webViewLink"], "file_id": f["id"], "local": png}
 
 
 def main():
@@ -243,6 +323,7 @@ def main():
     i = sub.add_parser("instruct")
     i.add_argument("--sheet", required=True); i.add_argument("--id", required=True)
     i.add_argument("--text", required=True); i.add_argument("--dry", action="store_true")
+    i.add_argument("--slug", default="")
     a = ap.parse_args()
     fn = {"clients": cmd_clients, "calendar": cmd_calendar,
           "analytics": cmd_analytics, "patch": cmd_patch, "instruct": cmd_instruct}[a.cmd]
