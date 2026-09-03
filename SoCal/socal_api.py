@@ -333,10 +333,20 @@ def main():
     i.add_argument("--sheet", required=True); i.add_argument("--id", required=True)
     i.add_argument("--text", required=True); i.add_argument("--dry", action="store_true")
     i.add_argument("--slug", default="")
+    i.add_argument("--result-file", default="", help="also write the JSON result here (atomic)")
     a = ap.parse_args()
     fn = {"clients": cmd_clients, "calendar": cmd_calendar,
           "analytics": cmd_analytics, "patch": cmd_patch, "instruct": cmd_instruct}[a.cmd]
-    print(json.dumps(fn(a)))
+    try:
+        result = fn(a)
+    except Exception as e:
+        result = {"error": f"{type(e).__name__}: {e}"}
+    if getattr(a, "result_file", ""):
+        tmp = a.result_file + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(result, fh)
+        os.replace(tmp, a.result_file)
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

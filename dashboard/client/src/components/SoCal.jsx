@@ -55,11 +55,25 @@ export default function SoCal() {
     if (!text || instrBusy) return;
     setInstrBusy(true);
     try {
+      // submit is a detached job (survives server deploys and tab reloads);
+      // poll until it lands. The typed text is kept until success.
       const r = await fetch(`/api/socal/${selected.slug}/rows/${expanded}/instruct`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      const out = await r.json();
+      const sub = await r.json();
+      if (sub.error) { say(sub.error); return; }
+      const started = Date.now();
+      let out = null;
+      while (Date.now() - started < 6 * 60_000) {
+        await new Promise((ok) => setTimeout(ok, 3000));
+        try {
+          const p = await fetch(`/api/socal/jobs/${sub.job}`);
+          const st = await p.json();
+          if (st.done) { out = st.result; break; }
+        } catch { /* poll again — server may be mid-restart */ }
+      }
+      if (!out) { say("Still working in the background — the row will update when it finishes."); return; }
       if (out.error) { say(out.error); return; }
       setInstrReply({ id: expanded, reply: out.reply, updated: out.updated || [] });
       if (out.warning) say(out.warning);
