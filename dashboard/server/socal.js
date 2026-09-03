@@ -14,7 +14,7 @@ const cache = new Map(); // key -> { at, promise }
 
 function bridge(args) {
   return new Promise((resolve, reject) => {
-    execFile("python3", [BRIDGE, ...args], { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 },
+    execFile("python3", [BRIDGE, ...args], { timeout: 300_000, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr?.slice(-500) || err.message));
         try { resolve(JSON.parse(stdout)); }
@@ -58,6 +58,23 @@ export function mountSocal(app, requireAdmin) {
     try {
       res.json(await cached(`an:${c.slug}`, TTL.analytics,
         () => bridge(["analytics", "--page", c.page_id, "--ig", c.ig_id || ""])));
+    } catch (e) { res.status(502).json({ error: e.message }); }
+  });
+
+  // free-text instruction, carried out by a model instance that gets the post
+  // row + client config as context and can only touch editable fields
+  app.post("/api/socal/:slug/rows/:id/instruct", requireAdmin, async (req, res) => {
+    const c = findClient(req.params.slug);
+    if (!c) return res.status(404).json({ error: "unknown client" });
+    const text = (req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "text required" });
+    try {
+      const out = await bridge(["instruct", "--sheet", c.sheet, "--id", req.params.id,
+                                "--text", text]);
+      if (out.error) return res.status(400).json(out);
+      cache.delete(`cal:${c.slug}`);
+      cache.delete("clients");
+      res.json(out);
     } catch (e) { res.status(502).json({ error: e.message }); }
   });
 

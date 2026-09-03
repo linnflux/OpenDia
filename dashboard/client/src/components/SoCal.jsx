@@ -28,10 +28,38 @@ export default function SoCal() {
   const [cal, setCal] = useState(null);
   const [an, setAn] = useState(null);
   const [editing, setEditing] = useState(null); // {id, field, value}
+  const [expanded, setExpanded] = useState(null); // row ID open in the upcoming list
+  const [instr, setInstr] = useState("");
+  const [instrBusy, setInstrBusy] = useState(false);
+  const [instrReply, setInstrReply] = useState(null); // {id, reply, updated}
   const [toast, setToast] = useState(null);
   const [err, setErr] = useState(null);
 
-  const say = (t) => { setToast(t); setTimeout(() => setToast(null), 5000); };
+  const say = (t) => { setToast(t); setTimeout(() => setToast(null), 6000); };
+
+  const refreshCal = useCallback((c) => {
+    fetch(`/api/socal/${c.slug}/calendar`).then((r) => r.json())
+      .then((d) => (d.error ? say(`calendar: ${d.error}`) : setCal(d)));
+  }, []);
+
+  const sendInstruction = async () => {
+    const text = instr.trim();
+    if (!text || instrBusy) return;
+    setInstrBusy(true);
+    try {
+      const r = await fetch(`/api/socal/${selected.slug}/rows/${expanded}/instruct`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const out = await r.json();
+      if (out.error) { say(out.error); return; }
+      setInstrReply({ id: expanded, reply: out.reply, updated: out.updated || [] });
+      if (out.warning) say(out.warning);
+      setInstr("");
+      refreshCal(selected);
+    } catch (e) { say(String(e)); }
+    finally { setInstrBusy(false); }
+  };
 
   useEffect(() => {
     fetch("/api/socal/clients").then((r) => r.json())
@@ -57,7 +85,7 @@ export default function SoCal() {
     if (out.error) { say(out.error); return; }
     say(out.warning || `${id} ${field} saved`);
     setEditing(null);
-    openClient(selected); // refetch (patch invalidated server cache)
+    refreshCal(selected); // refetch (patch invalidated server cache)
   };
 
   if (err) return <div className="socal-wrap"><div className="socal-error">SoCal view failed: {err}</div></div>;
@@ -104,6 +132,11 @@ export default function SoCal() {
   const past = rows.filter((r) => r.Status === "Published")
     .sort((a, b) => (b["Published date"] || "").localeCompare(a["Published date"] || ""));
 
+  const thumb = (row, size = 480) => {
+    const m = /(?:\/d\/|id=)([\w-]{20,})/.exec(row.Image || "");
+    return m ? `https://lh3.googleusercontent.com/d/${m[1]}=s${size}` : null;
+  };
+
   const editable = (row, field, kind = "text") => {
     const isEditing = editing && editing.id === row.ID && editing.field === field;
     if (!isEditing) {
@@ -145,7 +178,7 @@ export default function SoCal() {
         body: JSON.stringify({ field: "Status", value: e.target.value }),
       }).then((r) => r.json()).then((out) => {
         say(out.error || out.warning || `${row.ID} → ${e.target.value}`);
-        if (!out.error) openClient(selected);
+        if (!out.error) refreshCal(selected);
       })}>
       {(cal?.statuses || Object.keys(STATUS_COLORS)).map((s) => <option key={s}>{s}</option>)}
     </select>
@@ -166,24 +199,64 @@ export default function SoCal() {
       {!cal ? <div className="socal-loading">Loading calendar…</div> : (
         <>
           <h3 className="socal-h3">Upcoming ({upcoming.length})</h3>
-          <table className="socal-table">
-            <thead><tr><th>ID</th><th>Date</th><th>Title</th><th>Caption</th><th>Status</th></tr></thead>
-            <tbody>
-              {upcoming.map((r) => (
-                <tr key={r.ID}>
-                  <td className="mono">{r.ID}</td>
-                  <td className="nowrap">{editable(r, "Post date", "date")} {r.Time && <span className="muted">{r.Time}</span>}</td>
-                  <td>{editable(r, "Title")}</td>
-                  <td className="socal-caption">{editable(r, "Caption", "textarea")}</td>
-                  <td>{statusPicker(r)}</td>
-                </tr>
-              ))}
-              {upcoming.length === 0 && <tr><td colSpan={5} className="muted">Nothing queued — time for a brief.</td></tr>}
-            </tbody>
-          </table>
-          <div className="socal-editnote">
-            Edits write to the sheet with guards. Changing the caption or title of an
-            Approved or Scheduled post drops it back to Ready for re-approval.
+          <div className="socal-postlist">
+            {upcoming.map((r) => {
+              const open = expanded === r.ID;
+              return (
+                <div key={r.ID} className={`socal-post${open ? " open" : ""}`}>
+                  <button className="socal-post-head" onClick={() => {
+                    setExpanded(open ? null : r.ID); setEditing(null); setInstr(""); setInstrReply(null);
+                  }}>
+                    <span className="mono">{r.ID}</span>
+                    <span className="nowrap"><b>{fmtDate(r["Post date"])}</b>{r.Time ? ` ${r.Time}` : ""}</span>
+                    <span className="socal-post-title">{r.Title}</span>
+                    <Chip status={r.Status} />
+                    <span className="socal-caret">{open ? "▾" : "▸"}</span>
+                  </button>
+                  {open && (
+                    <div className="socal-post-body">
+                      <div className="socal-post-art">
+                        {thumb(r)
+                          ? <img src={thumb(r)} alt={`${r.Title} graphic`} loading="lazy" />
+                          : <div className="socal-noart">no graphic yet</div>}
+                        {r["Image state"] && <div className="muted small-note">{r["Image state"]}</div>}
+                      </div>
+                      <div className="socal-post-fields">
+                        <div className="socal-field"><label>Date</label> {editable(r, "Post date", "date")}
+                          <label className="ml">Time</label> {editable(r, "Time")}
+                          <label className="ml">Status</label> {statusPicker(r)}</div>
+                        <div className="socal-field"><label>Title</label> {editable(r, "Title")}</div>
+                        <div className="socal-field"><label>Caption</label>
+                          <div className="socal-caption">{editable(r, "Caption", "textarea")}</div></div>
+                        {r["Client comments"] && (
+                          <div className="socal-field"><label>Client comments</label> {r["Client comments"]}</div>
+                        )}
+                        <div className="socal-instruct">
+                          <label>Tell SoCal what to change</label>
+                          <textarea rows={2} value={instr} disabled={instrBusy}
+                            placeholder='e.g. "move this to the following Tuesday" or "make the caption mention our fall special"'
+                            onChange={(e) => setInstr(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendInstruction(); }} />
+                          <div className="socal-instr-actions">
+                            <button onClick={sendInstruction} disabled={instrBusy || !instr.trim()}>
+                              {instrBusy ? "Working…" : "Send"}
+                            </button>
+                            <span className="muted">applies straight to the sheet, guarded; approved posts drop to Ready on content changes</span>
+                          </div>
+                          {instrReply && instrReply.id === r.ID && (
+                            <div className="socal-instr-reply">
+                              <b>{instrReply.updated.length ? `Updated: ${instrReply.updated.join(", ")}` : "No changes"}</b>
+                              {" — "}{instrReply.reply}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {upcoming.length === 0 && <div className="muted">Nothing queued — time for a brief.</div>}
           </div>
 
           <h3 className="socal-h3">Published ({past.length})</h3>

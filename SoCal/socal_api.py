@@ -141,27 +141,94 @@ def cmd_analytics(a):
     return out
 
 
+def apply_updates(svc, sheet, row, head, updates):
+    """Validate + apply field updates to one row with the lifecycle rule."""
+    bad = [f for f in updates if f not in EDITABLE]
+    if bad:
+        return {"error": f"fields not editable from the dashboard: {bad}"}
+    if "Status" in updates and updates["Status"] not in STATUSES:
+        return {"error": f"invalid status {updates['Status']!r}"}
+    if "Caption" in updates:
+        updates["Caption"] = updates["Caption"].replace("—", ",")  # lint: no em dashes
+    demoted = False
+    if any(f in CONTENT_FIELDS for f in updates) and row["Status"] in APPROVED_STATES \
+            and updates.get("Status") is None:
+        updates["Status"] = "Ready"
+        demoted = True
+    guarded_write(svc, sheet, "Calendar", row["_row"], head, updates, {"ID": row["ID"]})
+    return {"ok": True, "id": row["ID"], "updated": list(updates),
+            "demoted_to_ready": demoted,
+            "warning": ("content changed on an approved post; status dropped to Ready — "
+                        "it must be re-approved (and re-scheduled if it was already queued)"
+                        if demoted else None)}
+
+
 def cmd_patch(a):
-    if a.field not in EDITABLE:
-        return {"error": f"field {a.field!r} is not editable from the dashboard"}
-    if a.field == "Status" and a.value not in STATUSES:
-        return {"error": f"invalid status {a.value!r}"}
     svc = get_sheets_service()
     head, rows = read_tab_retry(svc, a.sheet, "Calendar")
     row = next((r for r in rows if r.get("ID") == a.id), None)
     if not row:
         return {"error": f"no row with ID {a.id}"}
-    updates = {a.field: a.value}
-    demoted = False
-    if a.field in CONTENT_FIELDS and row["Status"] in APPROVED_STATES:
-        updates["Status"] = "Ready"
-        demoted = True
-    guarded_write(svc, a.sheet, "Calendar", row["_row"], head, updates, {"ID": a.id})
-    return {"ok": True, "id": a.id, "updated": list(updates),
-            "demoted_to_ready": demoted,
-            "warning": ("content changed on an approved post; status dropped to Ready — "
-                        "it must be re-approved (and re-scheduled if it was already queued)"
-                        if demoted else None)}
+    return apply_updates(svc, a.sheet, row, head, {a.field: a.value})
+
+
+INSTRUCT_PROMPT = """You are the operator's assistant for a managed social media calendar. One post row and the client's config are below, followed by an instruction typed by the operator. Decide what field changes carry out the instruction.
+
+Rules you must respect:
+- Editable fields ONLY: Caption, Title, Post date (ISO yyyy-mm-dd), Time (HH:MM 24h), Status, Notes, Client comments.
+- Valid statuses: {statuses}. The post lifecycle is Draft -> Ready -> Under Review -> Approved -> Scheduled -> Published.
+- Captions: plainspoken, 2-4 short sentences, NO em dashes, no relative-time phrases ("tomorrow", "next week"), keep the footer line "{footer}" as the final line if the caption changes.
+- Never invent facts about the client. Client voice/context: {highlight}
+- If the instruction is unclear or asks something outside these fields, make NO changes and explain in reply.
+
+POST ROW:
+{row}
+
+CLIENT CONFIG:
+{config}
+
+OPERATOR INSTRUCTION:
+{text}
+
+Return ONLY a JSON object, no fences: {{"updates": {{"Field": "new value", ...}}, "reply": "one or two sentences on what you did or why you did nothing"}}"""
+
+
+def cmd_instruct(a):
+    import re as _re
+    import subprocess as _sp
+    svc = get_sheets_service()
+    head, rows = read_tab_retry(svc, a.sheet, "Calendar")
+    row = next((r for r in rows if r.get("ID") == a.id), None)
+    if not row:
+        return {"error": f"no row with ID {a.id}"}
+    cfg = read_config(svc, a.sheet)
+    row_view = {k: v for k, v in row.items() if k != "_row" and v}
+    prompt = INSTRUCT_PROMPT.format(
+        statuses=", ".join(STATUSES),
+        footer=cfg.get("footer_line", ""),
+        highlight=(cfg.get("image_style", "")[:200] or "plainspoken small business"),
+        row=json.dumps(row_view, indent=1),
+        config=json.dumps({k: cfg.get(k, "") for k in
+                           ("client_name", "post_weekday", "footer_line")}, indent=1),
+        text=a.text)
+    out = _sp.run(["claude", "-p", prompt], capture_output=True, text=True, timeout=300)
+    body = _re.sub(r"^```(json)?|```$", "", out.stdout.strip(), flags=_re.M).strip()
+    start, end = body.find("{"), body.rfind("}")
+    try:
+        parsed = json.loads(body[start:end + 1])
+    except Exception:
+        return {"error": "assistant returned an unreadable answer", "raw": body[:300]}
+    updates = parsed.get("updates") or {}
+    reply = parsed.get("reply") or ""
+    if not updates:
+        return {"ok": True, "id": a.id, "updated": [], "reply": reply or "No changes made."}
+    if a.dry:
+        return {"ok": True, "id": a.id, "dry": True, "updates": updates, "reply": reply}
+    res = apply_updates(svc, a.sheet, row, head, dict(updates))
+    if res.get("error"):
+        return {"error": res["error"], "reply": reply}
+    res["reply"] = reply
+    return res
 
 
 def main():
@@ -173,9 +240,12 @@ def main():
     p = sub.add_parser("patch")
     p.add_argument("--sheet", required=True); p.add_argument("--id", required=True)
     p.add_argument("--field", required=True); p.add_argument("--value", required=True)
+    i = sub.add_parser("instruct")
+    i.add_argument("--sheet", required=True); i.add_argument("--id", required=True)
+    i.add_argument("--text", required=True); i.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     fn = {"clients": cmd_clients, "calendar": cmd_calendar,
-          "analytics": cmd_analytics, "patch": cmd_patch}[a.cmd]
+          "analytics": cmd_analytics, "patch": cmd_patch, "instruct": cmd_instruct}[a.cmd]
     print(json.dumps(fn(a)))
 
 
