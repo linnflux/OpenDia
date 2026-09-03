@@ -216,8 +216,8 @@ and the operator's words.
 CLIENT IMAGE STYLE:
 {image_style}
 
-Return ONLY a JSON object, no fences:
-{{"updates": {{"Field": "new value", ...}}, "graphic": {{"brief": "..."}} or null, "reply": "one or two sentences on what you did or why you did nothing"}}"""
+Return ONLY a JSON object, no fences, with "reply" FIRST:
+{{"reply": "one or two sentences on what you did or why you did nothing", "updates": {{"Field": "new value", ...}}, "graphic": {{"brief": "..."}} or null}}"""
 
 
 def cmd_instruct(a):
@@ -248,8 +248,31 @@ def cmd_instruct(a):
         try:
             parsed = json.loads(blob, strict=False)
         except Exception:
-            # second chance: models also emit trailing commas
-            parsed = json.loads(_re.sub(r",\s*([}\]])", r"\1", blob), strict=False)
+            try:
+                # second chance: models also emit trailing commas
+                parsed = json.loads(_re.sub(r",\s*([}\]])", r"\1", blob), strict=False)
+            except Exception:
+                # third chance: truncated output — close any string and balance
+                # the brackets that are still open outside string context
+                fixed, in_str, esc, stack = [], False, False, []
+                for ch in blob:
+                    fixed.append(ch)
+                    if esc:
+                        esc = False
+                        continue
+                    if ch == "\\":
+                        esc = True
+                    elif ch == '"':
+                        in_str = not in_str
+                    elif not in_str:
+                        if ch in "{[":
+                            stack.append("}" if ch == "{" else "]")
+                        elif ch in "}]" and stack:
+                            stack.pop()
+                if in_str:
+                    fixed.append('"')
+                fixed = "".join(fixed).rstrip().rstrip(",") + "".join(reversed(stack))
+                parsed = json.loads(fixed, strict=False)
     except Exception as e:
         dump = os.path.expanduser("~/OpenDia/socal-samples/.last-instruct-raw.txt")
         with open(dump, "w") as fh:
