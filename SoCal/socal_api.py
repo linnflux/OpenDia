@@ -190,7 +190,7 @@ def cmd_patch(a):
 INSTRUCT_PROMPT = """You are the operator's assistant for a managed social media calendar. One post row and the client's config are below, followed by an instruction typed by the operator. Decide what field changes carry out the instruction.
 
 Rules you must respect:
-- Editable fields ONLY: Caption, Title, Post date (ISO yyyy-mm-dd), Time (HH:MM 24h), Status, Notes, Client comments.
+- Editable fields ONLY: Caption, Title, Post date (ISO yyyy-mm-dd), Time (HH:MM 24h), Status, Notes, Client comments, and Image state ("Final" or "Placeholder" — set Final when the operator approves the current graphic).
 - Valid statuses: {statuses}. The post lifecycle is Draft -> Ready -> Under Review -> Approved -> Scheduled -> Published.
 - Captions: plainspoken, 2-4 short sentences, NO em dashes, no relative-time phrases ("tomorrow", "next week"), keep the footer line "{footer}" as the final line if the caption changes.
 - Never invent facts about the client. Client voice/context: {highlight}
@@ -244,9 +244,18 @@ def cmd_instruct(a):
     start, end = body.find("{"), body.rfind("}")
     try:
         # strict=False: models emit literal newlines inside JSON strings
-        parsed = json.loads(body[start:end + 1], strict=False)
-    except Exception:
-        return {"error": "assistant returned an unreadable answer", "raw": body[:300]}
+        blob = body[start:end + 1]
+        try:
+            parsed = json.loads(blob, strict=False)
+        except Exception:
+            # second chance: models also emit trailing commas
+            parsed = json.loads(_re.sub(r",\s*([}\]])", r"\1", blob), strict=False)
+    except Exception as e:
+        dump = os.path.expanduser("~/OpenDia/socal-samples/.last-instruct-raw.txt")
+        with open(dump, "w") as fh:
+            fh.write(body)
+        return {"error": "assistant returned an unreadable answer",
+                "parse_error": str(e), "raw": body[:300], "full_raw_saved": dump}
     updates = parsed.get("updates") or {}
     graphic = parsed.get("graphic") or None
     reply = parsed.get("reply") or ""
