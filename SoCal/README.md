@@ -38,6 +38,7 @@ a date.
 | `init_sheet.py` | Idempotent tab creator for a new client sheet: `--sheet ID --pages "..." --channels "..."` |
 | `review_pdf.py` | Builds the client review PDF for one batch: `--sheet ID --batch YYYY-MM --out DIR [--upload]`. Uploads to Drive IN PLACE (same file id forever) and records version+link on Batches |
 | `publish.py` | `schedule`: turns Approved rows into natively scheduled Facebook posts. `tick`: timer-driven; publishes Instagram at post time, backfills permalinks, flips rows to Published |
+| `sampler.py` | Sales samples from nothing but a prospect's domain: brand extraction (rendered-page + logo pixel dominants; CSS is fallback only), model-drafted captions, finished cards in their palette/logo. `--accent/--ink/--bg` operator overrides. Every card is audited before a prospect sees it |
 
 Per-client wrappers, output dirs, and graphics templates live OUTSIDE this repo
 (this repo is public and carries zero client identifiers; a pre-commit guard
