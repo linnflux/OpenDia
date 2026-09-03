@@ -230,10 +230,18 @@ h1 .g {{ color:{accent}; }}
 """
 
 
-def card_html(post, brief, name, logo_data_uri):
+def card_html(post, brief, name, logo_data_uri, emphasis="color"):
     pal = brief["palette"]
     ink = pal["ink"] if luminance(pal["bg"]) > .5 else "#f7f8fa"
     chipink = "#ffffff" if luminance(pal["accent"]) < .6 else pal["ink"]
+    blob_css = ""
+    if emphasis == "blob":
+        # organic logo-style blob behind the emphasis line; text flips to the
+        # contrast color so a light accent stops washing out on a light ground
+        blob_css = (f"h1 .g {{ display:inline-block; color:{chipink}; background:{pal['accent']};"
+                    " padding:2px 34px 10px 28px; margin:6px 0;"
+                    " border-radius: 58% 42% 55% 45% / 55% 48% 60% 45%;"
+                    " transform: rotate(-1.4deg); }")
     lines = []
     for ln in post["headline_lines"]:
         if ln.startswith("*"):
@@ -252,7 +260,7 @@ def card_html(post, brief, name, logo_data_uri):
     logo = (f'<img class="logo" src="{logo_data_uri}">' if logo_data_uri
             else f'<div class="wordmark">{name}</div>')
     css = CARD_CSS.format(bg=pal["bg"], accent=pal["accent"], ink=ink,
-                          chipink=chipink, h1=h1)
+                          chipink=chipink, h1=h1) + blob_css
     return (f"<!doctype html><html><head><meta charset=utf-8><style>{css}</style></head>"
             f'<body><div class="card"><div class="stack">'
             f'<div class="eyebrow">{post["eyebrow"]}</div>'
@@ -285,6 +293,10 @@ def main():
     ap.add_argument("--accent", help="override accent hex (operator knows best)")
     ap.add_argument("--ink", help="override ink hex")
     ap.add_argument("--bg", help="override background hex")
+    ap.add_argument("--emphasis", choices=["color", "blob"], default="color",
+                    help="emphasis line: accent-colored text, or a logo-style blob behind it")
+    ap.add_argument("--reuse", action="store_true",
+                    help="reuse brief.json + posts.json already in --out (style A/Bs on identical content)")
     a = ap.parse_args()
 
     chrome = next((shutil.which(e) for e in ("chromium", "chromium-browser", "google-chrome") if shutil.which(e)), None)
@@ -292,10 +304,17 @@ def main():
         sys.exit("no chromium on PATH")
     os.makedirs(a.out, exist_ok=True)
 
-    print(f"extracting brand from {a.url} ...")
-    brief = extract(a.url)
-    name = a.name or (brief["title"].split("|")[0].split("-")[0].strip() or brief["domain"])
-    brief["name"] = name
+    reuse = a.reuse and os.path.exists(os.path.join(a.out, "brief.json"))
+    if reuse:
+        print("reusing brief.json from", a.out)
+        brief = json.load(open(os.path.join(a.out, "brief.json")))
+        name = a.name or brief.get("name") or brief["domain"]
+        brief["name"] = name
+    else:
+        print(f"extracting brand from {a.url} ...")
+        brief = extract(a.url)
+        name = a.name or (brief["title"].split("|")[0].split("-")[0].strip() or brief["domain"])
+        brief["name"] = name
 
     logo_uri, logo_counts = None, Counter()
     if brief["logo"]:
@@ -312,13 +331,16 @@ def main():
         except Exception as e:
             print(f"  (logo fetch failed: {e}; using text wordmark)")
 
-    print("reading rendered page colors ...")
-    try:
-        full, header = page_counts(chrome, a.url, a.out)
-    except Exception as e:
-        print(f"  (screenshot failed: {e}; falling back to CSS colors)")
-        full, header = Counter(), Counter()
-    palette = choose_palette(full, header, logo_counts, brief["css_hexes"])
+    if reuse:
+        palette = brief["palette"]
+    else:
+        print("reading rendered page colors ...")
+        try:
+            full, header = page_counts(chrome, a.url, a.out)
+        except Exception as e:
+            print(f"  (screenshot failed: {e}; falling back to CSS colors)")
+            full, header = Counter(), Counter()
+        palette = choose_palette(full, header, logo_counts, brief["css_hexes"])
     for k in ("accent", "ink", "bg"):
         if getattr(a, k):
             palette[k] = getattr(a, k)
@@ -329,14 +351,19 @@ def main():
     print(f"  palette {palette}  phone {brief['phone'] or '-'}  "
           f"logo {'yes' if logo_uri else 'wordmark'}  socials {len(brief['socials'])}")
 
-    print(f"drafting {a.posts} posts ...")
-    posts = draft_posts(brief, name, a.posts)
-    with open(os.path.join(a.out, "posts.json"), "w") as fh:
-        json.dump(posts, fh, indent=2)
+    posts_path = os.path.join(a.out, "posts.json")
+    if reuse and os.path.exists(posts_path):
+        print("reusing posts.json")
+        posts = json.load(open(posts_path))[:a.posts]
+    else:
+        print(f"drafting {a.posts} posts ...")
+        posts = draft_posts(brief, name, a.posts)
+        with open(posts_path, "w") as fh:
+            json.dump(posts, fh, indent=2)
 
     for i, p in enumerate(posts, 1):
         png = os.path.join(a.out, f"sample-{i}-{p['slug']}.png")
-        render(name, card_html(p, brief, name, logo_uri), png, chrome)
+        render(name, card_html(p, brief, name, logo_uri, a.emphasis), png, chrome)
         print(f"  {os.path.basename(png)}")
     print(f"\n{len(posts)} samples in {a.out} — AUDIT EVERY CARD before a prospect sees it.")
 
