@@ -107,6 +107,112 @@ def choose_palette(page, header, logo, css_hexes):
     return {"accent": accent, "ink": ink, "bg": bg}
 
 
+def upgrade_logo_url(url):
+    """Ask common image CDNs for a bigger rendition (GoDaddy W+M's wsimg
+    serves whatever height you request in the transform segment)."""
+    if "wsimg.com" in url:
+        return re.sub(r"rs=h:\d+", "rs=h:600", url)
+    return url
+
+
+def logo_blob_shape(logo_bytes, accent):
+    """Extract the accent-colored shape from the logo as a transparent PNG
+    (silhouette smoothed, recolored in the accent). Returns a data URI, or
+    None when the logo has no meaningful region near the accent color."""
+    import io
+    from PIL import Image, ImageFilter
+    ar, ag, ab = (int(accent[i:i + 2], 16) for i in (1, 3, 5))
+    im = Image.open(io.BytesIO(logo_bytes))
+    if im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA")
+        base = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        base.paste(im, mask=im.split()[-1])
+        im = base
+    im = im.convert("RGB")
+    px = im.load()
+    mask = Image.new("L", im.size, 0)
+    dark = Image.new("L", im.size, 0)
+    mp, dp = mask.load(), dark.load()
+    hits = 0
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b = px[x, y]
+            if r + g + b < 260:
+                dp[x, y] = 255
+            elif abs(r - ar) + abs(g - ag) + abs(b - ab) < 110:
+                mp[x, y] = 255
+                hits += 1
+    if hits < im.width * im.height * 0.02:
+        return None
+    # anti-aliased halos around dark lettering read as near-accent: remove
+    # everything within a few px of a dark pixel before reconstructing
+    halo = dark.filter(ImageFilter.MaxFilter(7))
+    mask = Image.composite(Image.new("L", im.size, 0), mask, halo)
+    # close the gaps where logo lettering crosses the shape (dilate then erode)
+    k = max(9, (min(im.size) // 12) | 1)
+    mask = mask.filter(ImageFilter.MaxFilter(k)).filter(ImageFilter.MinFilter(k))
+    # keep only the largest connected region and fill its internal holes,
+    # working at a small resolution where BFS is cheap
+    w = 150
+    small = mask.resize((w, max(1, int(w * mask.height / mask.width))))
+    grid = [[1 if small.getpixel((x, y)) > 127 else 0 for x in range(small.width)]
+            for y in range(small.height)]
+    H, W = len(grid), len(grid[0])
+
+    def flood(sy, sx, match, label, labels):
+        stack = [(sy, sx)]
+        cells = []
+        while stack:
+            y, x = stack.pop()
+            if 0 <= y < H and 0 <= x < W and labels[y][x] == 0 and grid[y][x] == match:
+                labels[y][x] = label
+                cells.append((y, x))
+                stack += [(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)]
+        return cells
+
+    labels = [[0] * W for _ in range(H)]
+    best = []
+    lab = 0
+    for y in range(H):
+        for x in range(W):
+            if grid[y][x] and not labels[y][x]:
+                lab += 1
+                cells = flood(y, x, 1, lab, labels)
+                if len(cells) > len(best):
+                    best = cells
+    keep = {(y, x) for y, x in best}
+    # outside = empty cells reachable from the border; unreachable empties are holes
+    outside = [[0] * W for _ in range(H)]
+    for y in range(H):
+        for x in (0, W - 1):
+            if not grid[y][x] and not outside[y][x]:
+                flood(y, x, 0, 1, outside)
+    for x in range(W):
+        for y in (0, H - 1):
+            if not grid[y][x] and not outside[y][x]:
+                flood(y, x, 0, 1, outside)
+    from PIL import Image as _I
+    comp = _I.new("L", (W, H), 0)
+    for y in range(H):
+        for x in range(W):
+            if (y, x) in keep or (not grid[y][x] and not outside[y][x]):
+                comp.putpixel((x, y), 255)
+    bbox = comp.getbbox()
+    if not bbox:
+        return None
+    comp = comp.crop(bbox)
+    # smooth hard: letter-scale detail dies, the organic outline survives
+    comp = comp.resize((900, max(1, int(900 * comp.height / comp.width))), Image.LANCZOS)
+    comp = comp.filter(ImageFilter.GaussianBlur(22)).point(lambda v: 255 if v > 105 else 0)
+    comp = comp.filter(ImageFilter.GaussianBlur(3))
+    out = Image.new("RGBA", comp.size, (ar, ag, ab, 0))
+    solid = Image.new("RGBA", comp.size, (ar, ag, ab, 255))
+    out.paste(solid, mask=comp)
+    buf = io.BytesIO()
+    out.save(buf, "PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
 def find_logo(soup, base):
     cands = []
     for img in soup.find_all("img"):
@@ -230,18 +336,27 @@ h1 .g {{ color:{accent}; }}
 """
 
 
-def card_html(post, brief, name, logo_data_uri, emphasis="color"):
+def card_html(post, brief, name, logo_data_uri, emphasis="color", blob_uri=None):
     pal = brief["palette"]
     ink = pal["ink"] if luminance(pal["bg"]) > .5 else "#f7f8fa"
     chipink = "#ffffff" if luminance(pal["accent"]) < .6 else pal["ink"]
     blob_css = ""
     if emphasis == "blob":
-        # organic logo-style blob behind the emphasis line; text flips to the
-        # contrast color so a light accent stops washing out on a light ground
-        blob_css = (f"h1 .g {{ display:inline-block; color:{chipink}; background:{pal['accent']};"
-                    " padding:2px 34px 10px 28px; margin:6px 0;"
-                    " border-radius: 58% 42% 55% 45% / 55% 48% 60% 45%;"
-                    " transform: rotate(-1.4deg); }")
+        if blob_uri:
+            # the client's OWN logo shape at its natural aspect, behind the whole
+            # headline — the same composition their logo uses (text on the blob)
+            blob_css = (" .hwrap { position:relative; }"
+                        " .hwrap img.blobbg { position:absolute; height:118%;"
+                        "   width:auto; left:-34px; top:50%;"
+                        "   transform:translateY(-51%); z-index:0; }"
+                        " .hwrap h1 { position:relative; z-index:1; }"
+                        f" h1 .g {{ color:{ink}; }}")
+        else:
+            # no usable shape in the logo: generic organic blob fallback
+            blob_css = (f"h1 .g {{ display:inline-block; color:{chipink}; background:{pal['accent']};"
+                        " padding:2px 34px 10px 28px; margin:6px 0;"
+                        " border-radius: 58% 42% 55% 45% / 55% 48% 60% 45%;"
+                        " transform: rotate(-1.4deg); }")
     lines = []
     for ln in post["headline_lines"]:
         if ln.startswith("*"):
@@ -261,10 +376,13 @@ def card_html(post, brief, name, logo_data_uri, emphasis="color"):
             else f'<div class="wordmark">{name}</div>')
     css = CARD_CSS.format(bg=pal["bg"], accent=pal["accent"], ink=ink,
                           chipink=chipink, h1=h1) + blob_css
+    h1_html = f'<h1>{"".join(lines)}</h1>'
+    if emphasis == "blob" and blob_uri:
+        h1_html = f'<div class="hwrap"><img class="blobbg" src="{blob_uri}">{h1_html}</div>'
     return (f"<!doctype html><html><head><meta charset=utf-8><style>{css}</style></head>"
             f'<body><div class="card"><div class="stack">'
             f'<div class="eyebrow">{post["eyebrow"]}</div>'
-            f'<h1>{"".join(lines)}</h1><div class="rule"></div>'
+            f'{h1_html}<div class="rule"></div>'
             f'<div class="note">{"<br>".join(post["note_lines"])}</div>'
             f'<div class="chip">{chip}</div></div>'
             f'{logo}{url_line}</div></body></html>')
@@ -316,18 +434,20 @@ def main():
         name = a.name or (brief["title"].split("|")[0].split("-")[0].strip() or brief["domain"])
         brief["name"] = name
 
-    logo_uri, logo_counts = None, Counter()
+    logo_uri, logo_counts, logo_bytes, logo_ext = None, Counter(), None, ""
     if brief["logo"]:
         try:
-            blob = fetch(brief["logo"], binary=True)
-            ext = brief["logo"].rsplit(".", 1)[-1].lower().split("?")[0]
+            logo_src = upgrade_logo_url(brief["logo"])
+            logo_bytes = fetch(logo_src, binary=True)
+            logo_ext = re.search(r"\.(png|jpe?g|svg|webp)", brief["logo"].lower())
+            logo_ext = logo_ext.group(1) if logo_ext else "png"
             mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                    "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "image/png")
-            logo_uri = f"data:{mime};base64," + base64.b64encode(blob).decode()
-            if ext != "svg":
+                    "svg": "image/svg+xml", "webp": "image/webp"}.get(logo_ext, "image/png")
+            logo_uri = f"data:{mime};base64," + base64.b64encode(logo_bytes).decode()
+            if logo_ext != "svg":
                 import io
                 from PIL import Image
-                logo_counts = image_counts(Image.open(io.BytesIO(blob)))
+                logo_counts = image_counts(Image.open(io.BytesIO(logo_bytes)))
         except Exception as e:
             print(f"  (logo fetch failed: {e}; using text wordmark)")
 
@@ -361,9 +481,14 @@ def main():
         with open(posts_path, "w") as fh:
             json.dump(posts, fh, indent=2)
 
+    blob_uri = None
+    if a.emphasis == "blob" and logo_bytes and logo_ext != "svg":
+        blob_uri = logo_blob_shape(logo_bytes, brief["palette"]["accent"])
+        print("  logo blob shape:", "extracted from logo" if blob_uri else "not found; generic fallback")
+
     for i, p in enumerate(posts, 1):
         png = os.path.join(a.out, f"sample-{i}-{p['slug']}.png")
-        render(name, card_html(p, brief, name, logo_uri, a.emphasis), png, chrome)
+        render(name, card_html(p, brief, name, logo_uri, a.emphasis, blob_uri), png, chrome)
         print(f"  {os.path.basename(png)}")
     print(f"\n{len(posts)} samples in {a.out} — AUDIT EVERY CARD before a prospect sees it.")
 
