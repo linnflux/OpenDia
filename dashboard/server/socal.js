@@ -52,6 +52,30 @@ export function mountSocal(app, requireAdmin) {
     } catch (e) { res.status(502).json({ error: e.message }); }
   });
 
+  app.get("/api/socal/:slug/styleguide", requireAdmin, async (req, res) => {
+    const c = findClient(req.params.slug);
+    if (!c) return res.status(404).json({ error: "unknown client" });
+    try {
+      res.json(await cached(`sg:${c.slug}`, TTL.calendar,
+        () => bridge(["styleguide", "--sheet", c.sheet])));
+    } catch (e) { res.status(502).json({ error: e.message }); }
+  });
+
+  app.patch("/api/socal/:slug/styleguide", requireAdmin, async (req, res) => {
+    const c = findClient(req.params.slug);
+    if (!c) return res.status(404).json({ error: "unknown client" });
+    const { key, value } = req.body || {};
+    if (!key || value === undefined) return res.status(400).json({ error: "key and value required" });
+    try {
+      const out = await bridge(["styleset", "--sheet", c.sheet,
+                                "--key", String(key), "--value", String(value)]);
+      if (out.error) return res.status(400).json(out);
+      cache.delete(`sg:${c.slug}`);
+      cache.delete(`cal:${c.slug}`); // calendar payload carries config too
+      res.json(out);
+    } catch (e) { res.status(502).json({ error: e.message }); }
+  });
+
   app.get("/api/socal/:slug/analytics", requireAdmin, async (req, res) => {
     const c = findClient(req.params.slug);
     if (!c) return res.status(404).json({ error: "unknown client" });

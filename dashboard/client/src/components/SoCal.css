@@ -91,3 +91,20 @@
   display: grid; place-items: center; cursor: zoom-out; }
 .socal-lightbox img { max-width: min(92vw, 1080px); max-height: 92vh; border-radius: 10px;
   box-shadow: 0 12px 60px rgba(0,0,0,.6); }
+
+/* ---- style guide panel ---- */
+.socal-sg-toggle { border: 0; background: none; font: inherit; color: inherit; cursor: pointer;
+  text-transform: inherit; letter-spacing: inherit; padding: 0; }
+.socal-sg-body { border: 1px solid var(--border, #3a4353); border-radius: 10px;
+  background: var(--bg-card, #fff); padding: 14px 16px; display: grid; gap: 14px; }
+.socal-sg-swatches { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+.socal-sg-swatch { width: 120px; }
+.socal-sg-chip { display: block; width: 100%; height: 54px; border-radius: 8px;
+  border: 1px solid var(--border, #3a4353); cursor: pointer; }
+.socal-sg-lab { font-size: 13px; margin-top: 5px; }
+.socal-sg-logo { margin-left: auto; align-self: center; max-width: 260px; }
+.socal-sg-logo img { max-height: 56px; max-width: 100%; background: #fff;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-subtle, #2e3644); }
+.socal-sg-fonts { display: flex; gap: 26px; flex-wrap: wrap; }
+.socal-sg-block label { display: block; font-size: 13px; opacity: .8; margin-bottom: 3px; }
+.socal-sg-text { display: block; line-height: 1.5; font-size: 14px; white-space: pre-wrap; }

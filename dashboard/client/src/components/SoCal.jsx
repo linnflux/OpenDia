@@ -22,6 +22,141 @@ function fmtDate(iso) {
   return isNaN(d) ? iso : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// Per-client style guide: the Config style keys, viewable and editable in
+// place. Researched at onboarding (styleguide.py), curated here — the sheet
+// stays the source of truth, so the review PDF, the graphics pipeline, and
+// the instruction agent all read the same guide.
+const SG_COLORS = [["brand_primary", "Primary"], ["brand_secondary", "Secondary"],
+                   ["brand_ink", "Ink"], ["brand_bg", "Background"]];
+const SG_TEXTS = [["heading_font", "Heading font"], ["body_font", "Body font"],
+                  ["logo_url", "Logo URL"]];
+const SG_BLOCKS = [["image_style", "Image style", "Directive for generated graphics"],
+                   ["imagery_notes", "Imagery notes", "What their site actually uses"],
+                   ["voice", "Voice", "How captions should read"],
+                   ["motif", "Motif", "Recurring visual devices"]];
+
+function StyleGuide({ slug, say }) {
+  const [open, setOpen] = useState(false);
+  const [sg, setSg] = useState(null);
+  const [edit, setEdit] = useState(null); // {key, value}
+  const [busy, setBusy] = useState(false);
+
+  const load = () => fetch(`/api/socal/${slug}/styleguide`).then((r) => r.json())
+    .then((d) => (d.error ? say(`style guide: ${d.error}`) : setSg(d.guide)));
+
+  useEffect(() => { if (open && !sg) load(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // render font names in the actual faces (best effort; fallback is fine)
+  useEffect(() => {
+    if (!sg) return;
+    const fams = [...new Set([sg.heading_font, sg.body_font].filter(Boolean))];
+    if (!fams.length) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?display=swap&" +
+      fams.map((f) => `family=${encodeURIComponent(f).replace(/%20/g, "+")}:wght@400;700`).join("&");
+    document.head.appendChild(link);
+    return () => document.head.removeChild(link);
+  }, [sg]);
+
+  const save = async () => {
+    if (!edit || busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/socal/${slug}/styleguide`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: edit.key, value: edit.value }),
+      });
+      const out = await r.json();
+      if (out.error) { say(out.error); return; }
+      setSg({ ...sg, [edit.key]: out.value });
+      setEdit(null);
+      say(`${edit.key} saved`);
+    } catch (e) { say(String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const field = (key, mode) => {
+    if (edit?.key !== key) return null;
+    return (
+      <span className="socal-editbox" style={{ display: "block", marginTop: 6 }}>
+        {mode === "block"
+          ? <textarea rows={4} value={edit.value} autoFocus
+              onChange={(e) => setEdit({ ...edit, value: e.target.value })} />
+          : <input value={edit.value} autoFocus style={{ width: mode === "hex" ? 110 : 320, maxWidth: "100%" }}
+              placeholder={mode === "hex" ? "#rrggbb" : ""}
+              onChange={(e) => setEdit({ ...edit, value: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEdit(null); }} />}
+        <span className="socal-editbtns" style={{ marginLeft: 6 }}>
+          <button onClick={save} disabled={busy}>{busy ? "…" : "Save"}</button>
+          <button className="ghost" onClick={() => setEdit(null)}>Cancel</button>
+        </span>
+      </span>
+    );
+  };
+
+  return (
+    <div className="socal-styleguide">
+      <h3 className="socal-h3">
+        <button className="socal-sg-toggle" onClick={() => setOpen(!open)}>
+          {open ? "▾" : "▸"} Style guide
+        </button>
+      </h3>
+      {open && !sg && <div className="socal-loading">Loading style guide…</div>}
+      {open && sg && (
+        <div className="socal-sg-body">
+          <div className="socal-sg-swatches">
+            {SG_COLORS.map(([key, label]) => (
+              <div key={key} className="socal-sg-swatch">
+                <button className="socal-sg-chip" title="Click to edit"
+                  style={{ background: sg[key] || "transparent",
+                           borderStyle: sg[key] ? "solid" : "dashed" }}
+                  onClick={() => setEdit({ key, value: sg[key] || "" })} />
+                <div className="socal-sg-lab">{label}</div>
+                <div className="muted mono small-note">{sg[key] || "unset"}</div>
+                {field(key, "hex")}
+              </div>
+            ))}
+            {sg.logo_url && (
+              <div className="socal-sg-logo"><img src={sg.logo_url} alt="client logo" /></div>
+            )}
+          </div>
+          <div className="socal-sg-fonts">
+            {SG_TEXTS.map(([key, label]) => (
+              <div key={key} className="socal-field">
+                <label>{label}</label>{" "}
+                <span className="socal-editable" title="Click to edit"
+                  style={key.endsWith("_font") && sg[key]
+                    ? { fontFamily: `"${sg[key]}", sans-serif`, fontSize: key === "heading_font" ? 18 : 15,
+                        fontWeight: key === "heading_font" ? 700 : 400 }
+                    : undefined}
+                  onClick={() => setEdit({ key, value: sg[key] || "" })}>
+                  {key === "logo_url" && sg[key] ? sg[key].replace(/^https?:\/\//, "").slice(0, 60) : (sg[key] || <i>unset</i>)}
+                </span>
+                {field(key, "text")}
+              </div>
+            ))}
+          </div>
+          {SG_BLOCKS.map(([key, label, hint]) => (
+            <div key={key} className="socal-sg-block">
+              <label>{label} <span className="muted">· {hint}</span></label>
+              {edit?.key === key ? field(key, "block") : (
+                <div className="socal-editable socal-sg-text" title="Click to edit"
+                  onClick={() => setEdit({ key, value: sg[key] || "" })}>
+                  {sg[key] || <i>unset — click to write one</i>}
+                </div>
+              )}
+            </div>
+          ))}
+          <div className="muted small-note">
+            Edits write to the client sheet's Config tab and steer the graphics pipeline and the instruction agent.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SoCal() {
   const [clients, setClients] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -217,6 +352,8 @@ export default function SoCal() {
           {an?.page?.ig_followers != null && <span>IG {an.page.ig_followers} followers</span>}
         </div>
       </div>
+
+      <StyleGuide slug={selected.slug} say={say} />
 
       {!cal ? <div className="socal-loading">Loading calendar…</div> : (
         <>
