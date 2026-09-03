@@ -413,6 +413,8 @@ def main():
     ap.add_argument("--bg", help="override background hex")
     ap.add_argument("--emphasis", choices=["color", "blob"], default="color",
                     help="emphasis line: accent-colored text, or a logo-style blob behind it")
+    ap.add_argument("--blob-file", help="exact shape image (png/svg) to use for --emphasis blob, "
+                                        "skipping logo extraction (operator-supplied asset wins)")
     ap.add_argument("--reuse", action="store_true",
                     help="reuse brief.json + posts.json already in --out (style A/Bs on identical content)")
     a = ap.parse_args()
@@ -482,9 +484,16 @@ def main():
             json.dump(posts, fh, indent=2)
 
     blob_uri = None
-    if a.emphasis == "blob" and logo_bytes and logo_ext != "svg":
-        blob_uri = logo_blob_shape(logo_bytes, brief["palette"]["accent"])
-        print("  logo blob shape:", "extracted from logo" if blob_uri else "not found; generic fallback")
+    if a.emphasis == "blob":
+        if a.blob_file:
+            ext = a.blob_file.rsplit(".", 1)[-1].lower()
+            mime = {"png": "image/png", "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "image/png")
+            with open(a.blob_file, "rb") as fh:
+                blob_uri = f"data:{mime};base64," + base64.b64encode(fh.read()).decode()
+            print("  blob shape: operator-supplied", os.path.basename(a.blob_file))
+        elif logo_bytes and logo_ext != "svg":
+            blob_uri = logo_blob_shape(logo_bytes, brief["palette"]["accent"])
+            print("  logo blob shape:", "extracted from logo" if blob_uri else "not found; generic fallback")
 
     for i, p in enumerate(posts, 1):
         png = os.path.join(a.out, f"sample-{i}-{p['slug']}.png")
