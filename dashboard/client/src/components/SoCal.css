@@ -84,3 +84,10 @@
 .socal-instr-actions button:disabled { opacity: .5; cursor: default; }
 .socal-instr-reply { margin-top: 8px; font-size: 13px; padding: 8px 10px; border-radius: 8px;
   background: var(--bg-recessed, #f0f5f0); border-left: 3px solid #54af4d; line-height: 1.5; }
+
+/* graphic lightbox */
+.socal-zoomable { cursor: zoom-in; }
+.socal-lightbox { position: fixed; inset: 0; z-index: 80; background: rgba(10, 13, 18, .88);
+  display: grid; place-items: center; cursor: zoom-out; }
+.socal-lightbox img { max-width: min(92vw, 1080px); max-height: 92vh; border-radius: 10px;
+  box-shadow: 0 12px 60px rgba(0,0,0,.6); }

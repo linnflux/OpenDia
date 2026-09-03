@@ -34,6 +34,14 @@ export default function SoCal() {
   const [instrReply, setInstrReply] = useState(null); // {id, reply, updated}
   const [toast, setToast] = useState(null);
   const [err, setErr] = useState(null);
+  const [lightbox, setLightbox] = useState(null); // enlarged graphic URL
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => { if (e.key === "Escape") setLightbox(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
 
   const say = (t) => { setToast(t); setTimeout(() => setToast(null), 6000); };
 
@@ -217,7 +225,9 @@ export default function SoCal() {
                     <div className="socal-post-body">
                       <div className="socal-post-art">
                         {thumb(r)
-                          ? <img src={thumb(r)} alt={`${r.Title} graphic`} loading="lazy" />
+                          ? <img src={thumb(r)} alt={`${r.Title} graphic`} loading="lazy"
+                              className="socal-zoomable" title="Click to enlarge"
+                              onClick={() => setLightbox(thumb(r, 1600))} />
                           : <div className="socal-noart">no graphic yet</div>}
                         {r["Image state"] && <div className="muted small-note">{r["Image state"]}</div>}
                       </div>
@@ -315,6 +325,11 @@ export default function SoCal() {
         </div>
       )}
 
+      {lightbox && (
+        <div className="socal-lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="Post graphic, enlarged" />
+        </div>
+      )}
       {toast && <div className="socal-toast">{toast}</div>}
     </div>
   );
