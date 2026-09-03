@@ -40,7 +40,8 @@ a date.
 | `publish.py` | `schedule`: turns Approved rows into natively scheduled Facebook posts. `tick`: timer-driven; publishes Instagram at post time, backfills permalinks, flips rows to Published |
 | `sampler.py` | Sales samples from nothing but a prospect's domain: brand extraction (rendered-page + logo pixel dominants; CSS is fallback only), model-drafted captions, finished cards in their palette/logo. `--accent/--ink/--bg` operator overrides. Every card is audited before a prospect sees it |
 | `onboard.py` | One-command client spin-up: Drive images folder (link-readable), calendar sheet via init_sheet, Config filled from signup facts, per-client wrapper scaffold, registry entry for the admin view, printed checklist of the remaining human steps. `--dry-run` first |
-| `socal_api.py` | JSON bridge behind the admin dashboard's SoCal view: client summaries, calendar rows, Meta analytics, guarded row edits (content edits on approved posts auto-demote to Ready) |
+| `styleguide.py` | Website -> client style guide: rendered-page palette + logo pixels (SVG rasterized via chrome), fonts from the CSS that actually applies them, site imagery examined by a model with vision; writes the Config style keys (blank keys only — operator curation wins; `--force` to override) and renders a one-page specimen |
+| `socal_api.py` | JSON bridge behind the admin dashboard's SoCal view: client summaries, calendar rows, Meta analytics, guarded row edits (content edits on approved posts auto-demote to Ready), style-guide read/write |
 
 Client-facing docs live in `docs/` (`meta-access.md`: the partner-share
 instructions a new client follows to grant page/IG access).

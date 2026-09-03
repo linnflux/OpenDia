@@ -21,7 +21,9 @@ CONFIG_KEYS = ["client_name", "client_short", "footer_line", "pages", "channels"
                "approver", "compliance_contact", "cc_list", "lead_time_days",
                "post_weekday", "posts_per_month", "drive_images_folder_id",
                "drive_reviews_folder_id", "shared_drive_id", "brand_primary",
-               "brand_ink", "main_phone", "image_style", "archive_tab"]
+               "brand_secondary", "brand_ink", "brand_bg", "heading_font",
+               "body_font", "logo_url", "motif", "imagery_notes", "voice",
+               "main_phone", "image_style", "archive_tab"]
 
 
 def one_of(values):

@@ -21,7 +21,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.expanduser("~/OpenDia/scripts"))
-from sheet import get_sheets_service, read_tab, read_config, guarded_write, STATUSES  # noqa: E402
+from sheet import (get_sheets_service, read_tab, read_config, guarded_write,  # noqa: E402
+                   write_config, STATUSES, STYLE_KEYS)
 
 REGISTRY = os.path.expanduser("~/OpenDia/socal-clients.json")
 TOKEN_PATH = os.path.expanduser("~/.claude/mcp-credentials/meta/access_token")
@@ -187,6 +188,27 @@ def cmd_patch(a):
     return apply_updates(svc, a.sheet, row, head, {a.field: a.value})
 
 
+HEX_KEYS = {"brand_primary", "brand_secondary", "brand_ink", "brand_bg"}
+
+
+def cmd_styleguide(a):
+    svc = get_sheets_service()
+    cfg = retried(lambda: read_config(svc, a.sheet))
+    return {"guide": {k: cfg.get(k, "") for k in STYLE_KEYS}, "keys": STYLE_KEYS}
+
+
+def cmd_styleset(a):
+    import re as _re
+    if a.key not in STYLE_KEYS:
+        return {"error": f"not a style-guide key: {a.key}"}
+    value = a.value.replace("—", ",").strip()
+    if a.key in HEX_KEYS and value and not _re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+        return {"error": f"{a.key} must be a #rrggbb hex color (or blank)"}
+    svc = get_sheets_service()
+    retried(lambda: write_config(svc, a.sheet, a.key, value))
+    return {"ok": True, "key": a.key, "value": value}
+
+
 INSTRUCT_PROMPT = """You are the operator's assistant for a managed social media calendar. One post row and the client's config are below, followed by an instruction typed by the operator. Decide what field changes carry out the instruction.
 
 Rules you must respect:
@@ -230,11 +252,20 @@ def cmd_instruct(a):
         return {"error": f"no row with ID {a.id}"}
     cfg = retried(lambda: read_config(svc, a.sheet))
     row_view = {k: v for k, v in row.items() if k != "_row" and v}
+    style_ctx = (cfg.get("image_style", "")
+                 or "clean, simple, professional; match the client's website look")
+    extras = [f"- {k}: {cfg[k]}" for k in
+              ("brand_primary", "brand_secondary", "brand_ink", "brand_bg",
+               "heading_font", "body_font", "motif", "imagery_notes")
+              if cfg.get(k)]
+    if extras:
+        style_ctx += "\n\nBrand style guide (colors, type, observed imagery):\n" + "\n".join(extras)
     prompt = INSTRUCT_PROMPT.format(
         statuses=", ".join(STATUSES),
         footer=cfg.get("footer_line", ""),
-        highlight=(cfg.get("image_style", "")[:200] or "plainspoken small business"),
-        image_style=(cfg.get("image_style", "") or "clean, simple, professional; match the client's website look"),
+        highlight=(cfg.get("voice", "") or cfg.get("image_style", "")[:200]
+                   or "plainspoken small business"),
+        image_style=style_ctx,
         row=json.dumps(row_view, indent=1),
         config=json.dumps({k: cfg.get(k, "") for k in
                            ("client_name", "post_weekday", "footer_line")}, indent=1),
@@ -357,9 +388,14 @@ def main():
     i.add_argument("--text", required=True); i.add_argument("--dry", action="store_true")
     i.add_argument("--slug", default="")
     i.add_argument("--result-file", default="", help="also write the JSON result here (atomic)")
+    sg = sub.add_parser("styleguide"); sg.add_argument("--sheet", required=True)
+    ss = sub.add_parser("styleset")
+    ss.add_argument("--sheet", required=True); ss.add_argument("--key", required=True)
+    ss.add_argument("--value", required=True)
     a = ap.parse_args()
     fn = {"clients": cmd_clients, "calendar": cmd_calendar,
-          "analytics": cmd_analytics, "patch": cmd_patch, "instruct": cmd_instruct}[a.cmd]
+          "analytics": cmd_analytics, "patch": cmd_patch, "instruct": cmd_instruct,
+          "styleguide": cmd_styleguide, "styleset": cmd_styleset}[a.cmd]
     try:
         result = fn(a)
     except Exception as e:

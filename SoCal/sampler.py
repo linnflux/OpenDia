@@ -214,17 +214,27 @@ def logo_blob_shape(logo_bytes, accent):
 
 
 def find_logo(soup, base):
-    cands = []
+    def src_of(img):
+        return img.get("src") or img.get("data-src") or ""
+    # the site's own logo lives in the header/nav, whatever its classes say —
+    # attribute matching alone once grabbed a product badge off a card grid
+    for scope in soup.find_all(["header", "nav"]):
+        img = scope.find("img")
+        if img and src_of(img):
+            return urljoin(base, src_of(img))
+    # an image wrapped in a link home is a brand mark too
+    for a_tag in soup.find_all("a", href=True):
+        if a_tag["href"] in ("/", base, base.rstrip("/") + "/"):
+            img = a_tag.find("img")
+            if img and src_of(img):
+                return urljoin(base, src_of(img))
     for img in soup.find_all("img"):
-        blob = " ".join([img.get("src") or "", img.get("alt") or "",
+        blob = " ".join([src_of(img), img.get("alt") or "",
                          " ".join(img.get("class") or [])]).lower()
-        if "logo" in blob:
-            cands.append(img.get("src"))
-    if not cands:
-        og = soup.find("meta", property="og:image")
-        if og and og.get("content"):
-            cands.append(og["content"])
-    return urljoin(base, cands[0]) if cands and cands[0] else None
+        if "logo" in blob and src_of(img):
+            return urljoin(base, src_of(img))
+    og = soup.find("meta", property="og:image")
+    return urljoin(base, og["content"]) if og and og.get("content") else None
 
 
 def extract(url):

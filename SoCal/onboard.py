@@ -45,8 +45,8 @@ Remaining human steps for {name}:
   1. Meta access: send docs/meta-access.md (filled with our Business ID); client
      partner-shares their FB Page + IG account; assign both to the system user;
      then add meta_page_id + meta_ig_user_id to Config.
-  2. Brand brief: fill image_style, brand_primary, brand_ink in Config
-     (run sampler.py against their site for a head start).
+  2. Review the researched style guide (specimen.png + the Config style keys)
+     in the dashboard; the descriptor fields are drafts — curate them.
   3. Standing instructions from the intake form -> Config rows.
   4. Dashboard card + Notion task for the engagement (od-new).
   5. First batch: rows -> graphics -> ./review.sh -> approval email -> publish.
@@ -67,6 +67,8 @@ def main():
     ap.add_argument("--phone", default="")
     ap.add_argument("--pages", default="Parent")
     ap.add_argument("--channels", default="Facebook, Instagram")
+    ap.add_argument("--no-research", action="store_true",
+                    help="skip the website style-guide research pass")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -83,6 +85,8 @@ def main():
         print(f"  init_sheet.py --pages {a.pages!r} --channels {a.channels!r}")
         print(f"  Config fill: name/short/footer={footer!r}/approver/{a.weekday}/{a.posts}/mo"
               f"/phone={a.phone!r}/folder ids")
+        if not a.no_research:
+            print(f"  styleguide.py research --url {a.url} --write (palette, fonts, logo, imagery)")
         print(f"  scaffold {client_dir}/review.sh + graphics/ + out/")
         print(CHECKLIST.format(name=a.name))
         return
@@ -124,6 +128,17 @@ def main():
         if k in cfg and cfg[k]:
             guarded_write(svc, ss["id"], "Config", r["_row"], head, {"value": cfg[k]}, {"key": k})
     print("config filled:", ", ".join(k for k, v in cfg.items() if v))
+
+    if not a.no_research:
+        # style-guide research: their palette, fonts, logo, imagery -> Config.
+        # Best effort — a research failure must never abort an onboarding.
+        rc = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "styleguide.py"),
+             "research", "--url", a.url, "--name", a.name,
+             "--out", os.path.join(client_dir, "styleguide"),
+             "--sheet", ss["id"], "--write"])
+        if rc.returncode != 0:
+            print("style research failed; run styleguide.py by hand and fill Config")
 
     os.makedirs(os.path.join(client_dir, "out"), exist_ok=True)
     os.makedirs(os.path.join(client_dir, "graphics"), exist_ok=True)

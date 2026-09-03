@@ -31,6 +31,14 @@ COMPLIANCE = ["N/A", "Pending", "Pass", "Fail"]
 REVIEW_STATUSES = {"Ready", "Under Review", "Changes Requested", "Approved"}
 SKIP_STATUSES = {"Scheduled", "Published", "Do Not Run"}
 
+# The client style guide lives in Config alongside the operational keys. These
+# are the keys that describe the brand itself — researched from the client's
+# website at onboarding (styleguide.py), then human-curated. Every surface that
+# renders or generates for the client should read from here.
+STYLE_KEYS = ["brand_primary", "brand_secondary", "brand_ink", "brand_bg",
+              "heading_font", "body_font", "logo_url", "motif",
+              "image_style", "imagery_notes", "voice"]
+
 DRIVE_ID = re.compile(r"(?:/d/|id=)([\w-]{20,})|^([\w-]{20,})$")
 
 
@@ -68,6 +76,20 @@ def read_tab(svc, sid, tab):
 def read_config(svc, sid):
     _, rows = read_tab(svc, sid, "Config")
     return {r["key"].strip(): r["value"].strip() for r in rows if r.get("key", "").strip()}
+
+
+def write_config(svc, sid, key, value):
+    """Set one Config key (guarded on the key cell). Appends the row if the
+    key does not exist yet, so schema additions self-heal on older sheets."""
+    head, rows = read_tab(svc, sid, "Config")
+    row = next((r for r in rows if r.get("key", "").strip() == key), None)
+    if row is None:
+        svc.spreadsheets().values().append(
+            spreadsheetId=sid, range="'Config'!A:B",
+            valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
+            body={"values": [[key, value]]}).execute()
+        return
+    guarded_write(svc, sid, "Config", row["_row"], head, {"value": value}, {"key": key})
 
 
 def guarded_write(svc, sid, tab, row, head, updates: dict, expect: dict):
