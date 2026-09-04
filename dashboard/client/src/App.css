@@ -7751,4 +7751,38 @@ html.vt-no-target::view-transition-old(card-morph) {
 
 .newtask-session-note { font-size: 0.85rem; color: var(--text-secondary); margin: 0.75rem 0 0; }
 
+.newtask-dupes {
+  margin-top: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--warning, #d97706);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.newtask-dupes-title { font-size: 0.85rem; font-weight: 600; color: var(--warning, #d97706); }
+.newtask-dupe-row { display: flex; align-items: center; gap: 0.6rem; }
+.newtask-dupe-name { flex: 1; font-size: 0.88rem; min-width: 0; }
+.newtask-dupe-name em { margin-left: 0.4rem; font-size: 0.78rem; color: var(--text-secondary); font-style: normal; }
+.newtask-dupe-attach {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.newtask-dupe-force {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
 .client-autocomplete-item.create { font-style: italic; color: var(--accent); }

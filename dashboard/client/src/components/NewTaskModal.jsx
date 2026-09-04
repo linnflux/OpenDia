@@ -40,6 +40,7 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
   const [phase, setPhase] = useState("form");         // form | busy | done
   const [result, setResult] = useState(null);         // POST /api/dispatch response (+ spark step)
   const [doneMode, setDoneMode] = useState("spawn");
+  const [dupes, setDupes] = useState(null);           // { candidates, mode } from a 409 duplicate guard
 
   const clientName = company?.name || newClient?.name || "";
 
@@ -75,7 +76,7 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
   }, [company, newClient, task, sessionTouched]);
   // Picking a different client resets the card choice — a stale card id from
   // the previous client must never ride into the submit.
-  useEffect(() => { setCardChoice("new"); }, [clientName]);
+  useEffect(() => { setCardChoice("new"); setDupes(null); }, [clientName]);
 
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape" && phase !== "busy") onClose(); }
@@ -86,19 +87,21 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
   const existingCard = cardChoice !== "new" ? openCards.find((p) => p.id === cardChoice) : null;
   const canSubmit = phase === "form" && (existingCard || task.trim());
 
-  async function submit(mode) {
+  async function submit(mode, overrides = {}) {
     if (!canSubmit) return;
     setPhase("busy");
     setDoneMode(mode);
+    setDupes(null);
     const payload = {
       task: task.trim(),
       companyId: company?.id || undefined,
       newCompany: !company && newClient ? { name: newClient.name } : undefined,
-      existingProjectId: existingCard?.id || undefined,
+      existingProjectId: overrides.existingProjectId ?? existingCard?.id ?? undefined,
       division: division || undefined,
       context: context.trim() || undefined,
       sessionName: mode === "spawn" ? sessionName.trim() || undefined : undefined,
       mode,
+      force: overrides.force || undefined,
     };
     try {
       const r = await fetch("/api/dispatch", {
@@ -107,6 +110,13 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
         body: JSON.stringify(payload),
       });
       const d = await r.json().catch(() => ({}));
+      if (r.status === 409 && Array.isArray(d?.candidates) && d.candidates.length) {
+        // Duplicate guard fired: nothing was created. Show the candidates and
+        // let the human decide — attach, or force a genuinely new card.
+        setDupes({ candidates: d.candidates, mode });
+        setPhase("form");
+        return;
+      }
       if (!r.ok) {
         showToast?.(d?.error || `HTTP ${r.status}`);
         setPhase("form");
@@ -148,7 +158,7 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
             <input
               className="newtask-task-input"
               value={task}
-              onChange={(e) => setTask(e.target.value)}
+              onChange={(e) => { setTask(e.target.value); setDupes(null); }}
               placeholder="What needs doing?"
               autoFocus
               disabled={phase === "busy"}
@@ -219,6 +229,28 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
                 onChange={(e) => setContext(e.target.value)}
                 placeholder="Optional — paste an email, notes, anything. Lands in the session brief." />
             </div>
+
+            {dupes && (
+              <div className="newtask-dupes">
+                <div className="newtask-dupes-title">This looks like existing work — nothing was created:</div>
+                {dupes.candidates.map((c) => (
+                  <div key={c.id} className="newtask-dupe-row">
+                    <span className="newtask-dupe-name">
+                      #{c.id} {c.name}
+                      <em>{c.status === "wfhuman" ? "waiting on human" : "in progress"}</em>
+                    </span>
+                    <button className="newtask-dupe-attach" disabled={phase === "busy"}
+                      onClick={() => { setCardChoice(c.id); submit(dupes.mode, { existingProjectId: c.id }); }}>
+                      Attach to #{c.id}
+                    </button>
+                  </div>
+                ))}
+                <button className="newtask-dupe-force" disabled={phase === "busy"}
+                  onClick={() => submit(dupes.mode, { force: true })}>
+                  Create new card anyway
+                </button>
+              </div>
+            )}
 
             <div className="newtask-actions">
               <button className="newtask-primary" disabled={!canSubmit} onClick={() => submit("spawn")}>

@@ -230,6 +230,9 @@ app.post("/api/dispatch", requireAdmin, async (req, res) => {
     scheduleCalendarSync();
     res.status(201).json(result);
   } catch (err) {
+    if (err.code === "DUPLICATE_CANDIDATES") {
+      return res.status(409).json({ error: err.message, candidates: err.candidates });
+    }
     console.error("POST /api/dispatch error:", err.message);
     res.status(400).json({ error: err.message });
   }

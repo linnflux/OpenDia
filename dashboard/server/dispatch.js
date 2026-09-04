@@ -13,6 +13,7 @@ import { resolve } from "path";
 import {
   createProject, getProjectById, updateProject,
   createCompany, getCompanyById, findSupervisorCard,
+  matchProjectCandidates,
 } from "./db.js";
 import { createNotionTask } from "./notion.js";
 import { resolveFreeSession, spawnSession } from "./runroom_build.js";
@@ -114,6 +115,25 @@ export async function runDispatch(body, requesterEmail) {
     if (!company && project.company_id) company = getCompanyById(project.company_id);
     record("card", true, `using existing card #${project.id} — ${project.name}`);
   } else {
+    // Duplicate guard: an open card for the same company whose name shares
+    // task text is probably this same work arriving through a second door
+    // (inbox pipeline vs "+ New"). Score >= 4 means at least one shared
+    // name token beyond the client match; division-only (3) and client-only
+    // relaxed matches (1) pass freely. body.force = operator said "create
+    // new anyway", and it stays honest because the guard already showed them
+    // the candidates.
+    if (!body.force && company) {
+      const dupes = (matchProjectCandidates(company.name, division || "", task, 3) || [])
+        .filter((c) => ["in_progress", "wfhuman"].includes(c.status) && (c.score || 0) >= 4);
+      if (dupes.length) {
+        const err = new Error(`possible duplicate of open card #${dupes[0].id} — ${dupes[0].name}`);
+        err.code = "DUPLICATE_CANDIDATES";
+        err.candidates = dupes.map(({ id, name, status, score, company_short }) => ({
+          id, name, status, score, company_short,
+        }));
+        throw err;
+      }
+    }
     project = createProject({
       name: task.trim(),
       companyName: company?.name || null,
