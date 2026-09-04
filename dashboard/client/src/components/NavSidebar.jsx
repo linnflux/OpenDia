@@ -66,6 +66,11 @@ const NAV_ICONS = {
       <rect x="10.5" y="6.5" width="2.5" height="5.5" rx="0.5" />
     </svg>
   ),
+  system: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1.5 8h2.5l1.5-4 2.5 7 1.5-3h4" />
+    </svg>
+  ),
   billing: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="1.5" y="3.5" width="12" height="8" rx="1.5" />

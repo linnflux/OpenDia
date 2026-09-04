@@ -11,6 +11,7 @@ import { registerMailroomRoutes } from "./mailroom.js";
 import { mountAgents } from "./agents.js";
 import { registerHandoffRoutes } from "./handoffs.js";
 import { mountSocal } from "./socal.js";
+import { registerSystemRoutes } from "./system.js";
 import { requireLinnfluxUser, requireAdmin } from "./auth.js";
 import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession, reorderProjects, matchProject, matchProjectCandidates, createProject, createCompany, getAllInboxItems, updateInboxItem, deleteInboxItem, ensureInboxTable, getInboxItemById, ensureClientAliasesTable, getAllClientAliases, insertClientAlias, getInboxItemsByProject, ensureProjectForInbox, getProcessedGmailIds, moveProjectToTop, getStaleInProgressProjects, getAllCompanies, getWfHumanProjects, getOpenInboxCount, getRecentInbox, getProjectsByNotionIds, ensureProjectsColumns, ensureAgentsTables } from "./db.js";
 import { runDispatch } from "./dispatch.js";
@@ -1335,6 +1336,9 @@ registerHandoffRoutes(app);
 
 // SoCal admin view (managed social clients)
 mountSocal(app, requireAdmin);
+
+// System health readout (admin; polled only while the System view is open)
+registerSystemRoutes(app);
 
 // Second client, same API, same auth. Mounted before the dashboard
 // catch-all so /prm/* never falls through to the dashboard SPA. Built from

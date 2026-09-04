@@ -164,7 +164,8 @@ body.has-bg::before {
      own), so each needs its own backdrop. Kept lighter than the sidebar:
      ~34 cards can be in the DOM at once and every backdrop-filter is a
      separate compositing layer. */
-  body.has-bg .card {
+  body.has-bg .card,
+  body.has-bg .sys-card {
     background: color-mix(in srgb, var(--bg-card) var(--glass-card), transparent);
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
     backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(1.25);
@@ -223,6 +224,7 @@ body.has-bg::before {
   body.has-bg .nav-sidebar,
   body.has-bg .status-filter-pill,
   body.has-bg .card,
+  body.has-bg .sys-card,
   body.has-bg .agents-panel,
   body.has-bg .agent-hero {
     -webkit-backdrop-filter: none;
@@ -233,6 +235,7 @@ body.has-bg::before {
   body.has-bg .status-filter-pill,
   body.has-bg .agent-hero { background: var(--bg-surface); }
   body.has-bg .card,
+  body.has-bg .sys-card,
   body.has-bg .agents-panel { background: var(--bg-card); }
 
   body.has-bg .modal-backdrop {
@@ -7786,3 +7789,98 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 
 .client-autocomplete-item.create { font-style: italic; color: var(--accent); }
+
+/* ---- System health view -------------------------------------------------- */
+/* Charts follow the dataviz rules: thin recessive marks, fixed y-domains,
+   values always in text tokens beside any status color (never color-alone). */
+
+.sys-view { padding: 0.25rem 0 2rem; }
+.sys-header { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 1rem; }
+.sys-header h2 { margin: 0; font-size: 1.15rem; }
+.sys-header-note { font-size: 0.8rem; color: var(--text-secondary); }
+.sys-loading { color: var(--text-secondary); padding: 2rem 0; }
+
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.9rem;
+}
+.sys-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.sys-card-wide { grid-column: span 2; }
+@media (max-width: 640px) { .sys-card-wide { grid-column: span 1; } }
+
+.sys-card-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.sys-hero { font-size: 1.9rem; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sys-hero-unit { font-size: 1rem; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+.sys-hero.warn { color: var(--warning); }
+.sys-hero.crit { color: var(--danger); }
+.sys-stat { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.sys-stat-row { display: flex; gap: 1.4rem; flex-wrap: wrap; }
+.sys-sub { font-size: 0.8rem; color: var(--text-secondary); }
+.sys-sub.warn, .sys-line.warn, .sys-disk-pct.warn { color: var(--warning); }
+.sys-sub.crit, .sys-line.crit, .sys-disk-pct.crit { color: var(--danger); }
+.sys-note { font-style: italic; margin-top: 0.2rem; }
+
+.sys-meter { height: 6px; border-radius: 4px; background: color-mix(in srgb, var(--text-secondary) 18%, transparent); overflow: hidden; }
+.sys-meter-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width 0.4s ease; }
+.sys-meter-fill.warn { background: var(--warning); }
+.sys-meter-fill.crit { background: var(--danger); }
+
+.sys-spark { position: relative; margin-top: auto; padding-top: 0.3rem; }
+.sys-spark svg { display: block; width: 100%; height: 46px; }
+.sys-spark-empty { font-size: 0.78rem; color: var(--text-secondary); height: 46px; display: flex; align-items: center; }
+.sys-spark-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.sys-spark-area { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: none; }
+.sys-spark-crosshair { stroke: color-mix(in srgb, var(--text-secondary) 45%, transparent); stroke-width: 1; }
+.sys-spark-dot { fill: var(--accent); }
+.sys-spark-tip {
+  position: absolute;
+  top: -1.35rem;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.4rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.sys-line { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; min-width: 0; }
+.sys-svc-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-services { display: flex; flex-direction: column; gap: 0.3rem; }
+.sys-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.sys-dot.ok { background: var(--timer-open); }
+.sys-dot.warn { background: var(--warning); }
+.sys-dot.crit { background: var(--danger); }
+.sys-dot.muted { background: color-mix(in srgb, var(--text-secondary) 45%, transparent); }
+
+.sys-disk-row { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.4rem; }
+.sys-disk-head { display: flex; justify-content: space-between; font-size: 0.85rem; }
+.sys-disk-mount { font-weight: 600; }
+.sys-disk-pct { font-variant-numeric: tabular-nums; }
+
+.sys-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.sys-table th {
+  text-align: left; font-weight: 600; color: var(--text-secondary);
+  padding: 0.15rem 0.5rem 0.3rem 0; border-bottom: 1px solid var(--border);
+}
+.sys-table td { padding: 0.25rem 0.5rem 0.25rem 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
+.sys-table .sys-num, .sys-table th:nth-child(n+2) { text-align: right; font-variant-numeric: tabular-nums; }
