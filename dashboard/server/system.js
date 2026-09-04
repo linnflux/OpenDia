@@ -15,7 +15,6 @@ import { DB_PATH } from "./config.js";
 const WATCHED_UNITS = [
   "opendia-dashboard", "opendia-rooms", "cloudflared-opendia",
   "mcp-notion", "mcp-google-workspace", "mcp-square", "mcp-toggl",
-  "tmux",
 ];
 
 function tryProbe(fn) {
@@ -97,9 +96,23 @@ function procInfo() {
 
 // ---- tmux -----------------------------------------------------------------
 
+// tmux is NOT judged by its systemd unit: the unit only matters at boot, and
+// a manually-started server (unit inactive) is still a healthy server. What
+// the operator cares about is (a) server up and (b) will it come back at boot.
 function tmuxInfo() {
   const out = tryProbe(() => execFileSync("tmux", ["ls"], { timeout: 3000 }).toString());
-  return { sessions: out ? out.trim().split("\n").filter(Boolean).length : 0 };
+  let bootEnabled = null;
+  try {
+    bootEnabled = execFileSync("systemctl", ["--user", "is-enabled", "tmux"], { timeout: 3000 }).toString().trim() === "enabled";
+  } catch (e) {
+    const s = (e.stdout || "").toString().trim();
+    bootEnabled = s ? s === "enabled" : null; // "disabled" exits nonzero but prints
+  }
+  return {
+    running: out != null,
+    sessions: out ? out.trim().split("\n").filter(Boolean).length : 0,
+    bootEnabled,
+  };
 }
 
 // ---- systemd user units ---------------------------------------------------

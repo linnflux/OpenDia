@@ -181,6 +181,13 @@ export default function SystemHealth() {
             <div><div className="sys-stat">{procs?.claude?.count ?? "—"}</div><div className="sys-sub">claude · {fmtGb((procs?.claude?.rssMb || 0) * 1048576)}</div></div>
             <div><div className="sys-stat">{procs?.node?.count ?? "—"}</div><div className="sys-sub">node · {fmtGb((procs?.node?.rssMb || 0) * 1048576)}</div></div>
           </div>
+          <div className={`sys-line ${!tmux?.running ? "crit" : tmux?.bootEnabled === false ? "warn" : ""}`}>
+            <Dot lvl={!tmux?.running ? "crit" : tmux?.bootEnabled === false ? "warn" : "ok"} />
+            <span className="sys-svc-name">tmux server {tmux?.running ? "running" : "DOWN"}</span>
+            <span className="sys-sub">
+              {tmux?.bootEnabled == null ? "" : tmux.bootEnabled ? "auto-start at boot: enabled" : "auto-start at boot: DISABLED"}
+            </span>
+          </div>
         </div>
 
         <div className="sys-card">
