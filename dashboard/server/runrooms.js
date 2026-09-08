@@ -6,6 +6,7 @@ import {
   gateForSession, captureLiveTail, deliver as sendToSession, firstNameOf,
   MAX_SEND_CHARS, sessionPlanFile, PLANS_DIR,
 } from "./session_gate.js";
+import { getProjectById } from "./db.js";
 
 // Runrooms — read-only API over ~/OpenDia/runrooms/<tmux-session>/plan.json.
 //
@@ -124,12 +125,22 @@ export function registerRunroomRoutes(app) {
         }
         if (working) lastWorked.set(session, Date.now());
         const mtime = planMtime(session);
+        // The card is the ledger of the work; a room whose card is completed
+        // is resolved no matter what its own plan.json still says (a session
+        // that went idle mid-plan never flips its status). plan.json stays
+        // read-only — resolution is derived, never written back.
+        let cardStatus = null;
+        if (plan.card_id != null) {
+          try { cardStatus = getProjectById(plan.card_id)?.status ?? null; } catch {}
+        }
         return {
           session,
           plan_mtime: mtime,
           activity: Math.max(lastWorked.get(session) || 0, mtime || 0),
           title: plan.title,
           status: plan.status,
+          card_status: cardStatus,
+          resolved: plan.status !== "active" || cardStatus === "completed",
           card_id: plan.card_id,
           card_name: plan.card_name,
           company: plan.company,
@@ -142,13 +153,14 @@ export function registerRunroomRoutes(app) {
           needs,
         };
       })
-      // Active rooms first; within active, most recent activity first —
-      // currently-working rooms carry a just-refreshed timestamp so they top
-      // the list, and a room keeps its rank after it stops thinking until
-      // another room out-works it. Needs-attention then newest as tiebreaks
-      // (only reachable when activity ties, e.g. right after a restart).
+      // Unresolved rooms first (the client renders resolved ones collapsed);
+      // within each group, most recent activity first — currently-working
+      // rooms carry a just-refreshed timestamp so they top the list, and a
+      // room keeps its rank after it stops thinking until another room
+      // out-works it. Needs-attention then newest as tiebreaks (only
+      // reachable when activity ties, e.g. right after a restart).
       .sort((a, b) =>
-        (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1)
+        (a.resolved ? 1 : 0) - (b.resolved ? 1 : 0)
         || (b.activity || 0) - (a.activity || 0)
         || (a.needs ? 0 : 1) - (b.needs ? 0 : 1)
         || (b.created || "").localeCompare(a.created || ""));

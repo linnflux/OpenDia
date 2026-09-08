@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { marked } from "marked";
 import { DIVISION_COLORS, DIVISION_WORDMARKS } from "../constants.js";
+import RoomListCard from "./RoomListCard.jsx";
 import {
   StateGlyph, decorateMarkdown, primeAudio, playDoneChime, ThinkingStrip,
   GATE_REASONS, firstNameOf, DialogCard, LiveOutput, Composer,
@@ -325,6 +326,10 @@ export default function Runroom({ activeTimerIds, me, onOpenProject, initialSess
   // operator on the list.
   const [selected, setSelected] = useState(initialSession);
   const [autoOpened, setAutoOpened] = useState(!!initialSession);
+  const [showResolved, setShowResolved] = useState(false);
+  // Two-click confirm for "Complete card": holds the session whose button is
+  // armed; any other click (or completing) disarms it.
+  const [confirmComplete, setConfirmComplete] = useState(null);
 
   // Prime the audio context on the first real gesture anywhere in the view,
   // so the completion chime is allowed to sound later.
@@ -345,18 +350,32 @@ export default function Runroom({ activeTimerIds, me, onOpenProject, initialSess
       .catch(() => setRooms([]));
   }, []);
 
+  // Completing the card resolves every room bound to it (the card is the
+  // ledger of the work); the existing PATCH machinery also pushes the
+  // Completed status to Notion. The refreshed list moves the room into the
+  // collapsed Resolved section — that movement is the confirmation.
+  const completeCard = useCallback((cardId) => {
+    setConfirmComplete(null);
+    fetch(`/api/projects/${cardId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "completed" }),
+    }).then(() => fetchRooms()).catch(() => {});
+  }, [fetchRooms]);
+
   useEffect(() => {
     fetchRooms();
     const t = setInterval(fetchRooms, 5000);
     return () => clearInterval(t);
   }, [fetchRooms]);
 
-  // Exactly one active room → it is almost certainly why the operator is
-  // here, so open it. Only once, so backing out to the list sticks.
+  // Exactly one open (unresolved) room → it is almost certainly why the
+  // operator is here, so open it. Only once, so backing out to the list
+  // sticks. Resolved rooms (own status, or card completed) never auto-open.
   useEffect(() => {
     if (autoOpened || selected || !rooms) return;
-    const active = rooms.filter((r) => r.status === "active");
-    if (active.length === 1) { setSelected(active[0].session); setAutoOpened(true); }
+    const open = rooms.filter((r) => r.status === "active" && !r.resolved);
+    if (open.length === 1) { setSelected(open[0].session); setAutoOpened(true); }
   }, [rooms, selected, autoOpened]);
 
   if (selected) {
@@ -374,14 +393,17 @@ export default function Runroom({ activeTimerIds, me, onOpenProject, initialSess
 
   if (rooms === null) return <div className="loading">Loading runrooms...</div>;
 
-  const active = (rooms || []).filter((r) => r.status === "active");
-  const finished = (rooms || []).filter((r) => r.status !== "active");
+  // "Open" = the room's own plan is active AND its card isn't completed; the
+  // server derives `resolved` from both. Resolved rooms collapse at the
+  // bottom — history worth keeping, not clutter worth scrolling.
+  const open = (rooms || []).filter((r) => !r.resolved);
+  const resolvedRooms = (rooms || []).filter((r) => r.resolved);
 
   const heading = (
     <header className="runroom-list-header">
       <h1 className="runroom-list-heading">Runrooms</h1>
       <span className="runroom-list-count">
-        {active.length} active{finished.length > 0 && <> &middot; {finished.length} finished</>}
+        {open.length} open{resolvedRooms.length > 0 && <> &middot; {resolvedRooms.length} resolved</>}
       </span>
     </header>
   );
@@ -398,57 +420,72 @@ export default function Runroom({ activeTimerIds, me, onOpenProject, initialSess
     );
   }
 
-  // Same wordmark-or-pill fallback the room header uses, at list scale.
+  // Shared card (RoomListCard) with the runroom ring grammar: motion means
+  // thinking, amber means your move — working = orbiting green ring (mid-turn,
+  // leave it alone); needs = steady amber ring (waiting on the operator — a
+  // dialog, an idle prompt, or a dead session); resolved = no ring, dimmed.
+  // Quick actions live in a rail BESIDE the card, not inside it — the card is
+  // itself a <button>, and nesting interactive elements breaks clicks.
   const roomItem = (r) => {
-    const wordmark = DIVISION_WORDMARKS[r.division];
-    const colors = DIVISION_COLORS[r.division] || { bg: "#6b7280", text: "#fff" };
-    const live = r.status === "active";
+    const live = r.status === "active" && !r.resolved;
     return (
-      <button
-        key={r.session}
-        // Motion means thinking, amber means your move: working = orbiting
-        // green ring (mid-turn, leave it alone); needs = steady amber ring
-        // (waiting on the operator — a dialog, an idle prompt, or a dead
-        // session); finished = no ring, dimmed.
-        className={`runroom-list-item${live ? (r.working ? " working" : " needs") : " finished"}`}
-        onClick={() => setSelected(r.session)}
-      >
-        <span className="runroom-list-brand">
-          {wordmark ? (
-            <img src={wordmark} alt={r.division} className="runroom-list-mark" />
-          ) : (
-            <span className="runroom-division-pill" style={{ backgroundColor: colors.bg, color: colors.text }}>
-              {r.division || "?"}
-            </span>
-          )}
-        </span>
-        <span className="runroom-list-title">{r.title}</span>
-        {live && (
-          <span className={`runroom-list-state ${r.working ? "working" : r.needs || "input"}`}>
-            {r.working ? "thinking…"
+      <div className="room-card-row" key={r.session}>
+        <RoomListCard
+          ringClass={live ? (r.working ? " working" : " needs") : " finished"}
+          onClick={() => setSelected(r.session)}
+          division={r.division}
+          company={r.company}
+          title={r.title}
+          stateClass={live ? (r.working ? "working" : r.needs || "input") : ""}
+          stateLabel={live
+            ? (r.working ? "thinking…"
               : r.needs === "dialog" ? "decision waiting"
               : r.needs === "gone" ? "session gone"
-              : "your move"}
+              : "your move")
+            : ""}
+          metaParts={[
+            `${r.steps_done}/${r.steps_total} steps`,
+            r.resolved ? (r.card_status === "completed" ? "card completed" : r.status) : "",
+          ]}
+        />
+        {r.card_id != null && (
+          <span className="room-card-actions">
+            {onOpenProject && (
+              <button className="room-act" title={`Open card #${r.card_id}`}
+                onClick={() => onOpenProject(r.card_id)}>
+                Card #{r.card_id}
+              </button>
+            )}
+            {r.card_status && r.card_status !== "completed" && (
+              confirmComplete === r.session ? (
+                <button className="room-act confirm" onClick={() => completeCard(r.card_id)}>
+                  Confirm ✓
+                </button>
+              ) : (
+                <button className="room-act" title="Mark the card completed — resolves this room"
+                  onClick={() => setConfirmComplete(r.session)}>
+                  ✓ Complete
+                </button>
+              )
+            )}
           </span>
         )}
-        <span className="runroom-list-meta">
-          {r.company} &middot; {r.steps_done}/{r.steps_total}
-          {!live && <> &middot; {r.status}</>}
-        </span>
-      </button>
+      </div>
     );
   };
 
   return (
     <div className="runroom-list">
       {heading}
-      {active.length > 0
-        ? active.map(roomItem)
-        : <div className="runroom-list-none">No active runrooms.</div>}
-      {finished.length > 0 && (
+      {open.length > 0
+        ? open.map(roomItem)
+        : <div className="runroom-list-none">No open runrooms.</div>}
+      {resolvedRooms.length > 0 && (
         <>
-          <div className="runroom-list-section">Finished</div>
-          {finished.map(roomItem)}
+          <button className="runroom-resolved-toggle" onClick={() => setShowResolved((v) => !v)}>
+            {showResolved ? "▾" : "▸"} Resolved ({resolvedRooms.length})
+          </button>
+          {showResolved && resolvedRooms.map(roomItem)}
         </>
       )}
     </div>
