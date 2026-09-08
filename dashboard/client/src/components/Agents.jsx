@@ -103,13 +103,13 @@ function OperatorInbox({ onOpenProject }) {
             <span className={`agents-queue-status action-result-${res.status}`}>{res.status}</span>
           ) : (
             <>
-              {a.kind === "git_push" && (
+              {(a.kind === "git_push" || a.kind === "card_patch") && (
                 <button
                   className="agents-inbox-approve"
                   disabled={busyAction === a.id}
                   onClick={(e) => { e.stopPropagation(); runAction(a, "approve"); }}
                 >
-                  {busyAction === a.id ? "Pushing…" : "Approve & push"}
+                  {busyAction === a.id ? "Applying…" : a.kind === "git_push" ? "Approve & push" : "Approve & apply"}
                 </button>
               )}
               <button
@@ -126,6 +126,12 @@ function OperatorInbox({ onOpenProject }) {
         {(open || res?.result) && (
           <div className="agents-queue-detail">
             {a.body && <pre className="agents-inbox-evidence">{a.body}</pre>}
+            {a.patch && (
+              <div className="agents-queue-meta">
+                Will apply: {Object.entries(a.patch).map(([k, v]) =>
+                  k === "roll_into" ? `roll into #${v}` : `${k} → ${v || "(cleared)"}`).join(" · ")}
+              </div>
+            )}
             {res?.result && <div className="agents-run-note">{res.result}</div>}
           </div>
         )}

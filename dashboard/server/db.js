@@ -1134,6 +1134,14 @@ export function createOperatorAction({ kind, title, body, action, source, findin
         .run(title, body || null, action ? JSON.stringify(action) : null, source || null, open.id);
       return db.prepare("SELECT * FROM operator_actions WHERE id = ?").get(open.id);
     }
+    // A dismissal is an answer, not a miss: don't re-file the same finding
+    // for two weeks — recurring sweeps would otherwise nag about every
+    // suggestion the operator already said no to.
+    const dismissed = db.prepare(`
+      SELECT id FROM operator_actions WHERE finding_key = ? AND status = 'dismissed'
+        AND resolved_at > datetime('now', '-14 days')
+    `).get(findingKey);
+    if (dismissed) return { id: dismissed.id, deduped: "recently-dismissed" };
   }
   const info = db.prepare(`
     INSERT INTO operator_actions (kind, title, body, action, source, finding_key)

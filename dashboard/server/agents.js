@@ -1345,6 +1345,21 @@ export function mountAgents(app) {
     }
   });
 
+  // What an action's Approve button will actually execute, spelled out for
+  // the UI — the evidence body is prose, but the click applies exactly
+  // `patch`, and the operator must see that before clicking (lesson from
+  // the first live card_patch: the body narrated more than the click did).
+  const shapeOperatorAction = (a) => {
+    let patch = null;
+    if (a.kind === "card_patch") {
+      try { patch = JSON.parse(a.action || "null")?.patch || null; } catch {}
+    }
+    return {
+      id: a.id, kind: a.kind, title: a.title, body: a.body,
+      source: a.source, at: a.created_at, ...(patch ? { patch } : {}),
+    };
+  };
+
   // The operator's terminus of the pipeline: what got DONE and what was
   // ESCALATED, as a dismissible inbox. Derived from the same verdict ledger
   // the review-queue reads (7-day window) — the only persisted state is the
@@ -1356,13 +1371,7 @@ export function mountAgents(app) {
     try {
       const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
       if (!supervisor) {
-        return res.json({
-          items: [],
-          actions: listOpenOperatorActions().map((a) => ({
-            id: a.id, kind: a.kind, title: a.title, body: a.body,
-            source: a.source, at: a.created_at,
-          })),
-        });
+        return res.json({ items: [], actions: listOpenOperatorActions().map(shapeOperatorAction) });
       }
       const since = new Date(Date.now() - 7 * 24 * 3600 * 1000)
         .toISOString().slice(0, 19).replace("T", " ");
@@ -1409,11 +1418,7 @@ export function mountAgents(app) {
       // One-click actions ride alongside the derived verdict items: these
       // are first-class rows (see handoffs.js), resolved by their own
       // approve/dismiss routes rather than the ack overlay.
-      const actions = listOpenOperatorActions().map((a) => ({
-        id: a.id, kind: a.kind, title: a.title, body: a.body,
-        source: a.source, at: a.created_at,
-      }));
-      res.json({ items: out, actions });
+      res.json({ items: out, actions: listOpenOperatorActions().map(shapeOperatorAction) });
     } catch (err) {
       console.error("GET /api/agents/operator-inbox error:", err.message);
       res.status(500).json({ error: err.message });

@@ -6,8 +6,9 @@ import { deliver, MAX_SEND_CHARS } from "./session_gate.js";
 import {
   createHandoff, getPendingHandoffs, recordHandoffAttempt,
   createOperatorAction, getOperatorActionById, listOpenOperatorActions,
-  resolveOperatorAction,
+  resolveOperatorAction, getProjectById, updateProject,
 } from "./db.js";
+import { updateNotionTaskStatus } from "./notion.js";
 
 // handoffs.js — routing work to whoever owns it.
 //
@@ -132,7 +133,80 @@ function runGitPush(action) {
   return out || `pushed ${branch} to ${remote}`;
 }
 
-const ACTION_KINDS = new Set(["git_push", "notice"]);
+// ── The card_patch executor ────────────────────────────────────────────────
+// One-click board hygiene: the action carries the exact patch AND an
+// `expected` snapshot of the card as it looked at scan time. Same safety
+// story as git_push's HEAD-sha check — if the card moved after the scan, the
+// evidence is stale and the click fails loudly instead of writing over
+// someone's newer state.
+const PATCHABLE_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
+const NOTION_STATUS_BY_CARD_STATUS = {
+  in_progress: "In Progress", wfhuman: "WFR", completed: "Completed",
+};
+
+function validateCardPatch(a) {
+  if (!a || !Number.isInteger(Number(a.project_id))) return "action needs project_id";
+  const patch = a.patch || {};
+  const keys = Object.keys(patch);
+  if (!keys.length || keys.some((k) => !["status", "next_step", "roll_into"].includes(k))) {
+    return "patch may only set status, next_step, and/or roll_into";
+  }
+  if (patch.roll_into !== undefined) {
+    const target = Number(patch.roll_into);
+    if (!Number.isInteger(target) || target === Number(a.project_id)) {
+      return "roll_into must be a different card's id";
+    }
+  }
+  if (patch.status !== undefined && !PATCHABLE_STATUSES.has(patch.status)) {
+    return `bad status "${patch.status}"`;
+  }
+  if (patch.next_step !== undefined &&
+      (typeof patch.next_step !== "string" || !patch.next_step.trim() || patch.next_step.length > 200)) {
+    return "next_step must be a non-empty string ≤200 chars";
+  }
+  if (!a.expected || a.expected.status === undefined || a.expected.next_step === undefined) {
+    return "action needs an expected {status, next_step} snapshot";
+  }
+  return null;
+}
+
+function runCardPatch(action) {
+  const pid = Number(action.project_id);
+  const project = getProjectById(pid);
+  if (!project) throw new Error(`card ${pid} not found`);
+  if (project.status !== action.expected.status ||
+      (project.next_step || null) !== (action.expected.next_step || null)) {
+    throw new Error(`card ${pid} changed since the scan (now ${project.status} / "${(project.next_step || "").slice(0, 60)}") — re-run hygiene before applying`);
+  }
+  // A merge: complete this card and stamp WHERE the work went, so anyone
+  // finding the card later sees it was rolled into the survivor. Existing
+  // notes are preserved under the stamp; explicit status/next_step in the
+  // same patch override the merge defaults (completed / cleared).
+  const { roll_into, ...patch } = action.patch;
+  if (roll_into !== undefined) {
+    const survivor = getProjectById(Number(roll_into));
+    if (!survivor) throw new Error(`roll_into card ${roll_into} not found`);
+    const stamp = `Rolled into #${survivor.id} ${survivor.name} — ${new Date().toISOString().slice(0, 10)}`;
+    patch.notes = project.notes ? `${stamp}\n\n${project.notes}` : stamp;
+    if (patch.status === undefined) patch.status = "completed";
+    if (patch.next_step === undefined) patch.next_step = "";
+  }
+  updateProject(pid, patch);
+  const changes = Object.entries(patch)
+    .filter(([k]) => k !== "notes")
+    .map(([k, v]) => `${k} → ${String(v).slice(0, 80)}`);
+  if (roll_into !== undefined) changes.unshift(`rolled into #${roll_into}`);
+  action.patch = patch;
+  // Best-effort Notion status sync, same mapping the PATCH route uses.
+  const notionStatus = NOTION_STATUS_BY_CARD_STATUS[action.patch.status];
+  if (project.notion_id && notionStatus) {
+    updateNotionTaskStatus(project.notion_id, notionStatus)
+      .catch((e) => console.error(`card_patch notion sync failed for ${pid}:`, e.message));
+  }
+  return `#${pid} ${project.name}: ${changes.join("; ")}`;
+}
+
+const ACTION_KINDS = new Set(["git_push", "card_patch", "notice"]);
 
 export function registerHandoffRoutes(app) {
   // Loopback callers (agent scan sessions) arrive as an admin user via
@@ -174,14 +248,21 @@ export function registerHandoffRoutes(app) {
         return res.status(400).json({ error: "git_push action needs repo, branch, head_sha" });
       }
     }
+    if (b.kind === "card_patch") {
+      const bad = validateCardPatch(b.action);
+      if (bad) return res.status(400).json({ error: bad });
+    }
     try {
       const row = createOperatorAction({
         kind: b.kind, title,
         body: typeof b.body === "string" ? b.body.slice(0, 8000) : null,
-        action: b.kind === "git_push" ? b.action : null,
+        action: b.kind === "notice" ? null : b.action,
         source: typeof b.source === "string" ? b.source.slice(0, 100) : null,
         findingKey: typeof b.finding_key === "string" ? b.finding_key.slice(0, 300) : null,
       });
+      if (row.deduped === "recently-dismissed") {
+        return res.json({ id: row.id, status: "deduped", detail: "operator dismissed this finding within 14 days" });
+      }
       res.json({ id: row.id, status: row.status });
     } catch (err) {
       console.error("POST /api/operator-actions error:", err.message);
@@ -193,12 +274,14 @@ export function registerHandoffRoutes(app) {
     const row = getOperatorActionById(Number(req.params.id));
     if (!row) return res.status(404).json({ error: "not found" });
     if (row.status !== "open") return res.status(409).json({ error: `already ${row.status}` });
-    if (row.kind !== "git_push") return res.status(400).json({ error: "nothing to execute for this kind" });
+    if (row.kind !== "git_push" && row.kind !== "card_patch") {
+      return res.status(400).json({ error: "nothing to execute for this kind" });
+    }
     let action;
     try { action = JSON.parse(row.action || "null"); } catch { action = null; }
     if (!action) return res.status(500).json({ error: "malformed action payload" });
     try {
-      const result = runGitPush(action);
+      const result = row.kind === "card_patch" ? runCardPatch(action) : runGitPush(action);
       resolveOperatorAction(row.id, "done", result);
       res.json({ id: row.id, status: "done", result });
     } catch (err) {
