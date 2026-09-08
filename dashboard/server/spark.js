@@ -493,6 +493,7 @@ async function buildBrief(project, runId, runDir, { maxLookbackDays = null } = {
       status: project.status,
       notes: project.notes,
       tags: project.tags,
+      goal: project.goal,
       next_step: project.next_step,
       notion_id: project.notion_id,
       tmux_session: project.tmux_session,
@@ -1399,6 +1400,7 @@ async function startRound(run, intent, note = "", opts = {}) {
       next_step: project.next_step,
       status: project.status,
       tmux_session: project.tmux_session,
+      goal: project.goal,
     },
     result: run.result,
   }, null, 2));
@@ -1833,7 +1835,12 @@ export function mountSpark(app) {
     if (existing && !existing.finishedAt) {
       return res.status(409).json({ error: "a Spark run is already active for this card", runId: existing.id });
     }
-    const active = [...runs.values()].filter((r) => !r.finishedAt).length;
+    // The cap limits concurrent COMPUTE. A "proposing" run's claude child has
+    // already exited — it is a parked recommendation waiting on a human, and
+    // recovery resurrects those across every restart, so counting them here
+    // walled off new sparks behind days-old undecided proposals. Same
+    // exclusion the ODA executor already uses.
+    const active = activeSparkCount({ excludeProposing: true });
     if (active >= MAX_CONCURRENT) {
       return res.status(429).json({ error: `${MAX_CONCURRENT} Spark runs are already going — wait for one to finish` });
     }
