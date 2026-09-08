@@ -30,8 +30,9 @@ import {
   getOperatorAckKeys, ackOperatorItems,
   getAllDuties, getDutyById, createDuty, updateDuty, deleteDuty,
   getAgentDuties, assignDuty, unassignDuty, markDutyRun, bumpDutyCursor,
-  listOpenOperatorActions,
+  listOpenOperatorActions, updateProject,
 } from "./db.js";
+import { updateNotionTaskStatus } from "./notion.js";
 import { drainPendingHandoffs } from "./handoffs.js";
 import {
   startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT,
@@ -841,6 +842,37 @@ async function waitForRunSettled(projectId) {
 // count moved) makes a run worth a second look.
 const reviewKey = (runId, rounds) => `${runId}:${rounds || 0}`;
 
+// The supervisor's one board write: a hold verdict may carry
+// reclass: "wfhuman" | "in_progress", flipping the card between the two
+// active statuses — wfhuman when the blocker is an external party (which
+// also removes the card from in_progress query rosters, so scanners stop
+// re-proposing work that is waiting on a human), and back to in_progress
+// when the wait has resolved. Bidirectional by design (Nick, 2026-09-07:
+// "we will likely end up doing this with leah as well"). Never touches
+// completed or ice; the server executes the flip off the verdict file —
+// the agent itself has no write access, same pattern as approvals.
+const RECLASSABLE = new Set(["in_progress", "wfhuman"]);
+
+function applySupervisorReclass(pid, v, state) {
+  const to = v.reclass;
+  if (!to) return null;
+  if (!RECLASSABLE.has(to)) return { ok: false, to, error: `bad reclass target "${to}"` };
+  const project = getProjectById(pid);
+  if (!project) return { ok: false, to, error: "card not found" };
+  if (!RECLASSABLE.has(project.status)) {
+    return { ok: false, to, error: `card is ${project.status} — reclass only moves between in_progress and wfhuman` };
+  }
+  if (project.status === to) return { ok: true, to, noop: true };
+  updateProject(pid, { status: to });
+  pushLog(state, "info", `Re-classed ${project.name}: ${project.status} → ${to}.`);
+  // Best-effort Notion sync, same mapping the PATCH route uses.
+  if (project.notion_id) {
+    updateNotionTaskStatus(project.notion_id, to === "wfhuman" ? "WFR" : "In Progress")
+      .catch((e) => console.error(`reclass notion sync failed for ${pid}:`, e.message));
+  }
+  return { ok: true, to };
+}
+
 function seenReviewKeys(agent) {
   const since = new Date(Date.now() - 48 * 3600 * 1000)
     .toISOString().slice(0, 19).replace("T", " ");
@@ -901,6 +933,10 @@ async function runSupervisorHeartbeat(agent, state) {
       reversible_only: true,
       max_approvals: agent.max_auto_approvals,
       shadow: !agent.autopilot,
+      // hold verdicts may carry reclass: one of these two statuses. wfhuman
+      // when the work is blocked on an external party and the card carries
+      // the wait date; in_progress when that wait has resolved.
+      reclass_targets: ["in_progress", "wfhuman"],
     },
     reviewables: reviewables.map((r) => ({
       project_id: r.projectId,
@@ -919,6 +955,7 @@ async function runSupervisorHeartbeat(agent, state) {
 
   const approved = [];   // {project_id, name, verdict, outcome?, redispatched?}
   const escalated = [];  // {project_id, name, reason, note, wouldApprove}
+  const held = [];       // {project_id, name, certitude, reason, reclass}
   let approvals = 0;
   const nameOf = (pid) => getProjectById(pid)?.name || `card ${pid}`;
 
@@ -947,7 +984,20 @@ async function runSupervisorHeartbeat(agent, state) {
       const pid = Number(v.project_id);
       if (!byPid.has(pid)) continue;
       const certitude = certOf(byPid.get(pid));
-      if (v.verdict === "hold") continue;
+      if (v.verdict === "hold") {
+        // A hold is a real verdict, not a skip: record it so the summary,
+        // Chat report, and queue overlay can show a parked item as parked
+        // (invisible holds cost a live confusion on 2026-09-07). The
+        // optional reclass rider executes here.
+        const rc = applySupervisorReclass(pid, v, state);
+        held.push({
+          project_id: pid, name: nameOf(pid), certitude,
+          reason: v.reason || "", note: v.escalation_note || "",
+          reclass: rc?.ok && !rc.noop ? rc.to : null,
+          ...(rc && !rc.ok ? { reclass_error: rc.error } : {}),
+        });
+        continue;
+      }
       if (Date.now() - state.startedAt > HEARTBEAT_MAX_MS - 5 * 60 * 1000) {
         escalated.push({ project_id: pid, name: nameOf(pid), certitude, reason: "ran out of window", note: v.escalation_note || "", wouldApprove: false });
         continue;
@@ -1041,7 +1091,7 @@ async function runSupervisorHeartbeat(agent, state) {
   const summary =
     `${shadowTag}Reviewed ${reviewables.length}, approved ${approved.length}` +
     `${approved.filter((a) => a.redispatched).length ? ` (${approved.filter((a) => a.redispatched).length} redispatched)` : ""}, ` +
-    `escalated ${escalated.length}.`;
+    `escalated ${escalated.length}${held.length ? `, held ${held.length}` : ""}.`;
 
   updateAgentRun(state.runId, {
     status: finalStatus,
@@ -1052,6 +1102,7 @@ async function runSupervisorHeartbeat(agent, state) {
       reviewed: reviewables.length,
       approved,
       escalated,
+      held,
       // The dedup ledger: what this pass looked at, keyed by run + round
       // count, so later heartbeats skip anything unchanged.
       reviewed_runs: reviewables.map((r) => ({
@@ -1076,6 +1127,9 @@ async function runSupervisorHeartbeat(agent, state) {
   }
   for (const e of escalated) {
     lines.push(`→ ${link(e.project_id, e.name)} — needs you${e.wouldApprove ? " [would approve]" : ""}`);
+  }
+  for (const h of held) {
+    lines.push(`⏸ ${link(h.project_id, h.name)} — held${h.reclass ? `, re-classed ${h.reclass}` : ""}`);
   }
   await notifyChat(agent.chat_webhook_url, lines.join("\n"));
 
@@ -1241,7 +1295,8 @@ export function mountAgents(app) {
         // Escalated first: a QA-escalated item sits in BOTH arrays (the QA
         // path never removes it from approved), and the escalation is the
         // later, binding judgment — it must win the latestVerdict slot.
-        for (const kind of ["escalated", "approved"]) {
+        // Held rides last; within one pass an item is held XOR decided.
+        for (const kind of ["escalated", "approved", "held"]) {
           for (const e of detail[kind] || []) {
             const row = { ...e, kind, at: run.started_at, shadow: shadowFor.get(e.project_id) ?? !supervisor.autopilot };
             processed.push(row);
@@ -1270,6 +1325,7 @@ export function mountAgents(app) {
               at: v.at, reason: v.reason || null, note: v.note || null,
               report_line: v.report_line || null,
               wouldApprove: v.wouldApprove ?? null, shadow: v.shadow,
+              reclass: v.reclass || null,
             } : null,
           };
         })

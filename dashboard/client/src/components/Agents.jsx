@@ -19,6 +19,7 @@ const QUEUE_STATUS_LABEL = {
   awaiting: "awaiting review",
   escalated: "escalated — needs you",
   approved: "approved",
+  held: "held ⏸",
 };
 
 // The operator's end of the pipeline: what got done and what was escalated,
@@ -318,6 +319,7 @@ function SupervisorQueue({ onOpenProject }) {
                         Verdict ({fmtQueueTime(p.verdict.at)}{p.verdict.shadow ? " · shadow" : ""}):{" "}
                         {p.verdict.reason || p.verdict.note || p.verdict.report_line || p.review_status}
                         {p.verdict.wouldApprove ? " — would approve on autopilot" : ""}
+                        {p.verdict.reclass ? ` — card re-classed ${p.verdict.reclass}` : ""}
                       </div>
                     )}
                   </div>
@@ -346,7 +348,8 @@ function SupervisorQueue({ onOpenProject }) {
                         {cardLink(e.project_id, e.name)}
                         {e.certitude != null && <span className="agents-run-certitude">{e.certitude}%</span>}
                         <span className={`agents-queue-status ${e.kind}`}>
-                          {e.kind === "approved" ? "approved ✓" : "escalated ↗"}{e.shadow ? " · shadow" : ""}
+                          {e.kind === "approved" ? "approved ✓" : e.kind === "held" ? "held ⏸" : "escalated ↗"}
+                          {e.shadow ? " · shadow" : ""}{e.reclass ? ` · → ${e.reclass}` : ""}
                         </span>
                       </>
                     ))}

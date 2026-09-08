@@ -7249,6 +7249,7 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .agents-queue-status.escalated { color: var(--warning); font-weight: 600; }
 .agents-queue-status.approved { color: var(--timer-open); }
+.agents-queue-status.held { color: var(--text-faint); font-style: italic; }
 .agents-queue-detail { padding: 0.15rem 0.15rem 0.7rem 0.9rem; }
 .agents-queue-step { font-size: 0.82rem; color: var(--text-primary); line-height: 1.45; }
 .agents-queue-meta { font-size: 0.74rem; color: var(--text-faint); margin-top: 0.25rem; }
