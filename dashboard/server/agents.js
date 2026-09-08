@@ -1351,12 +1351,18 @@ export function mountAgents(app) {
   // the first live card_patch: the body narrated more than the click did).
   const shapeOperatorAction = (a) => {
     let patch = null;
+    let projectId = null;
     if (a.kind === "card_patch") {
-      try { patch = JSON.parse(a.action || "null")?.patch || null; } catch {}
+      try {
+        const parsed = JSON.parse(a.action || "null");
+        patch = parsed?.patch || null;
+        projectId = Number(parsed?.project_id) || null;
+      } catch {}
     }
     return {
       id: a.id, kind: a.kind, title: a.title, body: a.body,
-      source: a.source, at: a.created_at, ...(patch ? { patch } : {}),
+      source: a.source, at: a.created_at,
+      ...(patch ? { patch } : {}), ...(projectId ? { project_id: projectId } : {}),
     };
   };
 

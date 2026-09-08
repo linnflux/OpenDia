@@ -98,6 +98,15 @@ function OperatorInbox({ onOpenProject }) {
         >
           <span className="agents-queue-when">{fmtQueueTime(a.at)}</span>
           <span className="agents-inbox-line agents-inbox-action-title">{a.title}</span>
+          {a.project_id && (
+            <button
+              className="agents-queue-cardlink"
+              title="Open the card"
+              onClick={(e) => { e.stopPropagation(); onOpenProject?.(a.project_id); }}
+            >
+              #{a.project_id} ↗
+            </button>
+          )}
           {a.source && <span className="agents-queue-status">{a.source}</span>}
           {res ? (
             <span className={`agents-queue-status action-result-${res.status}`}>{res.status}</span>
