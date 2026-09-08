@@ -354,7 +354,11 @@ def load_db_maps():
     by_notion = {r["notion_id"]: r for r in rows if r["notion_id"]}
     next_steps = []
     for r in rows:
-        if r["status"] not in ("in_progress", "wfhuman"):
+        # "ice" is included since the status reconciler started auto-parking
+        # far-dated cards there: an iced card's next_step date is exactly the
+        # date the work comes back, and dropping it from the calendar is how
+        # parked work dies.
+        if r["status"] not in ("in_progress", "wfhuman", "ice"):
             continue
         m = NEXT_STEP_RE.match(r["next_step"] or "")
         if m:

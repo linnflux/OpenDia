@@ -989,43 +989,91 @@ ensureClientAliasesTable();
 ensureProjectsColumns();
 ensureAgentsTables();
 
-// ── Running-timer → In Progress reconciler ────────────────────────────────────
-// A timer left running on an Ice/WFHuman/Completed card is invisible (the board
-// shows one status at a time), so a forgotten timer can run for days unseen. Any
-// card with a running timer is forced to In Progress so it surfaces in the column
-// that actually gets watched. Promote only, never demote — stopping a timer leaves
-// the card in In Progress, which is honest. Steady state writes nothing: we only
-// touch a card whose status actually differs.
+// ── Status reconciler ─────────────────────────────────────────────────────────
+// One pass every 60s, strict precedence; steady state writes nothing:
+//   1. Running timer → in_progress (promote + top of column + Notion). A timer
+//      left running on an Ice/WFHuman/Completed card is otherwise invisible,
+//      and this is also the standing-card escape: working on it forces it up.
+//   2. `standing` tag, no timer → ice. Missions aren't deadlines; they don't
+//      squat in In Progress.
+//   3. ice/in_progress cards with a dated next_step bounce on the date:
+//      within DUE_SOON_DAYS (or overdue) → in_progress; further out → ice.
+//   Never touched: wfhuman (waiting on a person is not parked), completed,
+//   and undated non-standing cards.
+// Promotions surface loudly (move-to-top + Notion push + calendar). Demotions
+// write quietly — no reorder, and "ice" has no Notion mapping by design.
+const DUE_SOON_DAYS = 3;
+const etDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+
 let reconcileInFlight = false;
-async function reconcileRunningTimers() {
+async function reconcileStatuses() {
   if (reconcileInFlight) return;
   reconcileInFlight = true;
   try {
     const timers = await getActiveTimers();
     let changed = false;
-    const seen = new Set();
+    const timered = new Set();
     for (const t of timers) {
       // Exact join only: project_id when present (dashboard-started), else
       // tmux_session (always written). Never the fuzzy matchProject here.
       const project = (t.project_id && getProjectById(t.project_id))
         || getProjectByTmuxSession(t.tmux_session);
-      if (!project || seen.has(project.id)) continue;
-      seen.add(project.id);
+      if (!project || timered.has(project.id)) continue;
+      timered.add(project.id);
       if (project.status === "in_progress") continue;
       moveProjectToTop(project.id, "in_progress");
       pushNotionStatus(project, "in_progress");
       changed = true;
       console.log(`reconciler: project ${project.id} (${project.name}) ${project.status} → in_progress (timer running)`);
     }
+
+    const today = etDay.format(new Date());
+    const soon = etDay.format(new Date(Date.now() + DUE_SOON_DAYS * 86_400_000));
+    for (const p of getAllProjects({ includeCompleted: false })) {
+      if (timered.has(p.id)) continue;
+      const standing = (p.tags || "").split(",").map((s) => s.trim()).includes("standing");
+      let target = null, why = null;
+      if (standing) {
+        target = "ice";
+        why = "standing, no timer";
+      } else if (p.status === "ice" || p.status === "in_progress") {
+        const m = (p.next_step || "").match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) {
+          const due = m[1];
+          if (p.status === "ice" && due >= today && due <= soon) {
+            // The alarm fires only NEAR its time: an iced card with a stale
+            // past date was parked on purpose and stays parked (re-date it to
+            // wake it). "3 days or less away" is a future-facing window.
+            target = "in_progress";
+            why = `due ${due}`;
+          } else if (p.status === "in_progress" && due > soon) {
+            // Once awake, overdue keeps a card up — only a genuinely far
+            // date parks it.
+            target = "ice";
+            why = `due ${due}, beyond ${DUE_SOON_DAYS}d`;
+          }
+        }
+      }
+      if (!target || target === p.status) continue;
+      if (target === "in_progress") {
+        moveProjectToTop(p.id, "in_progress");
+        pushNotionStatus(p, "in_progress");
+      } else {
+        updateProject(p.id, { status: "ice" });
+      }
+      changed = true;
+      console.log(`reconciler: project ${p.id} (${p.name}) ${p.status} → ${target} (${why})`);
+    }
+
     if (changed) scheduleCalendarSync();
   } catch (err) {
-    console.error("reconcileRunningTimers error:", err.message);
+    console.error("reconcileStatuses error:", err.message);
   } finally {
     reconcileInFlight = false;
   }
 }
-reconcileRunningTimers();
-setInterval(reconcileRunningTimers, 60_000);
+reconcileStatuses();
+setInterval(reconcileStatuses, 60_000);
 
 app.get("/api/inbox", (req, res) => {
   try {

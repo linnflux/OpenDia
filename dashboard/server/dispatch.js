@@ -124,7 +124,9 @@ export async function runDispatch(body, requesterEmail) {
     // the candidates.
     if (!body.force && company) {
       const dupes = (matchProjectCandidates(company.name, division || "", task, 3) || [])
-        .filter((c) => ["in_progress", "wfhuman"].includes(c.status) && (c.score || 0) >= 4);
+        // "ice" counts as open: the status reconciler auto-parks far-dated
+        // cards there, and a parked card is still the card this work belongs on.
+        .filter((c) => ["in_progress", "wfhuman", "ice"].includes(c.status) && (c.score || 0) >= 4);
       if (dupes.length) {
         const err = new Error(`possible duplicate of open card #${dupes[0].id} — ${dupes[0].name}`);
         err.code = "DUPLICATE_CANDIDATES";

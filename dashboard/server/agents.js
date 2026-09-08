@@ -302,7 +302,10 @@ function parkedRoster() {
     .filter(({ plan }) => plan.status === "parked" && plan.parked?.until && plan.parked.until <= today)
     .sort((a, b) => String(a.plan.parked.until).localeCompare(String(b.plan.parked.until)))
     .map(({ cardId }) => getProjectById(cardId))
-    .filter((p) => p && ["in_progress", "wfhuman"].includes(p.status)
+    // "ice" is a wakeable status: the reconciler auto-parks far-dated cards
+    // there, and a parked planroom coming due on an iced card is exactly the
+    // rebirth this roster exists for.
+    .filter((p) => p && ["in_progress", "wfhuman", "ice"].includes(p.status)
       && !busyIds.has(p.id) && lastSparkAt(p.id) < guardBefore);
 }
 
