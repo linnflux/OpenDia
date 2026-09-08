@@ -44,7 +44,9 @@ CHECKLIST = """
 Remaining human steps for {name}:
   1. Meta access: send docs/meta-access.md (filled with our Business ID); client
      partner-shares their FB Page + IG account; assign both to the system user;
-     then add meta_page_id + meta_ig_user_id to Config.
+     then add meta_page_id + meta_ig_user_id to Config AND page_id/ig_id to the
+     registry — the shared tick timer (tick_all.py) picks the client up from
+     the registry automatically, no per-client timer wiring.
   2. Review the researched style guide (specimen.png + the Config style keys)
      in the dashboard; the descriptor fields are drafts — curate them.
   3. Standing instructions from the intake form -> Config rows.
