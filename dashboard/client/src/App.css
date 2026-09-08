@@ -7909,3 +7909,33 @@ html.vt-no-target::view-transition-old(card-morph) {
   text-transform: uppercase; color: var(--text-faint);
 }
 .runroom-resolved-toggle:hover { color: var(--text-secondary); }
+
+/* ---- Runroom Park (nothing to do now; card date brings the work back) ---- */
+.runroom-park-btn {
+  font-family: inherit; font-size: 0.72rem; white-space: nowrap;
+  padding: 0.2rem 0.55rem; border-radius: var(--radius-sm);
+  background: none; border: 1px solid var(--border);
+  color: var(--text-secondary); cursor: pointer;
+}
+.runroom-park-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.runroom-park-panel {
+  margin: 0.6rem 0; padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.runroom-park-title { font-size: 0.8rem; font-weight: 600; }
+.runroom-park-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.runroom-park-row label { font-size: 0.8rem; color: var(--text-secondary); }
+.runroom-park-row input[type="date"] {
+  font-family: inherit; font-size: 0.82rem; padding: 0.25rem 0.4rem;
+  background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.runroom-park-action {
+  flex: 1; min-width: 220px; font-family: inherit; font-size: 0.82rem;
+  padding: 0.25rem 0.5rem; background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.runroom-park-note { font-size: 0.75rem; color: var(--text-secondary); }
+.runroom-park-err { font-size: 0.78rem; color: var(--danger); }

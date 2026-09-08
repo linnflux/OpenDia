@@ -22,7 +22,7 @@ import {
 // runroom/shared.jsx — Mailroom.jsx binds to a different session over the
 // same modal-gate machinery and reuses them unchanged.
 
-export function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
+export function RoomHeader({ plan, hasActiveTimer, onOpenProject, onPark }) {
   const wordmark = DIVISION_WORDMARKS[plan.division];
   const colors = DIVISION_COLORS[plan.division] || { bg: "#6b7280", text: "#fff" };
   const total = (plan.steps || []).length;
@@ -67,6 +67,11 @@ export function RoomHeader({ plan, hasActiveTimer, onOpenProject }) {
         <span className="runroom-progress">{done}/{total} done</span>
         {hasActiveTimer && <span className="runroom-timer-dot" title="Timer running on this card">&#9679; timer running</span>}
         {plan.created && <span className="runroom-created">opened {plan.created.replace("T", " ")}</span>}
+        {onPark && plan.status === "active" && (
+          <button className="runroom-park-btn" title="Nothing to do right now — wrap this room up; the card's dated next_step brings the work back" onClick={onPark}>
+            ⏸ Park
+          </button>
+        )}
         {plan.plan_mtime && (() => {
           // Steps-age readout: a session can be alive and productive while
           // never touching plan.json — without this line that room is
@@ -235,6 +240,55 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
       .catch((e) => setError(e.message));
   }, [session]);
 
+  // Park: nothing to do in this room right now. The card keeps a DATED
+  // next_step (the calendar + sweeps rebirth the work from it — a fresh plan,
+  // a fresh room), and the room is told to wrap itself up through the
+  // existing close route, so plan.json stays the session's to write. The
+  // close route also covers a dead session (server writes the status then).
+  const [park, setPark] = useState(null); // null | { date, action, busy, err }
+
+  const openPark = useCallback(async () => {
+    let next = "";
+    if (plan?.card_id != null) {
+      try {
+        const r = await fetch(`/api/projects/${plan.card_id}`);
+        if (r.ok) next = (await r.json()).next_step || "";
+      } catch {}
+    }
+    const m = next.match(/^(\d{4}-\d{2}-\d{2})(?:\s+\d{2}:\d{2})?:\s*(.*)$/);
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    setPark({
+      date: m?.[1] || tomorrow,
+      action: (m?.[2] || next || `Resume: ${plan?.title || ""}`).slice(0, 90),
+      busy: false, err: null,
+    });
+  }, [plan]);
+
+  const doPark = useCallback(async () => {
+    if (!park?.date) return;
+    setPark((p) => ({ ...p, busy: true, err: null }));
+    try {
+      if (plan?.card_id != null) {
+        await fetch(`/api/projects/${plan.card_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ next_step: `${park.date}: ${park.action}`.slice(0, 100) }),
+        });
+      }
+      const r = await fetch(`/api/runrooms/${encodeURIComponent(session)}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: `parked until ${park.date} — the card's next_step brings it back` }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      setPark(null);
+      fetchPlan();
+    } catch (e) {
+      setPark((p) => (p ? { ...p, busy: false, err: e.message } : p));
+    }
+  }, [park, plan, session, fetchPlan]);
+
   // Tighten the poll while live output is streaming — 1.2s reads as "live"
   // in the viewbox; 2.5s is plenty for everything else the room shows.
   const streaming = !!(plan?.live_output && plan?.gate?.working);
@@ -263,7 +317,31 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
       {showBack && (
         <button className="runroom-back" onClick={onBack}>&larr; all runrooms</button>
       )}
-      <RoomHeader plan={plan} hasActiveTimer={activeTimerIds?.has(plan.card_id)} onOpenProject={onOpenProject} />
+      <RoomHeader plan={plan} hasActiveTimer={activeTimerIds?.has(plan.card_id)} onOpenProject={onOpenProject} onPark={openPark} />
+      {park && (
+        <div className="runroom-park-panel">
+          <div className="runroom-park-title">Park this room</div>
+          <div className="runroom-park-row">
+            <label>Resume on</label>
+            <input type="date" value={park.date} disabled={park.busy}
+              onChange={(e) => setPark((p) => ({ ...p, date: e.target.value }))} />
+            <input className="runroom-park-action" value={park.action} disabled={park.busy}
+              maxLength={90}
+              onChange={(e) => setPark((p) => ({ ...p, action: e.target.value }))} />
+          </div>
+          <div className="runroom-park-note">
+            Writes the card's next_step (that date drives the calendar and the sweeps —
+            the work comes back as a fresh plan), then tells this session to wrap the room up.
+          </div>
+          {park.err && <div className="runroom-park-err">{park.err}</div>}
+          <div className="runroom-park-row">
+            <button className="runroom-act primary" disabled={park.busy || !park.date} onClick={doPark}>
+              {park.busy ? "Parking…" : "Park it"}
+            </button>
+            <button className="runroom-act" disabled={park.busy} onClick={() => setPark(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
       <div className="runroom-body">
         <aside className={`runroom-rail${railOpen ? "" : " collapsed"}`}>
           <button className="runroom-rail-toggle" onClick={() => setRailOpen((v) => !v)}
