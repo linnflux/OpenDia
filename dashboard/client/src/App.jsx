@@ -66,6 +66,11 @@ export default function App() {
   // One of the NAV_ITEMS keys. "tara" used to live here too; it is a filter on
   // the board (tag = tara), not a destination, so it is `taraOnly` below.
   const [view, setView] = useState("board");
+  // Bumped when the nav item for the CURRENT view is clicked again; keys
+  // <main> so the active view remounts — drill-in state (a selected agent, an
+  // open runroom) resets back to the view's landing list, while app-level
+  // state (board filters, data caches) survives untouched.
+  const [viewNonce, setViewNonce] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [theme, setTheme] = useState(getInitialTheme);
@@ -642,7 +647,18 @@ export default function App() {
             render as a labelless icon column. */}
         <NavSidebar
           view={view}
-          onChange={setView}
+          onChange={(key) => {
+            if (key === view) {
+              // Re-clicking the active item = "take me back to this view's
+              // top". Clear the app-level drill props too, or a remount
+              // would just re-open the same room/card via initial props.
+              setRunroomSession(null);
+              setPlanroomCard(null);
+              setViewNonce((n) => n + 1);
+            } else {
+              setView(key);
+            }
+          }}
           collapsed={sidebarCollapsed && !sidebarOpen}
           isAdmin={!!me?.is_admin}
           badges={{ inbox: pendingInbox, sweep: sweepAttention }}
@@ -650,7 +666,7 @@ export default function App() {
           onMobileClose={() => setSidebarOpen(false)}
         />
 
-        <main className="app-main">
+        <main className="app-main" key={`${view}:${viewNonce}`}>
           {view === "board" ? (
             loading ? (
               <div className="loading">Loading projects...</div>
