@@ -338,12 +338,53 @@ h1 .g {{ color:{accent}; }}
 .note {{ font-size:38px; font-weight:500; color:{ink}; opacity:.82; line-height:1.5; }}
 .chip {{ display:inline-block; margin-top:48px; background:{accent}; color:{chipink};
   font-size:34px; font-weight:800; padding:20px 38px; border-radius:10px; letter-spacing:.5px; }}
-.logo {{ position:absolute; right:72px; bottom:64px; max-width:300px; max-height:110px; display:block; }}
+.logo {{ position:absolute; right:72px; bottom:64px; max-width:360px; max-height:190px; display:block; }}
 .wordmark {{ position:absolute; right:80px; bottom:70px; font-size:40px; font-weight:900;
   color:{ink}; letter-spacing:-.5px; }}
 .url {{ position:absolute; left:80px; bottom:76px; font-size:27px; font-weight:600;
   color:{ink}; opacity:.55; letter-spacing:1px; }}
 """
+
+
+PHOTO_CSS = """
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+html,body {{ width:1080px; height:1080px; }}
+body {{ font-family:"Source Sans 3",Arial,sans-serif; -webkit-font-smoothing:antialiased; }}
+.card {{ position:relative; width:1080px; height:1080px; overflow:hidden; border-top:12px solid {accent}; }}
+.card img.bg {{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }}
+.shade {{ position:absolute; inset:0; background:
+  linear-gradient(180deg, {accent_hi} 0%, {accent_mid} 34%, {ink_deep} 82%); }}
+.stack {{ position:absolute; left:80px; right:80px; bottom:170px; color:#ffffff; }}
+.eyebrow {{ font-size:30px; font-weight:700; letter-spacing:4px; color:#ffffff; opacity:.85;
+  text-transform:uppercase; margin-bottom:30px; }}
+h1 {{ font-weight:900; font-size:{h1}px; line-height:1.04; letter-spacing:-1.5px; color:#ffffff;
+  text-shadow:0 2px 18px rgba(0,0,0,.35); }}
+h1 span {{ display:block; }}
+h1 .g {{ color:{accent_text}; }}
+.rule {{ height:7px; width:170px; background:{accent_text}; border-radius:4px; margin:38px 0 32px; }}
+.note {{ font-size:38px; font-weight:600; color:#ffffff; opacity:.92; line-height:1.5;
+  text-shadow:0 1px 10px rgba(0,0,0,.35); }}
+.chip {{ display:inline-block; margin-top:44px; background:{accent}; color:{chipink};
+  font-size:34px; font-weight:800; padding:20px 38px; border-radius:10px; letter-spacing:.5px; }}
+.logo {{ position:absolute; right:72px; bottom:64px; max-width:360px; max-height:190px; display:block;
+  filter:brightness(0) invert(1); opacity:.95; }}
+.wordmark {{ position:absolute; right:80px; bottom:70px; font-size:40px; font-weight:900;
+  color:#ffffff; letter-spacing:-.5px; }}
+.url {{ position:absolute; left:80px; bottom:76px; font-size:27px; font-weight:600;
+  color:#ffffff; opacity:.75; letter-spacing:1px; }}
+"""
+
+
+def _rgba(hexcolor, a):
+    r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({r},{g},{b},{a})"
+
+
+def _lighten(hexcolor, t):
+    """mix toward white by t (0..1)"""
+    r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+    r, g, b = (int(v + (255 - v) * t) for v in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def card_html(post, brief, name, logo_data_uri, emphasis="color", blob_uri=None):
@@ -384,6 +425,24 @@ def card_html(post, brief, name, logo_data_uri, emphasis="color", blob_uri=None)
             url_line = ""
     logo = (f'<img class="logo" src="{logo_data_uri}">' if logo_data_uri
             else f'<div class="wordmark">{name}</div>')
+    if post.get("template") == "photo" and post.get("bg_uri"):
+        # image background, brand-colored overlay gradient, bold legible text
+        css = PHOTO_CSS.format(accent=pal["accent"], chipink=chipink, h1=h1,
+                               accent_hi=_rgba(pal["accent"], 0.30),
+                               accent_mid=_rgba(pal["accent"], 0.42),
+                               ink_deep=_rgba(pal["ink"], 0.90),
+                               accent_text=_lighten(pal["accent"], 0.55))
+        logo_p = (f'<img class="logo" src="{logo_data_uri}">' if logo_data_uri
+                  else f'<div class="wordmark">{name}</div>')
+        return (f"<!doctype html><html><head><meta charset=utf-8><style>{css}</style></head>"
+                f'<body><div class="card"><img class="bg" src="{post["bg_uri"]}">'
+                f'<div class="shade"></div><div class="stack">'
+                f'<div class="eyebrow">{post["eyebrow"]}</div>'
+                f'<h1>{"".join(lines)}</h1><div class="rule"></div>'
+                f'<div class="note">{"<br>".join(post["note_lines"])}</div>'
+                f'<div class="chip">{chip}</div></div>'
+                f'{logo_p}{url_line}</div></body></html>')
+
     css = CARD_CSS.format(bg=pal["bg"], accent=pal["accent"], ink=ink,
                           chipink=chipink, h1=h1) + blob_css
     h1_html = f'<h1>{"".join(lines)}</h1>'
@@ -519,6 +578,10 @@ def main():
 
     for i, p in enumerate(posts, 1):
         png = os.path.join(a.out, f"sample-{i}-{p['slug']}.png")
+        if p.get("bg_image") and not p.get("bg_uri"):
+            bg_path = p["bg_image"] if os.path.isabs(p["bg_image"]) else os.path.join(a.out, p["bg_image"])
+            with open(bg_path, "rb") as bfh:
+                p["bg_uri"] = "data:image/jpeg;base64," + base64.b64encode(bfh.read()).decode()
         render(name, card_html(p, brief, name, logo_uri, a.emphasis, blob_uri), png, chrome)
         print(f"  {os.path.basename(png)}")
     print(f"\n{len(posts)} samples in {a.out} — AUDIT EVERY CARD before a prospect sees it.")
