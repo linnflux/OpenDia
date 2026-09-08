@@ -232,7 +232,9 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
         // Chime on the working -> idle edge: the answer to "is it done yet?"
         // for an operator who is looking at another window.
         const nowWorking = !!p.gate?.working;
-        if (wasWorking.current === true && !nowWorking && p.status === "active") playDoneChime();
+        // Chime on the working -> idle edge for finished rooms too: the
+        // wrap-up ending is exactly the "you're free now" moment Park waits on.
+        if (wasWorking.current === true && !nowWorking) playDoneChime();
         wasWorking.current = nowWorking;
         setPlan(p);
         setError(null);
@@ -304,6 +306,10 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
   const shownN = viewStep ?? plan.current_step;
   const shown = (plan.steps || []).find((s) => s.n === shownN);
   const finished = plan.status !== "active";
+  // Finished on paper, but the session is still visibly closing out — either
+  // mid-turn or holding a dialog. The room stays interactive until this ends.
+  const wrappingUp = finished
+    && (!!plan.gate?.working || (plan.gate?.reason === "dialog-open" && !!plan.gate?.dialog));
   // Every step done but status still "active": the work is over and the
   // session just hasn't closed the room. Without this the page keeps showing
   // the current step's instructions as if pending — the room lies finished-
@@ -376,6 +382,12 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
               &ldquo;close the runroom&rdquo; (it sets status done in plan.json), or it will close at /od-stop.
             </div>
           )}
+          {wrappingUp && (
+            <div className="runroom-wrapup-note">
+              The session is still closing out (ledger, timer, drafts) — stay until it
+              goes quiet, and answer anything it asks below.
+            </div>
+          )}
           {finished && viewStep == null ? <CompletedSummary plan={plan} /> : <StepPane step={shown} total={(plan.steps || []).length} working={!finished && !!plan.gate?.working} />}
           {/* Action buttons aim at the current step only — reading an earlier
               step must not offer buttons that would fire at a different one. */}
@@ -385,10 +397,14 @@ function RoomView({ session, activeTimerIds, onBack, showBack, me, onOpenProject
           {!finished && plan.live_output?.lines?.length > 0 && (
             <LiveOutput live={plan.live_output} />
           )}
-          {!finished && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
+          {/* Dialogs and the thinking strip stay live through the wrap-up
+              window: close-out can ask questions AFTER the plan flips to
+              finished (a timer-estimate dialog), and hiding them here was how
+              a parked room silently held a timer open. */}
+          {(!finished || wrappingUp) && plan.gate?.reason === "dialog-open" && plan.gate?.dialog && (
             <DialogCard key={plan.gate.dialog.fingerprint} dialog={plan.gate.dialog} endpoints={endpoints} />
           )}
-          {!finished && <ThinkingStrip working={plan.gate?.working} />}
+          {(!finished || plan.gate?.working) && <ThinkingStrip working={plan.gate?.working} />}
           {!finished && <Composer gate={plan.gate} endpoints={endpoints} />}
         </main>
       </div>

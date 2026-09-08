@@ -174,7 +174,15 @@ export function registerRunroomRoutes(app) {
     if (!plan) return res.status(404).json({ error: "no such runroom" });
     // Piggyback the gate on the poll the page already makes, so the composer
     // can disable itself the moment a dialog opens — before a send bounces.
-    const gate = plan.status === "active" ? gateForSession(plan.tmux_session) : { ok: false, reason: plan.status };
+    // A FINISHED plan still gets the real gate while its tmux session is
+    // alive: close-out can ask questions after the status flips (the timer
+    // estimate dialog), and a room that stops looking at the screen then
+    // hides a decision the operator must answer. Only a gone session settles
+    // into the quiet finished gate.
+    let gate = gateForSession(plan.tmux_session);
+    if (plan.status !== "active" && gate.reason === "session-gone") {
+      gate = { ok: false, reason: plan.status };
+    }
     // A plan-approval dialog gets the real plan document: the pane can only
     // ever show one page of it, the file holds all of it.
     if (gate.dialog?.options?.some((o) => /approve/i.test(o.label))) {
@@ -210,7 +218,9 @@ export function registerRunroomRoutes(app) {
     if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
     const plan = readPlan(session);
     if (!plan) return res.status(404).json({ error: "no such runroom" });
-    if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+    // Finished plans stay sendable: the wrap-up window (close-out questions
+    // after status flips) is real, and deliver() re-checks the live gate at
+    // send time — a dead or busy session still bounces correctly.
 
     let text = typeof req.body?.text === "string" ? req.body.text : "";
     // Literal text only: keep newlines (they insert, not submit, in the TUI
@@ -410,7 +420,9 @@ export function registerRunroomRoutes(app) {
     if (!SESSION_RE.test(session)) return res.status(400).json({ error: "bad session name" });
     const plan = readPlan(session);
     if (!plan) return res.status(404).json({ error: "no such runroom" });
-    if (plan.status !== "active") return res.status(409).json({ error: "runroom is not active" });
+    // No status gate: a finished plan's close-out can raise dialogs (timer
+    // estimate), and the live-screen fingerprint checks below are the real
+    // protection — the dialog must be on screen and unchanged to answer it.
 
     const { choice, fingerprint } = req.body || {};
     // Navigation keys exist for form-style dialogs: checkbox multiselects

@@ -7939,3 +7939,9 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .runroom-park-note { font-size: 0.75rem; color: var(--text-secondary); }
 .runroom-park-err { font-size: 0.78rem; color: var(--danger); }
+
+.runroom-wrapup-note {
+  margin: 0.5rem 0; padding: 0.5rem 0.8rem;
+  border: 1px solid var(--warning); border-radius: var(--radius-sm);
+  font-size: 0.8rem; color: var(--warning);
+}
