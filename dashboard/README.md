@@ -72,6 +72,28 @@ Runs Express on port 8038 and Vite dev server on port 5173 concurrently. Vite pr
 
 Drag a card between columns to update its status.
 
+### Status reconciler
+
+A server-side pass runs every 60s and owns the Ice ↔ In Progress boundary
+(steady state writes nothing). Precedence:
+
+1. **Running timer → In Progress.** A timer on an Ice/WFHuman/Completed card
+   would otherwise be invisible; this also lets active work override every
+   rule below.
+2. **`standing` tag, no timer → Ice.** Standing cards are missions, not
+   deadlines — they surface only while being worked.
+3. **Dated `next_step` bounces the card:** Ice → In Progress when the date is
+   within 3 days (today through +3 — a stale past date on an iced card means
+   deliberately parked and stays put); In Progress → Ice when the date is
+   further out (once awake, overdue keeps a card up).
+
+`wfhuman`, `completed`, and undated non-standing cards are never touched.
+Hand-dragging a card between Ice and In Progress therefore only sticks when
+the rules agree — the durable ways to hold a card up are a near date or a
+running timer. Iced cards keep their calendar events (`calendar_sync.py`
+carries `ice`), stay visible to the `+ New` duplicate guard, and remain
+wakeable by Planroom Wake, so parking never orphans work.
+
 ## Card Detail Modal
 
 Click a card to open a detail modal with:
@@ -219,6 +241,9 @@ Returns `{ "source": "loopback", "is_admin": true }` for local script requests.
 | `PUT` | `/api/projects/reorder` | Reorder cards within a column. Body: `{ status, ids[] }` |
 | `GET` | `/api/projects/match` | Find a project by `?client=&division=&task=`. Returns 404 if no match. Used by timers/active, backfill, and inbox re-link. |
 | `GET` | `/api/projects/match-candidates` | Return top N ranked project matches as a JSON array (always 200, empty if none). `?client=&division=&task=&limit=3`. Each element: `{ id, name, status, company_name, company_short, division, score }`. Used by `/od-go` Step 5.5. |
+| `POST` | `/api/dispatch` | **Admin only.** The Planroom "+ New" backend: company (optional inline create) → card → Notion task → handoff brief → spawned tmux/claude session (`mode: "spawn"`) or card + Notion only (`mode: "plan"`). Forgiving per-step results. A new card for a company with an open (`in_progress`/`wfhuman`/`ice`) card sharing task text returns **409 + candidates** instead of creating (duplicate guard); `force: true` overrides after the guard has shown its candidates. |
+| `POST` | `/api/companies` | **Admin only.** Idempotent company create (returns the existing row on a case-insensitive name/short match). Used by "+ New client" in the dispatch modal. |
+| `GET` | `/api/system/health` | **Admin only.** One-shot server-health snapshot (CPU/mem/disk/procs/tmux/services/tailscale/journal). Fail-soft per probe; polled by the System view only while it is open. |
 | `POST` | `/api/projects/:id/sync` | Sync project with Notion + Gmail + AI analysis |
 | `GET` | `/api/projects/:id/timers` | Time entries matching the project |
 | `GET` | `/api/projects/:id/inbox` | Inbox items linked to this project via `project_id` FK |
@@ -264,7 +289,13 @@ Exit by clicking any top-nav button (Board / Inbox / Clients).
 
 ## Admin-only Views
 
-Two views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles-admin-allowlist) above). They are not in the top nav — both are reachable only via **Ctrl+K**, and the palette omits their actions for non-admins. Backend routes are guarded by `requireAdmin` independently of the UI gate.
+Several views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles-admin-allowlist) above): the nav sidebar's ADMIN section (Billing, Newsletter, Rooms, Agents, Mailroom, SoCal, System) is hidden for non-admins, the command palette omits their actions, and a non-admin landing on an admin view key is bounced to the board. Backend routes are guarded by `requireAdmin` independently of the UI gate. Billing, Newsletter, and System are documented below.
+
+### System
+
+**Nav → System.** Server-health readout for "should I do proactive work on this box?": memory/swap and CPU with live sparklines, per-mount disk meters, the tmux session + claude/node fleet counts with RSS, top processes by memory, watched systemd user units + any failed units, Tailscale state with a node-key-expiry countdown (amber &lt;30d, red &lt;7d), and housekeeping (uptime, kernel, reboot-required flag, journal errors over 24h, DB size).
+
+`GET /api/system/health` gathers everything per request — every probe is individually fail-soft (a broken probe returns null, never a 500), the two slow probes (tailscale, journalctl) are cached server-side, and there is **no background sampling**: the client polls every 5s only while the view is mounted and the tab visible, so closing the view silences the whole pipeline. Charts are hand-rolled SVG; history is a client-side ring buffer that resets when the view closes.
 
 ### Billing
 
