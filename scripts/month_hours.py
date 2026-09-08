@@ -4,8 +4,9 @@
 One helper, two callers, so the number can never disagree between the command
 that starts work and the command that stops it.
 
-    python3 month_hours.py            # the two printable lines
-    python3 month_hours.py --verify   # the same numbers with their workings
+    python3 month_hours.py                  # global: the two printable lines
+    python3 month_hours.py "Client Name"    # scoped to one client
+    python3 month_hours.py --verify         # the same numbers with their workings
 
 Design notes, each of which is load-bearing:
 
@@ -20,22 +21,29 @@ Design notes, each of which is load-bearing:
   pulse it inflates badly: 100 short entries carry up to 25 phantom hours.
   Rounding the single total keeps the readout honest.
 
-* **Billable only, external clients only.** This mirrors what the billing
-  pipeline actually produces, so the pulse and the invoice tell the same story.
-  Ten Linnflux entries in August 2026 are flagged billable while being internal
-  build work; counting them would have overstated the month by ~14h. Flip
-  SKIP_INTERNAL to False to count them.
+* **Global mode: billable only, external clients only.** This mirrors what the
+  billing pipeline actually produces, so the pulse and the invoice tell the
+  same story. Flip SKIP_INTERNAL to False to count internal entries.
 
-* **Toggl is fail-soft and never freezes.** `toggl_hours.monthly_hours()` caches
-  forever, which is right for closed months and wrong for the current one — the
-  first value cached would be returned for the rest of the month. Current-month
-  figures go through a short TTL cache here instead, and the upstream permanent
-  cache is deliberately left unwritten for the current month. A missing token,
-  a 402, or a slow API drops the Toggl line rather than delaying a timer stop.
+* **Client mode: billable only — except the client IS Linnflux.** Internal work
+  is never billable, so a billable-only Linnflux readout would be a permanent
+  0.00; for Linnflux every entry counts (it is a workload pulse, not an
+  invoice). External clients stay billable-only so the number still matches
+  what the month would invoice. Client names are matched against the companies
+  table (name + short_name, normalized), because the ledger carries both
+  "Acme Widgets Co" and "acme-widgets-co" naming styles for the same client.
+
+* **Toggl is fail-soft and never freezes.** `toggl_hours.monthly_hours()`
+  already returns per-client hours in ONE call, so client mode costs no extra
+  API traffic (the hourly quota is shared across everything — see the Toggl
+  memory). The cache stores the whole per-client map; a missing token, a 402,
+  or a slow API drops the Toggl line rather than delaying a timer stop.
 """
 
 import json
 import math
+import re
+import sqlite3
 import sys
 import threading
 import time
@@ -51,6 +59,7 @@ from timeentry import load_month_entries  # noqa: E402
 SKIP_INTERNAL = True
 BILLABLE_ONLY = True
 
+DB_PATH = Path.home() / "OpenDia" / "opendia.db"
 CACHE = Path.home() / "OpenDia" / ".month-hours-cache.json"
 CURRENT_MONTH_TTL_SEC = 20 * 60
 # The readout must never be what makes a timer stop feel slow. A cold fetch of
@@ -66,17 +75,62 @@ def round_up_quarter(minutes: float) -> float:
     return math.ceil(minutes / 15) * 0.25
 
 
+# ── Client matching ───────────────────────────────────────────────────────────
+def _normalize(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def client_terms(client: str) -> set[str]:
+    """Normalized names this client answers to: the given string plus the
+    companies-table name and short_name of the best-matching row. Fail-soft:
+    a missing DB just means we match on the raw string."""
+    terms = {_normalize(client)}
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("SELECT name, short_name FROM companies").fetchall()
+        conn.close()
+        want = _normalize(client)
+        for name, short in rows:
+            cands = {_normalize(name), _normalize(short)}
+            if any(c and (c == want or (len(want) >= 4 and want in c) or (len(c) >= 4 and c in want)) for c in cands):
+                terms |= cands
+                break
+    except Exception:
+        pass
+    return {t for t in terms if t}
+
+
+def _matches(name: str, terms: set[str]) -> bool:
+    n = _normalize(name)
+    if not n:
+        return False
+    return any(n == t or (len(t) >= 4 and t in n) or (len(n) >= 4 and n in t) for t in terms)
+
+
 # ── OpenDia ───────────────────────────────────────────────────────────────────
-def od_month_minutes(year: int, month: int) -> tuple[int, int]:
-    """(estimated_minutes summed, entries counted) for the month."""
-    entries = load_month_entries(year, month, skip_internal=SKIP_INTERNAL)
-    if BILLABLE_ONLY:
-        entries = [e for e in entries if e["billable"]]
+def od_month_minutes(year: int, month: int, terms: set[str] = None,
+                     internal: bool = False) -> tuple[int, int]:
+    """(estimated_minutes summed, entries counted) for the month.
+
+    terms=None keeps the historical global behaviour. With terms, entries are
+    filtered to that client; `internal` (the Linnflux case) counts non-billable
+    entries too, since internal work is never billable.
+    """
+    if terms is None:
+        entries = load_month_entries(year, month, skip_internal=SKIP_INTERNAL)
+        if BILLABLE_ONLY:
+            entries = [e for e in entries if e["billable"]]
+    else:
+        entries = load_month_entries(year, month, skip_internal=False)
+        entries = [e for e in entries if _matches(e.get("client", ""), terms)]
+        if not internal:
+            entries = [e for e in entries if e["billable"]]
     return sum(e["estimated_minutes"] for e in entries), len(entries)
 
 
-def od_month_hours(year: int, month: int) -> float:
-    return round_up_quarter(od_month_minutes(year, month)[0])
+def od_month_hours(year: int, month: int, terms: set[str] = None,
+                   internal: bool = False) -> float:
+    return round_up_quarter(od_month_minutes(year, month, terms, internal)[0])
 
 
 # ── Toggl ─────────────────────────────────────────────────────────────────────
@@ -94,8 +148,8 @@ def _save_cache(cache: dict) -> None:
         pass
 
 
-def _toggl_fetch(year: int, month: int, is_current: bool) -> float:
-    """Sum Toggl hours across every configured user token.
+def _toggl_fetch(year: int, month: int, is_current: bool) -> dict:
+    """{client_name: hours} summed across every configured user token.
 
     Closed months go through toggl_hours' permanent cache, which is correct for
     them. The current month deliberately passes use_cache=False so it is never
@@ -105,11 +159,11 @@ def _toggl_fetch(year: int, month: int, is_current: bool) -> float:
 
     tokens = toggl_hours.load_tokens()  # raises if none configured
     hours = toggl_hours.monthly_hours(tokens, year, month, use_cache=not is_current)
-    return round(sum(hours.values()), 2)
+    return {k: round(v, 2) for k, v in hours.items()}
 
 
-def toggl_month_hours(year: int, month: int, deadline: float = None):
-    """Total Toggl hours, or None if unavailable within the deadline.
+def toggl_month_map(year: int, month: int, deadline: float = None):
+    """{client_name: hours} for the month, or None if unavailable in time.
 
     `deadline` resolves at call time, not import time: binding the module
     constant as a default argument would freeze it, so raising or lowering
@@ -119,6 +173,9 @@ def toggl_month_hours(year: int, month: int, deadline: float = None):
     omit the line. A worker thread gives a hard deadline that the upstream
     urlopen timeout (45s) does not — it is a daemon so a hung request can never
     hold up interpreter exit.
+
+    Cache format: {"by_client": {...}, "ts": ...}. Legacy pre-client entries
+    ({"hours": total}) are treated as misses and refreshed into the new shape.
     """
     deadline = TOGGL_DEADLINE_SEC if deadline is None else deadline
     now = datetime.now()
@@ -127,16 +184,16 @@ def toggl_month_hours(year: int, month: int, deadline: float = None):
 
     cache = _load_cache()
     hit = cache.get(key)
-    if hit:
+    if hit and "by_client" in hit:
         # Closed months never change; the current month expires.
         if not is_current or (time.time() - hit.get("ts", 0)) < CURRENT_MONTH_TTL_SEC:
-            return hit["hours"]
+            return hit["by_client"]
 
     box: dict = {}
 
     def worker():
         try:
-            box["hours"] = _toggl_fetch(year, month, is_current)
+            box["by_client"] = _toggl_fetch(year, month, is_current)
         except Exception as exc:  # missing token, 402, HTTP, anything
             box["error"] = exc
 
@@ -144,25 +201,45 @@ def toggl_month_hours(year: int, month: int, deadline: float = None):
     t.start()
     t.join(deadline)
 
-    if "hours" not in box:
+    if "by_client" not in box:
         # Timed out or errored. A stale cached value beats no value at all.
-        return hit["hours"] if hit else None
+        return hit.get("by_client") if hit else None
 
-    cache[key] = {"hours": box["hours"], "ts": time.time()}
+    cache[key] = {"by_client": box["by_client"], "ts": time.time()}
     _save_cache(cache)
-    return box["hours"]
+    return box["by_client"]
+
+
+def toggl_month_hours(year: int, month: int, terms: set[str] = None,
+                      deadline: float = None):
+    """Total Toggl hours (terms=None) or one client's hours, or None."""
+    by_client = toggl_month_map(year, month, deadline)
+    if by_client is None:
+        return None
+    if terms is None:
+        return round(sum(by_client.values()), 2)
+    return round(sum(v for k, v in by_client.items() if _matches(k, terms)), 2)
 
 
 # ── Presentation ──────────────────────────────────────────────────────────────
-def month_hours_lines(year: int = None, month: int = None, indent: str = "  ") -> list[str]:
+def month_hours_lines(year: int = None, month: int = None, indent: str = "  ",
+                      client: str = None) -> list[str]:
     """The block both commands print. Two data lines, no prose."""
     now = datetime.now()
     year = year or now.year
     month = month or now.month
 
-    lines = [f"{indent}Hours this Month"]
-    lines.append(f"{indent}  OpenDia: {od_month_hours(year, month):.2f}")
-    toggl = toggl_month_hours(year, month)
+    terms = None
+    internal = False
+    header = f"{indent}Hours this Month"
+    if client:
+        internal = _normalize(client) == "linnflux"
+        terms = client_terms(client)
+        header += f" — {client}"
+
+    lines = [header]
+    lines.append(f"{indent}  OpenDia: {od_month_hours(year, month, terms, internal):.2f}")
+    toggl = toggl_month_hours(year, month, terms)
     lines.append(f"{indent}  Toggl:   {toggl:.2f}" if toggl is not None
                  else f"{indent}  Toggl:   —")
     return lines
@@ -172,23 +249,31 @@ def main() -> int:
     args = sys.argv[1:]
     now = datetime.now()
     year, month = now.year, now.month
+    client = None
     for a in args:
-        if len(a) == 7 and a[4] == "-":  # YYYY-MM
+        if len(a) == 7 and a[4] == "-" and a[:4].isdigit():  # YYYY-MM
             year, month = int(a[:4]), int(a[5:])
+        elif not a.startswith("--"):
+            client = a
 
     if "--verify" in args:
-        minutes, count = od_month_minutes(year, month)
+        terms = client_terms(client) if client else None
+        internal = client is not None and _normalize(client) == "linnflux"
+        minutes, count = od_month_minutes(year, month, terms, internal)
         started = time.time()
-        toggl = toggl_month_hours(year, month)
+        toggl = toggl_month_hours(year, month, terms)
         elapsed = time.time() - started
-        print(f"{year:04d}-{month:02d}")
+        print(f"{year:04d}-{month:02d}" + (f"  client={client!r} terms={sorted(terms)}" if client else ""))
         print(f"  OpenDia  entries={count}  estimated_minutes={minutes}")
         print(f"           raw hours={minutes / 60:.4f}  ->  rounded up {round_up_quarter(minutes):.2f}")
-        print(f"           filters: billable_only={BILLABLE_ONLY} skip_internal={SKIP_INTERNAL}")
+        if client:
+            print(f"           filters: client-scoped, billable_only={not internal} (internal counts everything)")
+        else:
+            print(f"           filters: billable_only={BILLABLE_ONLY} skip_internal={SKIP_INTERNAL}")
         print(f"  Toggl    {toggl if toggl is not None else '(unavailable)'}   fetched in {elapsed:.2f}s")
         return 0
 
-    print("\n".join(month_hours_lines(year, month)))
+    print("\n".join(month_hours_lines(year, month, client=client)))
     return 0
 
 
