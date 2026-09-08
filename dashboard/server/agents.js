@@ -1352,7 +1352,7 @@ export function mountAgents(app) {
   const shapeOperatorAction = (a) => {
     let patch = null;
     let projectId = null;
-    if (a.kind === "card_patch") {
+    if (a.kind === "card_patch" || a.kind === "brief") {
       try {
         const parsed = JSON.parse(a.action || "null");
         patch = parsed?.patch || null;

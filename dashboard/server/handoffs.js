@@ -206,7 +206,7 @@ function runCardPatch(action) {
   return `#${pid} ${project.name}: ${changes.join("; ")}`;
 }
 
-const ACTION_KINDS = new Set(["git_push", "card_patch", "notice"]);
+const ACTION_KINDS = new Set(["git_push", "card_patch", "brief", "notice"]);
 
 export function registerHandoffRoutes(app) {
   // Loopback callers (agent scan sessions) arrive as an admin user via
