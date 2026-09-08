@@ -425,6 +425,8 @@ def main():
                     help="emphasis line: accent-colored text, or a logo-style blob behind it")
     ap.add_argument("--blob-file", help="exact shape image (png/svg) to use for --emphasis blob, "
                                         "skipping logo extraction (operator-supplied asset wins)")
+    ap.add_argument("--logo-file", help="local logo image to use on the cards, skipping site "
+                                        "logo extraction (operator-supplied asset wins)")
     ap.add_argument("--reuse", action="store_true",
                     help="reuse brief.json + posts.json already in --out (style A/Bs on identical content)")
     a = ap.parse_args()
@@ -447,7 +449,17 @@ def main():
         brief["name"] = name
 
     logo_uri, logo_counts, logo_bytes, logo_ext = None, Counter(), None, ""
-    if brief["logo"]:
+    if a.logo_file:
+        logo_bytes = open(a.logo_file, "rb").read()
+        logo_ext = a.logo_file.rsplit(".", 1)[-1].lower()
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "svg": "image/svg+xml", "webp": "image/webp"}.get(logo_ext, "image/png")
+        logo_uri = f"data:{mime};base64," + base64.b64encode(logo_bytes).decode()
+        if logo_ext != "svg":
+            import io
+            from PIL import Image
+            logo_counts = image_counts(Image.open(io.BytesIO(logo_bytes)))
+    elif brief["logo"]:
         try:
             logo_src = upgrade_logo_url(brief["logo"])
             logo_bytes = fetch(logo_src, binary=True)
