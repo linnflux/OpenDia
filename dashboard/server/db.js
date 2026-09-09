@@ -635,28 +635,30 @@ export function createCompany({ name, shortName = null }) {
   return getCompanyById(result.lastInsertRowid);
 }
 
-// A client's supervisor card: a non-completed card for the same company whose
-// tags include "supervisor" (comma-separated scalar, same convention tags.js
-// reads). The relationship is tag + company, not a schema link.
-export function findSupervisorCard(companyId) {
+// A client's hub card (the company-level coordinator): a non-completed card
+// for the same company whose tags include "hub" (comma-separated scalar, same
+// convention tags.js reads). The relationship is tag + company, not a schema
+// link. ("Supervisor" is the ODA agent role — a different thing.)
+export function findHubCard(companyId) {
   if (!companyId) return null;
   const rows = getDb().prepare(`
     SELECT id, name, tmux_session, tags FROM projects
     WHERE company_id = ? AND status != 'completed' AND tags IS NOT NULL
   `).all(companyId);
-  return rows.find((r) => r.tags.split(",").map((t) => t.trim()).includes("supervisor")) || null;
+  return rows.find((r) => r.tags.split(",").map((t) => t.trim()).includes("hub")) || null;
 }
 
 // The morning-briefing roster: every company whose open card carries the
-// `supervisor` tag, one row per company (first tagged card wins).
-export function listSupervisorCards() {
+// `hub` tag (the company-level coordinator card — "supervisor" is the ODA
+// agent role, a different thing), one row per company (first tagged card wins).
+export function listHubCards() {
   const rows = getDb().prepare(`
     SELECT p.id, p.name, p.tmux_session, p.tags,
            c.id AS company_id, c.name AS company_name, c.short_name AS company_short
     FROM projects p JOIN companies c ON p.company_id = c.id
     WHERE p.status != 'completed' AND p.tags IS NOT NULL
     ORDER BY c.name, p.id
-  `).all().filter((r) => r.tags.split(",").map((t) => t.trim()).includes("supervisor"));
+  `).all().filter((r) => r.tags.split(",").map((t) => t.trim()).includes("hub"));
   const seen = new Set();
   return rows.filter((r) => !seen.has(r.company_id) && seen.add(r.company_id));
 }

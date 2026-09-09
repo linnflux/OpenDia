@@ -263,7 +263,7 @@ export default function Briefing({ onOpenProject }) {
       </section>
 
       <section className="briefing-card">
-        <SectionHead title="Supervisor check-ins" meta={meta.supervisors} section="supervisors" onRefresh={refresh} generating={generating.supervisors} />
+        <SectionHead title="Hub check-ins" meta={meta.supervisors} section="supervisors" onRefresh={refresh} generating={generating.supervisors} />
         {supervisors.length === 0 ? (
           <div className="briefing-empty">{generating.supervisors ? "Checking in with each company…" : "No check-ins yet — hit ↻."}</div>
         ) : (

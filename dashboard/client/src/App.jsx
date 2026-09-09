@@ -774,6 +774,8 @@ export default function App() {
         <CardModal
           key={selectedProject.id}
           project={selectedProject}
+          projects={projects}
+          onOpenProject={(id) => openCardById(id)}
           onClose={handleModalClose}
           onUpdate={handleModalUpdate}
           hasActiveTimer={activeTimerIds.has(selectedProject.id)}

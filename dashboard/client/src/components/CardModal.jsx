@@ -77,15 +77,17 @@ const INBOX_STATUS_DOT = {
   dismissed: "#475569",
 };
 
-export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab, onGoToRunroom, onGoToPlanroom }) {
+export default function CardModal({ project, projects, onOpenProject, onClose, onUpdate, hasActiveTimer, onInboxItemClick, isAdmin, initialTab, onGoToRunroom, onGoToPlanroom }) {
   const [name, setName] = useState(project.name || "");
   const [editingName, setEditingName] = useState(false);
   const [notes, setNotes] = useState(project.notes || "");
   const [tmux, setTmux] = useState(project.tmux_session || "");
   const [nextStep, setNextStep] = useState(project.next_step || "");
+  const [goal, setGoal] = useState(project.goal || "");
   const [editingNotes, setEditingNotes] = useState(false);
   const [editingTmux, setEditingTmux] = useState(false);
   const [editingNextStep, setEditingNextStep] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(false);
   const [timers, setTimers] = useState([]);
   const [timersLoading, setTimersLoading] = useState(true);
   const [inboxItems, setInboxItems] = useState([]);
@@ -188,6 +190,13 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
     setEditingNextStep(false);
     if (nextStep !== (project.next_step || "")) {
       onUpdate(project.id, { next_step: nextStep || null });
+    }
+  }
+
+  function saveGoal() {
+    setEditingGoal(false);
+    if (goal !== (project.goal || "")) {
+      onUpdate(project.id, { goal: goal || null });
     }
   }
 
@@ -368,7 +377,7 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
               <button
                 key={tag.key}
                 className={`modal-tag-t${on ? " on" : ""}`}
-                style={on ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
+                style={{ "--tag-color": tag.color, ...(on ? { backgroundColor: tag.color, borderColor: tag.color } : {}) }}
                 title={on ? `Tagged for ${tag.label} — click to untag` : `Tag for ${tag.label}`}
                 onClick={() => onUpdate(project.id, { tags: toggleTag(project, tag.key) })}
               >
@@ -696,6 +705,35 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
         </div>
 
         <div className="modal-section">
+          <label className="modal-label modal-label-goal">
+            {hasTag(project, "standing") ? "Mission" : "Goal"}
+          </label>
+          {editingGoal ? (
+            <div className="modal-inline-edit">
+              <input
+                className="modal-input"
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                onBlur={saveGoal}
+                onKeyDown={(e) => e.key === "Enter" && saveGoal()}
+                placeholder="What's the terminal state that closes this card?"
+                autoFocus
+              />
+            </div>
+          ) : (
+            <div className="modal-value clickable" onClick={() => setEditingGoal(true)}>
+              {project.goal ? (
+                <span className="modal-goal">{project.goal}</span>
+              ) : (
+                <span className="modal-empty">
+                  {hasTag(project, "standing") ? "Click to set mission" : "Click to set goal"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-section">
           <label className="modal-label">Next Step</label>
           {editingNextStep ? (
             <div className="modal-inline-edit">
@@ -719,6 +757,48 @@ export default function CardModal({ project, onClose, onUpdate, hasActiveTimer, 
             </div>
           )}
         </div>
+
+        {/* Hub ↔ children: the company relationship, visible where you click.
+            A hub card lists its open children; every child links up to its
+            hub. Derived from the board list — tag + company, no schema. */}
+        {(() => {
+          if (!project.company_name || !projects?.length) return null;
+          const siblings = projects.filter((p) =>
+            p.company_name === project.company_name && p.id !== project.id && p.status !== "completed");
+          if (hasTag(project, "hub")) {
+            if (siblings.length === 0) return null;
+            return (
+              <div className="modal-section">
+                <label className="modal-label">Children ({siblings.length})</label>
+                <ul className="modal-children">
+                  {siblings.map((p) => (
+                    <li key={p.id}>
+                      <button className="modal-child-link" onClick={() => onOpenProject?.(p.id)}>
+                        #{p.id} {p.name}
+                      </button>
+                      <span className={`modal-child-status ${p.status}`}>{p.status.replace("_", " ")}</span>
+                      {p.tmux_session && <code className="modal-child-session">{p.tmux_session}</code>}
+                      {p.next_step && <span className="modal-child-next">{p.next_step}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          }
+          const hubCard = siblings.find((p) => hasTag(p, "hub"));
+          if (!hubCard) return null;
+          return (
+            <div className="modal-section">
+              <label className="modal-label">Hub</label>
+              <div className="modal-value">
+                <button className="modal-child-link" title={`Open the ${project.company_name} hub`}
+                  onClick={() => onOpenProject?.(hubCard.id)}>
+                  ⌂ #{hubCard.id} {hubCard.name}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {extractImagePaths(project.notes, project.next_step).length > 0 && (
           <div className="modal-section">

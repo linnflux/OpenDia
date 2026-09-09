@@ -15,7 +15,8 @@ import { resolve } from "path";
 import { spawn, execFile } from "child_process";
 import { requireAdmin } from "./auth.js";
 import {
-  listSupervisorCards, getOpenProjectsByCompany, getInboxItemsByProject,
+  listHubCards, getOpenProjectsByCompany, getInboxItemsByProject,
+  getProjectById, updateProject,
   getWfHumanProjects, getStaleInProgressProjects, getAllProjects,
   listRecentlyCompleted, listRecentAcks, listRecentResolvedActions,
 } from "./db.js";
@@ -160,13 +161,13 @@ async function generateSupervisors(date) {
   const started = Date.now();
   writeMeta(date, "supervisors", { started_at: new Date().toISOString(), error: null });
   try {
-    const roster = listSupervisorCards();
+    const roster = listHubCards();
     const errors = [];
     for (const sup of roster) {
       try {
         const blob = await gatherCompany(sup);
         const prompt = [
-          `You are the morning supervisor check-in for ${blob.company} at a web-services company.`,
+          `You are the morning hub check-in for ${blob.company} at a web-services company.`,
           "Below is today's raw signal: open cards with next steps, live session",
           "states (working / idle / decision-waiting / gone), open inbox items,",
           "and recent client email. Judge whether anything needs the operator's",
@@ -195,6 +196,23 @@ async function generateSupervisors(date) {
             card_id: Number.isInteger(a.card_id) ? a.card_id : null,
           })) : [],
         }, null, 2));
+        // Close the loop: the hub card carries every morning's verdict, so
+        // its long-memory session inherits the picture the moment it's
+        // resumed. ⌂-prefixed lines are the check-in ledger — last 10 kept,
+        // same-day regeneration replaces its own line, the rest of the notes
+        // are never touched.
+        try {
+          const hubCard = getProjectById(sup.id);
+          const lines = String(hubCard?.notes || "").split("\n");
+          const keep = lines.filter((l) => !l.startsWith("⌂ "));
+          const checkins = lines
+            .filter((l) => l.startsWith("⌂ ") && !l.startsWith(`⌂ ${date} `))
+            .slice(-9);
+          const top = verdict.status === "attention" && verdict.attention?.[0]?.item
+            ? ` | top: ${String(verdict.attention[0].item).slice(0, 120)}` : "";
+          checkins.push(`⌂ ${date} check-in: ${verdict.status === "attention" ? "attention" : "ok"} — ${String(verdict.summary || "").slice(0, 200)}${top}`);
+          updateProject(sup.id, { notes: [...keep, "", ...checkins].join("\n").replace(/\n{3,}/g, "\n\n").trim() });
+        } catch {}
       } catch (err) {
         errors.push(`${sup.company_name}: ${err.message}`);
       }
@@ -523,7 +541,7 @@ export function registerBriefingRoutes(app) {
         sendpile_older: pile.older,
         hello,
         supervisors,
-        roster: listSupervisorCards().map((s) => ({ company: s.company_name, card_id: s.id })),
+        roster: listHubCards().map((s) => ({ company: s.company_name, card_id: s.id })),
         recs,
         vitals: {
           hours: await monthHours(),

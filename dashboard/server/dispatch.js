@@ -12,7 +12,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import {
   createProject, getProjectById, updateProject,
-  createCompany, getCompanyById, findSupervisorCard,
+  createCompany, getCompanyById, findHubCard,
   matchProjectCandidates,
 } from "./db.js";
 import { createNotionTask } from "./notion.js";
@@ -47,7 +47,7 @@ function deriveSessionName(companyShort, task) {
   return base.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20) || "new-task";
 }
 
-function buildBrief({ session, requesterEmail, project, company, notionUrl, task, context, supervisor }) {
+function buildBrief({ session, requesterEmail, project, company, notionUrl, task, context, hub }) {
   const p = etParts();
   const lines = [
     `# Handoff Brief — ${session}`,
@@ -64,11 +64,11 @@ function buildBrief({ session, requesterEmail, project, company, notionUrl, task
     "## Context",
     (context || "").trim() || "(none provided — read the card and Notion task)",
   ];
-  if (supervisor) {
+  if (hub) {
     lines.push(
       "",
-      `**Supervisor:** this client is coordinated by the "${supervisor.name}" card ` +
-      `(#${supervisor.id}${supervisor.tmux_session ? `, tmux session \`${supervisor.tmux_session}\`` : ""}). ` +
+      `**Hub:** this client is coordinated by the "${hub.name}" card ` +
+      `(#${hub.id}${hub.tmux_session ? `, tmux session \`${hub.tmux_session}\`` : ""}). ` +
       "Coordinate significant decisions through it; do not duplicate its work."
     );
   }
@@ -86,7 +86,7 @@ function buildBrief({ session, requesterEmail, project, company, notionUrl, task
 }
 
 /**
- * The whole "+ New" flow. Returns { steps, projectId, sessionName, supervisor }.
+ * The whole "+ New" flow. Returns { steps, projectId, sessionName, hub }.
  * Throws only on invalid input; runtime failures land in steps[] instead.
  */
 export async function runDispatch(body, requesterEmail) {
@@ -168,11 +168,11 @@ export async function runDispatch(body, requesterEmail) {
   }
 
   // 4. Supervisor check (authoritative source for the brief + response).
-  const supervisor = findSupervisorCard(company?.id || project.company_id || null);
+  const hub = findHubCard(company?.id || project.company_id || null);
 
   if (mode === "plan") {
     record("mode", true, "plan-first: no session spawned; trigger Spark on the card");
-    return { steps, projectId: project.id, sessionName: null, supervisor };
+    return { steps, projectId: project.id, sessionName: null, hub };
   }
 
   // 5-6. Brief + spawn.
@@ -187,7 +187,7 @@ export async function runDispatch(body, requesterEmail) {
     const briefPath = resolve(HANDOFFS_DIR, `${finalName}.md`);
     writeFileSync(briefPath, buildBrief({
       session: finalName, requesterEmail, project, company, notionUrl,
-      task: (task || "").trim(), context, supervisor,
+      task: (task || "").trim(), context, hub,
     }));
     record("brief", true, briefPath);
     const spawned = spawnSession(finalName, briefPath);
@@ -198,5 +198,5 @@ export async function runDispatch(body, requesterEmail) {
     record(finalName ? "spawn" : "brief", false, err.message);
   }
 
-  return { steps, projectId: project.id, sessionName: finalName, supervisor };
+  return { steps, projectId: project.id, sessionName: finalName, hub };
 }

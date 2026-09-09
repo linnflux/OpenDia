@@ -44,7 +44,7 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
 
   const clientName = company?.name || newClient?.name || "";
 
-  // Cards, dominant division, and supervisor all derive from the projects the
+  // Cards, dominant division, and hub all derive from the projects the
   // app already holds — no extra fetches for display state.
   const clientProjects = useMemo(() => {
     if (!clientName) return [];
@@ -56,8 +56,8 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
     [clientProjects]
   );
 
-  const supervisor = useMemo(
-    () => openCards.find((p) => hasTag(p, "supervisor")) || null,
+  const hub = useMemo(
+    () => openCards.find((p) => hasTag(p, "hub")) || null,
     [openCards]
   );
 
@@ -215,11 +215,11 @@ export default function NewTaskModal({ projects, onClose, showToast, onOpenCard,
               <input className="inbox-edit-input newtask-session" value={sessionName} disabled={phase === "busy"}
                 onChange={(e) => { setSessionName(e.target.value); setSessionTouched(true); }} />
 
-              {supervisor && (
+              {hub && (
                 <>
                   <label className="inbox-edit-label">⌂</label>
                   <div className="newtask-supervisor">
-                    Supervisor: <strong>{supervisor.tmux_session || supervisor.name}</strong> (#{supervisor.id}) — will be noted in the brief
+                    Hub: <strong>{hub.tmux_session || hub.name}</strong> (#{hub.id}) — will be noted in the brief
                   </div>
                 </>
               )}

@@ -4,7 +4,7 @@ export const TAGS = [
   { key: "tara", label: "Tara", letter: "T", color: "#f97316" },
   { key: "standing", label: "Standing", letter: "S", color: "#16a34a" },
   // A client's coordinating card: + New surfaces it and notes it in the brief.
-  { key: "supervisor", label: "Supervisor", letter: "★", color: "#8b5cf6" },
+  { key: "hub", label: "Hub", letter: "⌂", color: "#8b5cf6" },
 ];
 
 export function hasTag(project, key) {
