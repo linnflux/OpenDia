@@ -415,6 +415,8 @@ def card_html(post, brief, name, logo_data_uri, emphasis="color", blob_uri=None)
         else:
             lines.append(f"<span>{ln}</span>")
     h1 = 118 if sum(len(l) for l in post["headline_lines"]) < 34 else 96
+    if max(len(l.lstrip("*")) for l in post["headline_lines"]) > 20:
+        h1 = 78  # a single long line must not wrap; wrapped headlines orphan words
     # avoid saying the domain twice: prefer the phone in the chip, else drop the url line
     chip = post["chip"]
     url_line = f'<div class="url">{brief["domain"]}</div>'
