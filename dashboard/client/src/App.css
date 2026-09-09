@@ -8033,3 +8033,29 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .briefing-expand:hover { border-color: var(--border-hover); color: var(--text-primary); }
 .briefing-opinbox { padding: 0.4rem 0.6rem; }
+
+/* Briefing day score — completions today racing yesterday's notch. */
+.briefing-score { display: flex; flex-direction: column; gap: 0.3rem; }
+.briefing-score-head {
+  display: flex; align-items: baseline; gap: 0.7rem;
+  font-size: 0.78rem; color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.briefing-score-head strong { font-size: 0.95rem; color: var(--text-primary); }
+.briefing-score-beat { color: var(--timer-open); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.04em; }
+.briefing-score-marks { margin-left: auto; color: var(--text-faint); }
+.briefing-score-track {
+  position: relative; height: 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 16%, transparent);
+  overflow: visible;
+}
+.briefing-score-fill {
+  height: 100%; border-radius: 999px; background: var(--accent);
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1), background 0.4s ease;
+  min-width: 2px;
+}
+.briefing-score-fill.beat { background: var(--timer-open); }
+.briefing-score-notch {
+  position: absolute; top: -3px; bottom: -3px; width: 2px;
+  background: var(--text-secondary); border-radius: 1px; opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) { .briefing-score-fill { transition: none; } }

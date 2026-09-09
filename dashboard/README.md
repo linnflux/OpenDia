@@ -295,6 +295,7 @@ Several views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles
 
 **Nav → Briefing.** The morning read: generated artifacts land under `~/OpenDia/briefing/YYYY-MM-DD/` (cron at 06:30 ET via `scripts/briefing-cron.sh`, or per-section ↻ buttons) and the view renders the latest with its age. Four sections plus a vitals strip:
 
+- **Day score** — a slim bar under the masthead, fed only by real completions today (cards completed ×3, ledger work sessions closed ×1, operator-inbox acks ×2, actions resolved ×2; UTC timestamps mapped to ET days). Yesterday's score is a notch on the track to race; beat it and the fill turns green. `briefing/scores.json` keeps each day's high-water mark for ~a month.
 - **Vitals** — live, zero AI: month hours (billable + internal), Spark proposals awaiting a decision, planroom wakeups due, and system warnings only when warn/crit (from one `/api/system/health` fetch).
 - **OD Recs** — one budget-capped model run over the whole board picture (deadlines, wfhuman, stale, parked proposals, wakeups, yesterday's ledger) returns THE FIRE (the single highest-leverage thing today) plus up to five ranked recs.
 - **Supervisor check-ins** — roster = companies whose card carries the `supervisor` tag. The server gathers each company's signals (open cards, live session gate states, open inbox items, recent client email) and a tool-less model call judges ok vs attention with specific items.

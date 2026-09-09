@@ -671,6 +671,24 @@ export function getOpenProjectsByCompany(companyId) {
   `).all(companyId);
 }
 
+// Briefing score inputs — raw UTC timestamps, filtered to an ET day by the
+// caller (SQLite datetime('now') is UTC; the day boundary is the operator's).
+export function listRecentlyCompleted(sinceUtc) {
+  return getDb().prepare(
+    "SELECT id, name, updated_at FROM projects WHERE status = 'completed' AND updated_at >= ?"
+  ).all(sinceUtc);
+}
+export function listRecentAcks(sinceUtc) {
+  return getDb().prepare(
+    "SELECT acked_at FROM operator_acks WHERE acked_at >= ?"
+  ).all(sinceUtc);
+}
+export function listRecentResolvedActions(sinceUtc) {
+  return getDb().prepare(
+    "SELECT resolved_at FROM operator_actions WHERE resolved_at IS NOT NULL AND resolved_at >= ?"
+  ).all(sinceUtc);
+}
+
 export function reorderProjects(status, ids) {
   if (!VALID_STATUSES.has(status)) {
     throw new Error(`Invalid status: ${status}`);

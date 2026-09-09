@@ -116,6 +116,29 @@ export default function Briefing({ onOpenProject }) {
         </button>
       </header>
 
+      {data.score && (() => {
+        const s = data.score;
+        const max = Math.max(s.points, s.yesterday, 10);
+        const beat = s.yesterday > 0 && s.points > s.yesterday;
+        return (
+          <div className="briefing-score"
+            title={`${s.breakdown.cards} cards completed · ${s.breakdown.sessions} work sessions closed · ${s.breakdown.acks} inbox items cleared · ${s.breakdown.actions} actions resolved`}>
+            <div className="briefing-score-head">
+              <span>Today <strong>{s.points}</strong></span>
+              {beat && <span className="briefing-score-beat">▲ beat yesterday</span>}
+              <span className="briefing-score-marks">yesterday {s.yesterday} · best {s.best}</span>
+            </div>
+            <div className="briefing-score-track">
+              <div className={`briefing-score-fill${beat ? " beat" : ""}`}
+                style={{ width: `${Math.min(100, (s.points / max) * 100)}%` }} />
+              {s.yesterday > 0 && (
+                <div className="briefing-score-notch" style={{ left: `${Math.min(99.5, (s.yesterday / max) * 100)}%` }} />
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="briefing-vitals">
         {vitals.hours?.billable && (
           <span className="briefing-chip">billable {vitals.hours.billable.opendia?.toFixed(2)}h

@@ -17,6 +17,7 @@ import { requireAdmin } from "./auth.js";
 import {
   listSupervisorCards, getOpenProjectsByCompany, getInboxItemsByProject,
   getWfHumanProjects, getStaleInProgressProjects, getAllProjects,
+  listRecentlyCompleted, listRecentAcks, listRecentResolvedActions,
 } from "./db.js";
 import { gateForSession } from "./session_gate.js";
 import { searchRecentEmails } from "./gmail.js";
@@ -301,6 +302,49 @@ function monthHours() {
   });
 }
 
+// ── day score (the ever-so-slightly gamified bit) ────────────────────────────
+// Real completions only, no manual state: cards completed today (+3), work
+// sessions closed in today's ledger (+1), operator-inbox acks (+2) and
+// resolved one-click actions (+2). DB timestamps are UTC; each is mapped to
+// its ET day. scores.json keeps each day's high-water mark so yesterday's
+// final score survives midnight and today's bar has a mark to race.
+
+const SCORES_PATH = resolve(BRIEFING_ROOT, "scores.json");
+const etDayOf = (utcish) => {
+  try { return etDay.format(new Date(String(utcish).replace(" ", "T") + (String(utcish).endsWith("Z") ? "" : "Z"))); }
+  catch { return null; }
+};
+
+function todayScore(date) {
+  const sinceUtc = new Date(Date.now() - 48 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+  const cards = listRecentlyCompleted(sinceUtc).filter((r) => etDayOf(r.updated_at) === date).length;
+  const acks = listRecentAcks(sinceUtc).filter((r) => etDayOf(r.acked_at) === date).length;
+  const actions = listRecentResolvedActions(sinceUtc).filter((r) => etDayOf(r.resolved_at) === date).length;
+  let sessions = 0;
+  try {
+    const ledger = readFileSync(resolve(HOME, "OpenDia", "Time", date.slice(0, 4), date.slice(5, 7), `${date}.md`), "utf8");
+    sessions = (ledger.match(new RegExp(`^end: ${date}T`, "gm")) || []).length;
+  } catch {}
+  const points = cards * 3 + acks * 2 + actions * 2 + sessions * 1;
+  return { points, breakdown: { cards, sessions, acks, actions } };
+}
+
+function scoreWithHistory(date) {
+  const score = todayScore(date);
+  let scores = readJson(SCORES_PATH) || {};
+  // High-water mark: acks can be pruned and ledgers roll, so a day's score
+  // never goes backwards once seen.
+  if ((scores[date] || 0) < score.points) {
+    scores[date] = score.points;
+    // keep a month of history
+    scores = Object.fromEntries(Object.entries(scores).sort().slice(-35));
+    try { writeFileSync(SCORES_PATH, JSON.stringify(scores, null, 2)); } catch {}
+  }
+  const yDate = etDay.format(new Date(new Date(`${date}T12:00:00`) - 86_400_000));
+  const best = Math.max(0, ...Object.values(scores));
+  return { ...score, yesterday: scores[yDate] || 0, best };
+}
+
 // ── routes ───────────────────────────────────────────────────────────────────
 
 export function registerBriefingRoutes(app) {
@@ -336,6 +380,7 @@ export function registerBriefingRoutes(app) {
       res.json({
         date, meta,
         generating: { ...inFlight },
+        score: scoreWithHistory(today()),
         hello,
         supervisors,
         roster: listSupervisorCards().map((s) => ({ company: s.company_name, card_id: s.id })),
