@@ -363,12 +363,18 @@ async function sendPile() {
         if (c) client = c.name;
       }
     }
+    // Card link: a strong subject match wins; otherwise fall back to the
+    // client's supervisor card, then its best-ranked open card. A guessed
+    // chip is a navigation aid (one wrong click at worst), and jumping into
+    // the card is how a stale draft gets fixed — the modal's Sync is there.
     let card = null;
     if (client) {
-      const cands = matchProjectCandidates(client, "", d.subject, 1) || [];
-      if (cands[0] && (cands[0].score || 0) >= 4 && cands[0].status !== "completed") {
-        card = { id: cands[0].id, name: cands[0].name };
-      }
+      const cands = (matchProjectCandidates(client, "", d.subject, 5) || [])
+        .filter((c) => c.status !== "completed");
+      const strong = cands.find((c) => (c.score || 0) >= 4);
+      const sup = cands.find((c) => (c.tags || "").split(",").map((t) => t.trim()).includes("supervisor"));
+      const pick = strong || sup || cands[0] || null;
+      if (pick) card = { id: pick.id, name: pick.name, guess: !strong };
     }
     const age_days = d.internalDate ? Math.floor((Date.now() - d.internalDate) / 86_400_000) : null;
     return { id: d.id, subject: d.subject, to: d.to, threadUrl: d.threadUrl, client, card, age_days };

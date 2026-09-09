@@ -245,7 +245,11 @@ export default function Briefing({ onOpenProject }) {
                   <span className="briefing-pile-to">to {d.to}</span>
                 </span>
                 {d.card && onOpenProject && (
-                  <button className="briefing-cardlink" onClick={() => onOpenProject(d.card.id)}>#{d.card.id}</button>
+                  <button className={`briefing-cardlink${d.card.guess ? " guess" : ""}`}
+                    title={d.card.guess ? `best guess for ${d.client}: ${d.card.name}` : d.card.name}
+                    onClick={() => onOpenProject(d.card.id)}>
+                    {d.card.guess ? "≈" : ""}#{d.card.id}
+                  </button>
                 )}
                 {!d.card && d.client && <span className="briefing-pile-client">{d.client}</span>}
               </li>

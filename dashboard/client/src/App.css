@@ -8099,3 +8099,4 @@ html.vt-no-target::view-transition-old(card-morph) {
 .briefing-pile-to { font-size: 0.72rem; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .briefing-pile-client { font-size: 0.72rem; color: var(--text-secondary); white-space: nowrap; }
 .briefing-pile-note { font-size: 0.72rem; color: var(--text-faint); font-style: italic; }
+.briefing-cardlink.guess { opacity: 0.75; }
