@@ -84,6 +84,7 @@ export const NAV_SECTIONS = [
     title: "ADMIN",
     adminOnly: true,
     items: [
+      { key: "briefing",   label: "Briefing",   icon: "☀",    badge: null },
       { key: "billing",    label: "Billing",    icon: "\u{1F4B0}", badge: null },
       { key: "newsletter", label: "Newsletter", icon: "\u{1F4F0}", badge: null },
       { key: "rooms",      label: "Rooms",      icon: "\u{1F6AA}", badge: null },

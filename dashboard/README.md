@@ -289,7 +289,19 @@ Exit by clicking any top-nav button (Board / Inbox / Clients).
 
 ## Admin-only Views
 
-Several views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles-admin-allowlist) above): the nav sidebar's ADMIN section (Billing, Newsletter, Rooms, Agents, Mailroom, SoCal, System) is hidden for non-admins, the command palette omits their actions, and a non-admin landing on an admin view key is bounced to the board. Backend routes are guarded by `requireAdmin` independently of the UI gate. Billing, Newsletter, and System are documented below.
+Several views are gated by the `AUTH_ADMIN_EMAILS` allowlist (see [Roles](#roles-admin-allowlist) above): the nav sidebar's ADMIN section (Briefing, Billing, Newsletter, Rooms, Agents, Mailroom, SoCal, System) is hidden for non-admins, the command palette omits their actions, and a non-admin landing on an admin view key is bounced to the board. Backend routes are guarded by `requireAdmin` independently of the UI gate. Briefing, Billing, Newsletter, and System are documented below.
+
+### Briefing
+
+**Nav → Briefing.** The morning read: generated artifacts land under `~/OpenDia/briefing/YYYY-MM-DD/` (cron at 06:30 ET via `scripts/briefing-cron.sh`, or per-section ↻ buttons) and the view renders the latest with its age. Four sections plus a vitals strip:
+
+- **Vitals** — live, zero AI: month hours (billable + internal), Spark proposals awaiting a decision, planroom wakeups due, and system warnings only when warn/crit (from one `/api/system/health` fetch).
+- **OD Recs** — one budget-capped model run over the whole board picture (deadlines, wfhuman, stale, parked proposals, wakeups, yesterday's ledger) returns THE FIRE (the single highest-leverage thing today) plus up to five ranked recs.
+- **Supervisor check-ins** — roster = companies whose card carries the `supervisor` tag. The server gathers each company's signals (open cards, live session gate states, open inbox items, recent client email) and a tool-less model call judges ok vs attention with specific items.
+- **Morning brief** — the `/hello` operator log for the day, rendered collapsed-to-excerpt. The headless generator runs `/hello` Steps 2–4 (skipping the operator check and dispatch menu) and writes the same `~/OpenDia/operator/log/<date>.md` a manual run does, so either source shows here.
+- **Operator Inbox** — the Agents view's inbox component mounted unchanged (same endpoints, same acks).
+
+`GET /api/briefing` serves artifacts + live vitals; `POST /api/briefing/generate?section=hello|supervisors|recs|all` (admin) fires generators with per-section in-flight guards; costs and durations land in each day's `meta.json`.
 
 ### System
 

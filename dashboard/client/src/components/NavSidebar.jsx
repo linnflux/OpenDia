@@ -71,6 +71,13 @@ const NAV_ICONS = {
       <path d="M1.5 8h2.5l1.5-4 2.5 7 1.5-3h4" />
     </svg>
   ),
+  briefing: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1.5 11h12" />
+      <path d="M4 11a3.5 3.5 0 0 1 7 0" />
+      <path d="M7.5 2.5v2M3 4.5l1.4 1.4M12 4.5l-1.4 1.4" />
+    </svg>
+  ),
   billing: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="1.5" y="3.5" width="12" height="8" rx="1.5" />

@@ -1764,6 +1764,12 @@ export function activeSparkCount({ excludeProposing = false } = {}) {
 export function getSparkRun(projectId) {
   return runs.get(String(projectId));
 }
+// Proposals parked on a human decision — the briefing view's vitals count.
+export function listProposingRuns() {
+  return [...runs.values()]
+    .filter((r) => !r.finishedAt && r.status === "proposing")
+    .map((r) => ({ projectId: r.projectId, runId: r.id }));
+}
 
 // Snapshot of live agent-started runs, for the supervisor executor.
 export function listAgentSparkRuns() {

@@ -26,7 +26,9 @@ const QUEUE_STATUS_LABEL = {
 // as a dismissible inbox. Rows derive from the supervisor's verdict ledger;
 // the ✓ acknowledges an item so the list only ever shows what the operator
 // hasn't dealt with.
-function OperatorInbox({ onOpenProject }) {
+// Exported for the Briefing view, which mounts the same inbox — acks and
+// one-click actions stay one implementation against the same endpoints.
+export function OperatorInbox({ onOpenProject }) {
   const [items, setItems] = useState(null);
   const [actions, setActions] = useState([]);
   const [expanded, setExpanded] = useState(null);

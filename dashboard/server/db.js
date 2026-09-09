@@ -647,6 +647,30 @@ export function findSupervisorCard(companyId) {
   return rows.find((r) => r.tags.split(",").map((t) => t.trim()).includes("supervisor")) || null;
 }
 
+// The morning-briefing roster: every company whose open card carries the
+// `supervisor` tag, one row per company (first tagged card wins).
+export function listSupervisorCards() {
+  const rows = getDb().prepare(`
+    SELECT p.id, p.name, p.tmux_session, p.tags,
+           c.id AS company_id, c.name AS company_name, c.short_name AS company_short
+    FROM projects p JOIN companies c ON p.company_id = c.id
+    WHERE p.status != 'completed' AND p.tags IS NOT NULL
+    ORDER BY c.name, p.id
+  `).all().filter((r) => r.tags.split(",").map((t) => t.trim()).includes("supervisor"));
+  const seen = new Set();
+  return rows.filter((r) => !seen.has(r.company_id) && seen.add(r.company_id));
+}
+
+export function getOpenProjectsByCompany(companyId) {
+  return getDb().prepare(`
+    SELECT p.id, p.name, p.status, p.next_step, p.tmux_session, p.tags,
+           d.name AS division
+    FROM projects p LEFT JOIN divisions d ON p.division_id = d.id
+    WHERE p.company_id = ? AND p.status != 'completed'
+    ORDER BY p.status, p.id
+  `).all(companyId);
+}
+
 export function reorderProjects(status, ids) {
   if (!VALID_STATUSES.has(status)) {
     throw new Error(`Invalid status: ${status}`);

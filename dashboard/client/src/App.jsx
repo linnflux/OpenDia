@@ -22,6 +22,7 @@ import Mailroom from "./components/Mailroom.jsx";
 import SoCal from "./components/SoCal.jsx";
 import Today from "./components/Today.jsx";
 import SystemHealth from "./components/SystemHealth.jsx";
+import Briefing from "./components/Briefing.jsx";
 import Sweep from "./components/Sweep.jsx";
 import NewTaskModal from "./components/NewTaskModal.jsx";
 import { hasTag, toggleTag } from "./tags.js";
@@ -131,7 +132,7 @@ export default function App() {
     fetch("/api/me").then(r => r.ok ? r.json() : null).then(user => {
       setMe(user);
       // Snap non-admins off the billing view if they somehow land on it
-      if (user && !user.is_admin && (view === "billing" || view === "newsletter" || view === "rooms" || view === "agents" || view === "mailroom" || view === "socal" || view === "system")) setView("board");
+      if (user && !user.is_admin && (view === "billing" || view === "newsletter" || view === "rooms" || view === "agents" || view === "mailroom" || view === "socal" || view === "system" || view === "briefing")) setView("board");
     }).catch(() => {});
   }, []);
 
@@ -740,6 +741,8 @@ export default function App() {
             <SoCal />
           ) : view === "system" && me?.is_admin ? (
             <SystemHealth />
+          ) : view === "briefing" && me?.is_admin ? (
+            <Briefing onOpenProject={handleProjectClick} />
           ) : view === "mailroom" && me?.is_admin ? (
             <Mailroom
               me={me}
