@@ -400,3 +400,31 @@ export async function getThreadFull(threadId) {
     });
   return { ok: true, status, threadId, messages };
 }
+
+/**
+ * Every draft is finished work waiting on a human send — the Briefing's
+ * send pile. Nothing here (or anywhere server-side) sends mail; this is a
+ * read-only listing. Returns [{ id, threadId, to, subject, internalDate,
+ * threadUrl }], newest-edited last so age is honest per draft.
+ */
+export async function listDrafts(limit = 25) {
+  const list = await gmailFetch(`/drafts?maxResults=${limit}`);
+  const out = [];
+  for (const d of list?.drafts || []) {
+    const full = await gmailFetch(`/drafts/${d.id}?format=metadata&metadataHeaders=To&metadataHeaders=Subject`);
+    const msg = full?.message;
+    if (!msg) continue;
+    const headers = Object.fromEntries((msg.payload?.headers || []).map((h) => [h.name.toLowerCase(), h.value]));
+    out.push({
+      id: d.id,
+      threadId: msg.threadId || null,
+      to: headers.to || "",
+      subject: headers.subject || "(no subject)",
+      internalDate: Number(msg.internalDate) || null,
+      threadUrl: msg.threadId
+        ? `https://mail.google.com/mail/u/0/#all/${msg.threadId}`
+        : "https://mail.google.com/mail/u/0/#drafts",
+    });
+  }
+  return out;
+}

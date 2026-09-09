@@ -102,7 +102,7 @@ export default function Briefing({ onOpenProject }) {
       label = sup ? `${sup.company}: ${sup.attention?.[Number(idx)]?.item || i.key}` : i.key;
     }
     return { ...i, label };
-  });
+  }).concat(board?.pile?.cleared_items || []);
   const dateLabel = new Date(`${data.date}T12:00:00`).toLocaleDateString([], {
     weekday: "long", month: "long", day: "numeric",
   });
@@ -224,6 +224,38 @@ export default function Briefing({ onOpenProject }) {
         ) : (
           <div className="briefing-empty">{generating.recs ? "Thinking about what matters most…" : "No recommendations generated yet — hit ↻."}</div>
         )}
+      </section>
+
+      <section className="briefing-card">
+        <div className="briefing-sechead">
+          <h2>Send pile</h2>
+          <span className="briefing-age">{(data.sendpile || []).length} drafts waiting on you · +4 each when they leave Gmail</span>
+        </div>
+        {(data.sendpile || []).length === 0 ? (
+          <div className="briefing-empty">Nothing drafted and waiting — the pile is clear ★</div>
+        ) : (
+          <ul className="briefing-pile">
+            {data.sendpile.map((d) => (
+              <li key={d.id}>
+                <span className={`briefing-pile-age${d.age_days >= 7 ? " crit" : d.age_days >= 3 ? " warn" : ""}`}>
+                  {d.age_days == null ? "—" : d.age_days === 0 ? "today" : `${d.age_days}d`}
+                </span>
+                <span className="briefing-pile-main">
+                  <a href={d.threadUrl} target="_blank" rel="noreferrer" className="briefing-pile-subject">{d.subject}</a>
+                  <span className="briefing-pile-to">to {d.to}</span>
+                </span>
+                {d.card && onOpenProject && (
+                  <button className="briefing-cardlink" onClick={() => onOpenProject(d.card.id)}>#{d.card.id}</button>
+                )}
+                {!d.card && d.client && <span className="briefing-pile-client">{d.client}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="briefing-pile-note">
+          Nothing sends from here — open the draft, send it in Gmail, and the row clears itself.
+          {data.sendpile_older > 0 && <> ({data.sendpile_older} drafts older than 60 days sit in Gmail, off the board — worth a cleanup pass someday.)</>}
+        </div>
       </section>
 
       <section className="briefing-card">

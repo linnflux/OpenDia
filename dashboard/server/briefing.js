@@ -20,7 +20,8 @@ import {
   listRecentlyCompleted, listRecentAcks, listRecentResolvedActions,
 } from "./db.js";
 import { gateForSession } from "./session_gate.js";
-import { searchRecentEmails } from "./gmail.js";
+import { searchRecentEmails, listDrafts } from "./gmail.js";
+import { getAllClientAliases, getAllCompanies, matchProjectCandidates, getAllInboxItems } from "./db.js";
 import { runClaude } from "./ai.js";
 import { listPlanrooms } from "./planroom_build.js";
 import { listProposingRuns } from "./spark.js";
@@ -316,7 +317,88 @@ function monthHours() {
 // not points: days have different-sized boards).
 
 const SCORES_PATH = resolve(BRIEFING_ROOT, "scores.json");
-const VALUES = { fire: 10, rec: 5, attn: 3, inbox: 2 };
+const VALUES = { fire: 10, rec: 5, draft: 4, attn: 3, inbox: 2 };
+
+// ── the send pile ────────────────────────────────────────────────────────────
+// Every Gmail draft is finished work waiting on a human send — the #1 place
+// days-of-delay were observed to live. Read-only by policy (nothing sends);
+// clearing is automatic: send (or discard) the draft in Gmail and it leaves
+// the pile, which the day's seen-set turns into earned points. Cached 3min —
+// the pile only moves when a human moves it.
+
+let pileCache = { at: 0, value: null };
+
+async function sendPile() {
+  if (pileCache.value && Date.now() - pileCache.at < 3 * 60_000) return pileCache.value;
+  let drafts = [];
+  try { drafts = await listDrafts(); } catch {}
+  const aliases = getAllClientAliases();
+  const companies = getAllCompanies();
+  // Inbox history is the richest learned mapping: every classified email
+  // already carries sender → client_hint. Build address- and domain-level
+  // maps from it (domain only when unambiguous — one client per domain).
+  const byAddr = new Map();
+  const byDomain = new Map();
+  try {
+    for (const i of getAllInboxItems()) {
+      if (!i.client_hint || !i.from_addr) continue;
+      const em = (String(i.from_addr).match(/[\w.+-]+@[\w.-]+/) || [null])[0]?.toLowerCase();
+      if (!em) continue;
+      if (!byAddr.has(em)) byAddr.set(em, i.client_hint);
+      const dom = em.split("@")[1];
+      if (byDomain.has(dom) && byDomain.get(dom) !== i.client_hint) byDomain.set(dom, null); // ambiguous
+      else if (!byDomain.has(dom)) byDomain.set(dom, i.client_hint);
+    }
+  } catch {}
+  const value = drafts.map((d) => {
+    const email = (String(d.to).match(/[\w.+-]+@[\w.-]+/) || [null])[0]?.toLowerCase() || null;
+    let client = null;
+    if (email) {
+      const domain = email.split("@")[1];
+      const a = aliases.find((x) => x.match_type === "email" && String(x.match_value).toLowerCase() === email);
+      if (a) client = a.client_hint;
+      if (!client) client = byAddr.get(email) || byDomain.get(domain) || null;
+      if (!client) {
+        const c = companies.find((c) => c.website && String(c.website).toLowerCase().includes(domain));
+        if (c) client = c.name;
+      }
+    }
+    let card = null;
+    if (client) {
+      const cands = matchProjectCandidates(client, "", d.subject, 1) || [];
+      if (cands[0] && (cands[0].score || 0) >= 4 && cands[0].status !== "completed") {
+        card = { id: cands[0].id, name: cands[0].name };
+      }
+    }
+    const age_days = d.internalDate ? Math.floor((Date.now() - d.internalDate) / 86_400_000) : null;
+    return { id: d.id, subject: d.subject, to: d.to, threadUrl: d.threadUrl, client, card, age_days };
+  }).sort((a, b) => (b.age_days ?? 0) - (a.age_days ?? 0));
+  // Fossils (untouched for months or years — Gmail keeps drafts forever) are
+  // dead inventory, not today's sends: they'd drown the live pile and price
+  // unclearable points into the board. Live pile = edited within 60 days;
+  // the rest surface only as a count.
+  const live = value.filter((d) => d.age_days != null && d.age_days <= 60);
+  const result = { drafts: live, older: value.length - live.length };
+  pileCache = { at: Date.now(), value: result };
+  return result;
+}
+
+// The day's seen-set: a draft that was on today's pile and is gone now was
+// sent (or deliberately discarded) — cleared either way, it left the pile.
+function pileBoard(date, drafts) {
+  const path = resolve(dayDir(date), "sendpile.json");
+  const seen = readJson(path) || {};
+  let changed = false;
+  for (const d of drafts) {
+    if (!seen[d.id]) { seen[d.id] = { subject: d.subject, seen_at: new Date().toISOString() }; changed = true; }
+  }
+  if (changed) { try { writeFileSync(path, JSON.stringify(seen, null, 2)); } catch {} }
+  const liveIds = new Set(drafts.map((d) => d.id));
+  const cleared_items = Object.entries(seen)
+    .filter(([id]) => !liveIds.has(id))
+    .map(([id, s]) => ({ key: `draft-${id}`, value: VALUES.draft, label: `Sent: ${s.subject}`, auto: true }));
+  return { open: drafts.length, cleared: cleared_items.length, cleared_items };
+}
 const etDayOf = (utcish) => {
   try { return etDay.format(new Date(String(utcish).replace(" ", "T") + (String(utcish).endsWith("Z") ? "" : "Z"))); }
   catch { return null; }
@@ -336,8 +418,9 @@ export function writeCheck(date, key, done) {
 }
 
 // The board: resolved per-item state the client renders ✓s from. `supervisors`
-// is passed in because the route already read those artifacts.
-function boardState(date, recs, supervisors) {
+// is passed in because the route already read those artifacts; `pile` comes
+// from sendPile() (async, so gathered by the route).
+function boardState(date, recs, supervisors, pileDrafts) {
   const checks = readChecks(date);
   const sinceUtc = new Date(Date.now() - 48 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
   const completedToday = new Set(
@@ -361,9 +444,12 @@ function boardState(date, recs, supervisors) {
   const resolvedToday = listRecentResolvedActions(sinceUtc).filter((r) => etDayOf(r.resolved_at) === date).length;
   const inboxOpen = inbox.items.length + inbox.actions.length;
   const inboxCleared = ackedToday + resolvedToday;
+  const pile = pileBoard(date, pileDrafts);
 
-  const earned = items.filter((i) => i.done).reduce((a, i) => a + i.value, 0) + inboxCleared * VALUES.inbox;
-  const possible = items.reduce((a, i) => a + i.value, 0) + (inboxOpen + inboxCleared) * VALUES.inbox;
+  const earned = items.filter((i) => i.done).reduce((a, i) => a + i.value, 0)
+    + inboxCleared * VALUES.inbox + pile.cleared * VALUES.draft;
+  const possible = items.reduce((a, i) => a + i.value, 0)
+    + (inboxOpen + inboxCleared) * VALUES.inbox + (pile.open + pile.cleared) * VALUES.draft;
   const pct = possible ? Math.round((earned / possible) * 100) : 0;
 
   // High-water history (a cleared board can shrink when old inbox acks age
@@ -385,6 +471,7 @@ function boardState(date, recs, supervisors) {
     best_pct: bestPct,
     items,
     inbox: { open: inboxOpen, cleared: inboxCleared },
+    pile,
   };
 }
 
@@ -421,10 +508,13 @@ export function registerBriefingRoutes(app) {
       } catch {}
 
       const recs = readJson(resolve(dir, "recs.json"));
+      const pile = await sendPile();
       res.json({
         date, meta,
         generating: { ...inFlight },
-        board: boardState(date, recs, supervisors),
+        board: boardState(date, recs, supervisors, pile.drafts),
+        sendpile: pile.drafts,
+        sendpile_older: pile.older,
         hello,
         supervisors,
         roster: listSupervisorCards().map((s) => ({ company: s.company_name, card_id: s.id })),
