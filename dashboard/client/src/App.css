@@ -8059,3 +8059,24 @@ html.vt-no-target::view-transition-old(card-morph) {
   background: var(--text-secondary); border-radius: 1px; opacity: 0.8;
 }
 @media (prefers-reduced-motion: reduce) { .briefing-score-fill { transition: none; } }
+
+/* Briefing board — check-off buttons and the cleared-today strip. */
+.briefing-check {
+  margin-left: 0.5rem; font-family: inherit; font-size: 0.72rem;
+  background: none; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--timer-open); cursor: pointer; padding: 0.08rem 0.5rem;
+  white-space: nowrap;
+}
+.briefing-check:hover { border-color: var(--timer-open); background: color-mix(in srgb, var(--timer-open) 12%, transparent); }
+.briefing-sup-cleared { font-size: 0.78rem; color: var(--timer-open); }
+.briefing-clearedwrap { opacity: 0.85; }
+.briefing-clearedlist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+.briefing-clearedlist li { display: flex; align-items: baseline; gap: 0.55rem; font-size: 0.82rem; }
+.briefing-cleared-pts { color: var(--timer-open); font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; }
+.briefing-cleared-label { color: var(--text-secondary); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-secondary) 45%, transparent); }
+.briefing-cleared-auto { font-size: 0.68rem; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 0.02rem 0.4rem; }
+.briefing-uncheck {
+  font-family: inherit; font-size: 0.7rem; background: none; border: none;
+  color: var(--text-faint); cursor: pointer; text-decoration: underline; padding: 0;
+}
+.briefing-uncheck:hover { color: var(--text-secondary); }

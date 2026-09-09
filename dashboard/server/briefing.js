@@ -24,6 +24,7 @@ import { searchRecentEmails } from "./gmail.js";
 import { runClaude } from "./ai.js";
 import { listPlanrooms } from "./planroom_build.js";
 import { listProposingRuns } from "./spark.js";
+import { buildOperatorInbox } from "./agents.js";
 
 const HOME = process.env.HOME;
 const BRIEFING_ROOT = resolve(HOME, "OpenDia", "briefing");
@@ -302,47 +303,89 @@ function monthHours() {
   });
 }
 
-// ── day score (the ever-so-slightly gamified bit) ────────────────────────────
-// Real completions only, no manual state: cards completed today (+3), work
-// sessions closed in today's ledger (+1), operator-inbox acks (+2) and
-// resolved one-click actions (+2). DB timestamps are UTC; each is mapped to
-// its ET day. scores.json keeps each day's high-water mark so yesterday's
-// final score survives midnight and today's bar has a mark to race.
+// ── the day board (the ever-so-slightly gamified bit) ────────────────────────
+// Every item on the view carries a value: THE FIRE 10, recs 5, supervisor
+// attention items 3, operator-inbox items and actions 2. Today's possible =
+// everything seen today (still-open + cleared); earned = what got cleared.
+// Clearing happens three ways: the ✓ on a rec/attention item (checks.json,
+// self-reported by design), automatically when an item's card_id is completed
+// today, and through the operator inbox's own ack/resolve machinery. The
+// denominator is live and truthful — new work grows the board.
+// scores.json keeps each day's high-water {earned, possible, pct} so
+// yesterday's completion % survives midnight as the notch to race (percent,
+// not points: days have different-sized boards).
 
 const SCORES_PATH = resolve(BRIEFING_ROOT, "scores.json");
+const VALUES = { fire: 10, rec: 5, attn: 3, inbox: 2 };
 const etDayOf = (utcish) => {
   try { return etDay.format(new Date(String(utcish).replace(" ", "T") + (String(utcish).endsWith("Z") ? "" : "Z"))); }
   catch { return null; }
 };
 
-function todayScore(date) {
-  const sinceUtc = new Date(Date.now() - 48 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
-  const cards = listRecentlyCompleted(sinceUtc).filter((r) => etDayOf(r.updated_at) === date).length;
-  const acks = listRecentAcks(sinceUtc).filter((r) => etDayOf(r.acked_at) === date).length;
-  const actions = listRecentResolvedActions(sinceUtc).filter((r) => etDayOf(r.resolved_at) === date).length;
-  let sessions = 0;
-  try {
-    const ledger = readFileSync(resolve(HOME, "OpenDia", "Time", date.slice(0, 4), date.slice(5, 7), `${date}.md`), "utf8");
-    sessions = (ledger.match(new RegExp(`^end: ${date}T`, "gm")) || []).length;
-  } catch {}
-  const points = cards * 3 + acks * 2 + actions * 2 + sessions * 1;
-  return { points, breakdown: { cards, sessions, acks, actions } };
+function readChecks(date) {
+  return readJson(resolve(dayDir(date), "checks.json")) || {};
 }
 
-function scoreWithHistory(date) {
-  const score = todayScore(date);
+export function writeCheck(date, key, done) {
+  const path = resolve(dayDir(date), "checks.json");
+  const checks = readJson(path) || {};
+  if (done) checks[key] = { done_at: new Date().toISOString() };
+  else delete checks[key];
+  writeFileSync(path, JSON.stringify(checks, null, 2));
+  return checks;
+}
+
+// The board: resolved per-item state the client renders ✓s from. `supervisors`
+// is passed in because the route already read those artifacts.
+function boardState(date, recs, supervisors) {
+  const checks = readChecks(date);
+  const sinceUtc = new Date(Date.now() - 48 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+  const completedToday = new Set(
+    listRecentlyCompleted(sinceUtc).filter((r) => etDayOf(r.updated_at) === date).map((r) => r.id));
+
+  const items = [];
+  const add = (key, value, cardId) => {
+    const auto = cardId != null && completedToday.has(cardId);
+    items.push({ key, value, done: auto || !!checks[key], auto });
+  };
+  if (recs?.fire) add("fire", VALUES.fire, recs.fire.card_id ?? null);
+  (recs?.recs || []).forEach((r, i) => add(`rec-${i}`, VALUES.rec, r.card_id ?? null));
+  for (const s of supervisors) {
+    (s.attention || []).forEach((a, i) => add(`attn-${s.company_id}-${i}`, VALUES.attn, a.card_id ?? null));
+  }
+
+  // Operator inbox: open items are on the board; acked/resolved TODAY are the
+  // cleared half (their rows already left the live list).
+  const inbox = buildOperatorInbox();
+  const ackedToday = listRecentAcks(sinceUtc).filter((r) => etDayOf(r.acked_at) === date).length;
+  const resolvedToday = listRecentResolvedActions(sinceUtc).filter((r) => etDayOf(r.resolved_at) === date).length;
+  const inboxOpen = inbox.items.length + inbox.actions.length;
+  const inboxCleared = ackedToday + resolvedToday;
+
+  const earned = items.filter((i) => i.done).reduce((a, i) => a + i.value, 0) + inboxCleared * VALUES.inbox;
+  const possible = items.reduce((a, i) => a + i.value, 0) + (inboxOpen + inboxCleared) * VALUES.inbox;
+  const pct = possible ? Math.round((earned / possible) * 100) : 0;
+
+  // High-water history (a cleared board can shrink when old inbox acks age
+  // past the 7-day window — the day's best % is what the notch remembers).
   let scores = readJson(SCORES_PATH) || {};
-  // High-water mark: acks can be pruned and ledgers roll, so a day's score
-  // never goes backwards once seen.
-  if ((scores[date] || 0) < score.points) {
-    scores[date] = score.points;
-    // keep a month of history
+  const prev = typeof scores[date] === "object" ? scores[date] : null;
+  if (!prev || (prev.pct ?? 0) < pct || (prev.earned ?? 0) < earned) {
+    scores[date] = { earned: Math.max(earned, prev?.earned ?? 0), possible, pct: Math.max(pct, prev?.pct ?? 0) };
     scores = Object.fromEntries(Object.entries(scores).sort().slice(-35));
     try { writeFileSync(SCORES_PATH, JSON.stringify(scores, null, 2)); } catch {}
   }
   const yDate = etDay.format(new Date(new Date(`${date}T12:00:00`) - 86_400_000));
-  const best = Math.max(0, ...Object.values(scores));
-  return { ...score, yesterday: scores[yDate] || 0, best };
+  const y = scores[yDate];
+  const bestPct = Math.max(0, ...Object.values(scores).map((s) => (typeof s === "object" ? s.pct ?? 0 : 0)));
+
+  return {
+    earned, possible, pct,
+    yesterday_pct: typeof y === "object" ? y.pct ?? 0 : 0,
+    best_pct: bestPct,
+    items,
+    inbox: { open: inboxOpen, cleared: inboxCleared },
+  };
 }
 
 // ── routes ───────────────────────────────────────────────────────────────────
@@ -377,14 +420,15 @@ export function registerBriefingRoutes(app) {
             || String(a.company).localeCompare(String(b.company)));
       } catch {}
 
+      const recs = readJson(resolve(dir, "recs.json"));
       res.json({
         date, meta,
         generating: { ...inFlight },
-        score: scoreWithHistory(today()),
+        board: boardState(date, recs, supervisors),
         hello,
         supervisors,
         roster: listSupervisorCards().map((s) => ({ company: s.company_name, card_id: s.id })),
-        recs: readJson(resolve(dir, "recs.json")),
+        recs,
         vitals: {
           hours: await monthHours(),
           spark_proposals: listProposingRuns(),
@@ -393,6 +437,22 @@ export function registerBriefingRoutes(app) {
       });
     } catch (err) {
       console.error("GET /api/briefing error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The ✓ on a rec/attention item. Self-reported by design (it is the
+  // operator's own game); auto-cleared items (card completed) don't need it.
+  app.post("/api/briefing/check", requireAdmin, (req, res) => {
+    const key = String(req.body?.key || "");
+    if (!/^(fire|rec-\d+|attn-\d+-\d+)$/.test(key)) {
+      return res.status(400).json({ error: "bad item key" });
+    }
+    const done = req.body?.done !== false;
+    try {
+      writeCheck(today(), key, done);
+      res.json({ ok: true, key, done });
+    } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });

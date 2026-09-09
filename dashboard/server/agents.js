@@ -1255,6 +1255,80 @@ function listRow(agent) {
   };
 }
 
+// What an action's Approve button will actually execute, spelled out for
+// the UI — the evidence body is prose, but the click applies exactly
+// `patch`, and the operator must see that before clicking (lesson from
+// the first live card_patch: the body narrated more than the click did).
+function shapeOperatorAction(a) {
+  let patch = null;
+  let projectId = null;
+  if (a.kind === "card_patch" || a.kind === "brief") {
+    try {
+      const parsed = JSON.parse(a.action || "null");
+      patch = parsed?.patch || null;
+      projectId = Number(parsed?.project_id) || null;
+    } catch {}
+  }
+  return {
+    id: a.id, kind: a.kind, title: a.title, body: a.body,
+    source: a.source, at: a.created_at,
+    ...(patch ? { patch } : {}), ...(projectId ? { project_id: projectId } : {}),
+  };
+}
+
+// The operator-inbox composition, shared by its route and the Briefing view's
+// day score (which prices these items into the board total).
+export function buildOperatorInbox(showAll = false) {
+  const actions = listOpenOperatorActions().map(shapeOperatorAction);
+  const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
+  if (!supervisor) return { items: [], actions };
+  const since = new Date(Date.now() - 7 * 24 * 3600 * 1000)
+    .toISOString().slice(0, 19).replace("T", " ");
+  const runs = getAgentRunsSince(supervisor.id, since)
+    .filter((r) => r.trigger === "review")
+    .sort((a, b) => (b.started_at || "").localeCompare(a.started_at || ""));
+  const items = [];
+  for (const run of runs) {
+    let detail = null;
+    try { detail = JSON.parse(run.detail || "null"); } catch {}
+    if (!detail) continue;
+    const shadowFor = new Map((detail.reviewed_runs || []).map((r) => [r.project_id, !!r.shadow]));
+    const escalatedIds = new Set((detail.escalated || []).map((e) => e.project_id));
+    for (const e of detail.escalated || []) {
+      items.push({
+        key: `${run.id}:${e.project_id}:esc`,
+        kind: "escalated", at: run.started_at,
+        project_id: e.project_id, name: e.name,
+        certitude: e.certitude ?? null, reason: e.reason || null,
+        note: e.note || null, wouldApprove: !!e.wouldApprove,
+        shadow: shadowFor.get(e.project_id) ?? !supervisor.autopilot,
+      });
+    }
+    for (const a of detail.approved || []) {
+      if (escalatedIds.has(a.project_id)) continue;
+      items.push({
+        key: `${run.id}:${a.project_id}:ok`,
+        kind: "done", at: run.started_at,
+        project_id: a.project_id, name: a.name,
+        certitude: a.certitude ?? null, reason: a.reason || null,
+        report_line: a.report_line || null,
+        outcome_summary: a.outcome?.summary || a.outcome?.status || null,
+        redispatched: !!a.redispatched,
+        shadow: shadowFor.get(a.project_id) ?? !supervisor.autopilot,
+      });
+    }
+  }
+  const acked = new Set(getOperatorAckKeys());
+  const out = items
+    .filter((i) => showAll || !acked.has(i.key))
+    .map((i) => (showAll ? { ...i, acked: acked.has(i.key) } : i))
+    .slice(0, 100);
+  // One-click actions ride alongside the derived verdict items: these are
+  // first-class rows (see handoffs.js), resolved by their own approve/dismiss
+  // routes rather than the ack overlay.
+  return { items: out, actions };
+}
+
 export function mountAgents(app) {
   const stale = interruptStaleAgentRuns();
   if (stale > 0) console.log(`agents: marked ${stale} orphaned heartbeat run(s) interrupted`);
@@ -1348,27 +1422,6 @@ export function mountAgents(app) {
     }
   });
 
-  // What an action's Approve button will actually execute, spelled out for
-  // the UI — the evidence body is prose, but the click applies exactly
-  // `patch`, and the operator must see that before clicking (lesson from
-  // the first live card_patch: the body narrated more than the click did).
-  const shapeOperatorAction = (a) => {
-    let patch = null;
-    let projectId = null;
-    if (a.kind === "card_patch" || a.kind === "brief") {
-      try {
-        const parsed = JSON.parse(a.action || "null");
-        patch = parsed?.patch || null;
-        projectId = Number(parsed?.project_id) || null;
-      } catch {}
-    }
-    return {
-      id: a.id, kind: a.kind, title: a.title, body: a.body,
-      source: a.source, at: a.created_at,
-      ...(patch ? { patch } : {}), ...(projectId ? { project_id: projectId } : {}),
-    };
-  };
-
   // The operator's terminus of the pipeline: what got DONE and what was
   // ESCALATED, as a dismissible inbox. Derived from the same verdict ledger
   // the review-queue reads (7-day window) — the only persisted state is the
@@ -1378,56 +1431,7 @@ export function mountAgents(app) {
   // and an item that failed QA is not done.
   app.get("/api/agents/operator-inbox", requireAdmin, (req, res) => {
     try {
-      const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
-      if (!supervisor) {
-        return res.json({ items: [], actions: listOpenOperatorActions().map(shapeOperatorAction) });
-      }
-      const since = new Date(Date.now() - 7 * 24 * 3600 * 1000)
-        .toISOString().slice(0, 19).replace("T", " ");
-      const runs = getAgentRunsSince(supervisor.id, since)
-        .filter((r) => r.trigger === "review")
-        .sort((a, b) => (b.started_at || "").localeCompare(a.started_at || ""));
-      const items = [];
-      for (const run of runs) {
-        let detail = null;
-        try { detail = JSON.parse(run.detail || "null"); } catch {}
-        if (!detail) continue;
-        const shadowFor = new Map((detail.reviewed_runs || []).map((r) => [r.project_id, !!r.shadow]));
-        const escalatedIds = new Set((detail.escalated || []).map((e) => e.project_id));
-        for (const e of detail.escalated || []) {
-          items.push({
-            key: `${run.id}:${e.project_id}:esc`,
-            kind: "escalated", at: run.started_at,
-            project_id: e.project_id, name: e.name,
-            certitude: e.certitude ?? null, reason: e.reason || null,
-            note: e.note || null, wouldApprove: !!e.wouldApprove,
-            shadow: shadowFor.get(e.project_id) ?? !supervisor.autopilot,
-          });
-        }
-        for (const a of detail.approved || []) {
-          if (escalatedIds.has(a.project_id)) continue;
-          items.push({
-            key: `${run.id}:${a.project_id}:ok`,
-            kind: "done", at: run.started_at,
-            project_id: a.project_id, name: a.name,
-            certitude: a.certitude ?? null, reason: a.reason || null,
-            report_line: a.report_line || null,
-            outcome_summary: a.outcome?.summary || a.outcome?.status || null,
-            redispatched: !!a.redispatched,
-            shadow: shadowFor.get(a.project_id) ?? !supervisor.autopilot,
-          });
-        }
-      }
-      const acked = new Set(getOperatorAckKeys());
-      const showAll = req.query.all === "1";
-      const out = items
-        .filter((i) => showAll || !acked.has(i.key))
-        .map((i) => (showAll ? { ...i, acked: acked.has(i.key) } : i))
-        .slice(0, 100);
-      // One-click actions ride alongside the derived verdict items: these
-      // are first-class rows (see handoffs.js), resolved by their own
-      // approve/dismiss routes rather than the ack overlay.
-      res.json({ items: out, actions: listOpenOperatorActions().map(shapeOperatorAction) });
+      res.json(buildOperatorInbox(req.query.all === "1"));
     } catch (err) {
       console.error("GET /api/agents/operator-inbox error:", err.message);
       res.status(500).json({ error: err.message });

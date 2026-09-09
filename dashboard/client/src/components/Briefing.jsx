@@ -73,11 +73,36 @@ export default function Briefing({ onOpenProject }) {
       .catch(() => {});
   }, [fetchBriefing]);
 
+  // The ✓ on a board item (and its undo from the cleared strip).
+  const check = useCallback((key, done = true) => {
+    fetch("/api/briefing/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, done }),
+    }).then(() => fetchBriefing()).catch(() => {});
+  }, [fetchBriefing]);
+
   if (!data) {
     return <div className="briefing-view"><div className="loading">{error ? `Briefing failed: ${error}` : "Loading briefing…"}</div></div>;
   }
 
-  const { meta = {}, generating = {}, hello, supervisors = [], roster = [], recs, vitals = {} } = data;
+  const { meta = {}, generating = {}, hello, supervisors = [], roster = [], recs, vitals = {}, board } = data;
+  const itemState = new Map((board?.items || []).map((i) => [i.key, i]));
+  const isDone = (key) => !!itemState.get(key)?.done;
+
+  // The cleared strip needs labels; resolve them from the same artifacts the
+  // sections render.
+  const clearedItems = (board?.items || []).filter((i) => i.done).map((i) => {
+    let label = i.key;
+    if (i.key === "fire") label = recs?.fire?.title || "the fire";
+    else if (i.key.startsWith("rec-")) label = recs?.recs?.[Number(i.key.slice(4))]?.title || i.key;
+    else if (i.key.startsWith("attn-")) {
+      const [, cid, idx] = i.key.split("-");
+      const sup = supervisors.find((s) => String(s.company_id) === cid);
+      label = sup ? `${sup.company}: ${sup.attention?.[Number(idx)]?.item || i.key}` : i.key;
+    }
+    return { ...i, label };
+  });
   const dateLabel = new Date(`${data.date}T12:00:00`).toLocaleDateString([], {
     weekday: "long", month: "long", day: "numeric",
   });
@@ -116,23 +141,23 @@ export default function Briefing({ onOpenProject }) {
         </button>
       </header>
 
-      {data.score && (() => {
-        const s = data.score;
-        const max = Math.max(s.points, s.yesterday, 10);
-        const beat = s.yesterday > 0 && s.points > s.yesterday;
+      {board && (() => {
+        const beat = board.yesterday_pct > 0 && board.pct > board.yesterday_pct;
+        const cleared = board.pct >= 100 && board.possible > 0;
         return (
           <div className="briefing-score"
-            title={`${s.breakdown.cards} cards completed · ${s.breakdown.sessions} work sessions closed · ${s.breakdown.acks} inbox items cleared · ${s.breakdown.actions} actions resolved`}>
+            title={`${board.inbox.cleared} inbox items cleared · ${board.inbox.open} still open · board items are worth fire 10 / rec 5 / attention 3 / inbox 2`}>
             <div className="briefing-score-head">
-              <span>Today <strong>{s.points}</strong></span>
-              {beat && <span className="briefing-score-beat">▲ beat yesterday</span>}
-              <span className="briefing-score-marks">yesterday {s.yesterday} · best {s.best}</span>
+              <span>Today <strong>{board.earned}</strong>/{board.possible} pts · <strong>{board.pct}%</strong></span>
+              {cleared && <span className="briefing-score-beat">★ board cleared</span>}
+              {!cleared && beat && <span className="briefing-score-beat">▲ beat yesterday</span>}
+              <span className="briefing-score-marks">yesterday {board.yesterday_pct}% · best {board.best_pct}%</span>
             </div>
             <div className="briefing-score-track">
-              <div className={`briefing-score-fill${beat ? " beat" : ""}`}
-                style={{ width: `${Math.min(100, (s.points / max) * 100)}%` }} />
-              {s.yesterday > 0 && (
-                <div className="briefing-score-notch" style={{ left: `${Math.min(99.5, (s.yesterday / max) * 100)}%` }} />
+              <div className={`briefing-score-fill${beat || cleared ? " beat" : ""}`}
+                style={{ width: `${Math.min(100, board.pct)}%` }} />
+              {board.yesterday_pct > 0 && (
+                <div className="briefing-score-notch" style={{ left: `${Math.min(99.5, board.yesterday_pct)}%` }} />
               )}
             </div>
           </div>
@@ -163,19 +188,22 @@ export default function Briefing({ onOpenProject }) {
         <SectionHead title="OD Recs" meta={meta.recs} section="recs" onRefresh={refresh} generating={generating.recs} />
         {recs?.fire ? (
           <>
-            <div className="briefing-fire">
-              <span className="briefing-fire-label">THE FIRE</span>
-              <div className="briefing-fire-title">
-                {recs.fire.title}
-                {recs.fire.card_id != null && onOpenProject && (
-                  <button className="briefing-cardlink" onClick={() => onOpenProject(recs.fire.card_id)}>#{recs.fire.card_id}</button>
-                )}
+            {!isDone("fire") && (
+              <div className="briefing-fire">
+                <span className="briefing-fire-label">THE FIRE</span>
+                <div className="briefing-fire-title">
+                  {recs.fire.title}
+                  {recs.fire.card_id != null && onOpenProject && (
+                    <button className="briefing-cardlink" onClick={() => onOpenProject(recs.fire.card_id)}>#{recs.fire.card_id}</button>
+                  )}
+                  <button className="briefing-check" title="Did it — clear from the board (+10)" onClick={() => check("fire")}>✓ +10</button>
+                </div>
+                <div className="briefing-fire-why">{recs.fire.why}</div>
+                {recs.fire.first_move && <div className="briefing-fire-move">First move: {recs.fire.first_move}</div>}
               </div>
-              <div className="briefing-fire-why">{recs.fire.why}</div>
-              {recs.fire.first_move && <div className="briefing-fire-move">First move: {recs.fire.first_move}</div>}
-            </div>
+            )}
             <ol className="briefing-reclist">
-              {(recs.recs || []).map((r, i) => (
+              {(recs.recs || []).map((r, i) => ({ r, i })).filter(({ i }) => !isDone(`rec-${i}`)).map(({ r, i }) => (
                 <li key={i}>
                   <span className="briefing-rec-title">
                     {r.title}
@@ -185,9 +213,13 @@ export default function Briefing({ onOpenProject }) {
                   </span>
                   <span className="briefing-rec-why">{r.why}</span>
                   {r.effort && <span className="briefing-effort">{r.effort}</span>}
+                  <button className="briefing-check" title="Did it — clear from the board (+5)" onClick={() => check(`rec-${i}`)}>✓</button>
                 </li>
               ))}
             </ol>
+            {isDone("fire") && (recs.recs || []).every((_, i) => isDone(`rec-${i}`)) && (
+              <div className="briefing-empty">All recommendations cleared ★</div>
+            )}
           </>
         ) : (
           <div className="briefing-empty">{generating.recs ? "Thinking about what matters most…" : "No recommendations generated yet — hit ↻."}</div>
@@ -210,18 +242,23 @@ export default function Briefing({ onOpenProject }) {
                   )}
                 </div>
                 <div className="briefing-sup-summary">{s.summary}</div>
-                {(s.attention || []).length > 0 && (
-                  <ul className="briefing-sup-attn">
-                    {s.attention.map((a, i) => (
-                      <li key={i}>
-                        <strong>{a.item}</strong> — {a.why}
-                        {a.card_id != null && onOpenProject && (
-                          <button className="briefing-cardlink" onClick={() => onOpenProject(a.card_id)}>#{a.card_id}</button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {(s.attention || []).length > 0 && (() => {
+                  const open = s.attention.map((a, i) => ({ a, i })).filter(({ i }) => !isDone(`attn-${s.company_id}-${i}`));
+                  if (open.length === 0) return <div className="briefing-sup-cleared">attention cleared ✓</div>;
+                  return (
+                    <ul className="briefing-sup-attn">
+                      {open.map(({ a, i }) => (
+                        <li key={i}>
+                          <strong>{a.item}</strong> — {a.why}
+                          {a.card_id != null && onOpenProject && (
+                            <button className="briefing-cardlink" onClick={() => onOpenProject(a.card_id)}>#{a.card_id}</button>
+                          )}
+                          <button className="briefing-check" title="Handled — clear from the board (+3)" onClick={() => check(`attn-${s.company_id}-${i}`)}>✓</button>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                })()}
               </div>
             ))}
             {missingCheckins.map((r) => (
@@ -251,6 +288,23 @@ export default function Briefing({ onOpenProject }) {
           </div>
         )}
       </section>
+
+      {clearedItems.length > 0 && (
+        <section className="briefing-card briefing-clearedwrap">
+          <div className="briefing-sechead"><h2>Cleared today ({clearedItems.length})</h2></div>
+          <ul className="briefing-clearedlist">
+            {clearedItems.map((c) => (
+              <li key={c.key}>
+                <span className="briefing-cleared-pts">+{c.value}</span>
+                <span className="briefing-cleared-label">{c.label}</span>
+                {c.auto
+                  ? <span className="briefing-cleared-auto" title="Cleared automatically — its card was completed">auto</span>
+                  : <button className="briefing-uncheck" title="Undo — back onto the board" onClick={() => check(c.key, false)}>undo</button>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="briefing-card briefing-opinbox">
         <OperatorInbox onOpenProject={onOpenProject} />
