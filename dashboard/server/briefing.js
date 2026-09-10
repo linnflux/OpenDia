@@ -395,7 +395,7 @@ async function sendPile() {
       if (pick) card = { id: pick.id, name: pick.name, guess: !strong };
     }
     const age_days = d.internalDate ? Math.floor((Date.now() - d.internalDate) / 86_400_000) : null;
-    return { id: d.id, subject: d.subject, to: d.to, threadUrl: d.threadUrl, client, card, age_days };
+    return { id: d.id, threadId: d.threadId, subject: d.subject, to: d.to, threadUrl: d.threadUrl, client, card, age_days };
   }).sort((a, b) => (b.age_days ?? 0) - (a.age_days ?? 0));
   // Fossils (untouched for months or years — Gmail keeps drafts forever) are
   // dead inventory, not today's sends: they'd drown the live pile and price

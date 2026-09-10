@@ -62,6 +62,7 @@ export default function App() {
   // runroom, doorway → planroom) and the ?planroom= deep link.
   const [planroomCard, setPlanroomCard] = useState(null);
   const [runroomSession, setRunroomSession] = useState(null);
+  const [mailroomDraft, setMailroomDraft] = useState(null); // { draftId, threadId } — send pile → Mailroom
   const [selectedInboxItem, setSelectedInboxItem] = useState(null);
   const [pendingClientKey, setPendingClientKey] = useState(null);
   // One of the NAV_ITEMS keys. "tara" used to live here too; it is a filter on
@@ -655,6 +656,7 @@ export default function App() {
               // would just re-open the same room/card via initial props.
               setRunroomSession(null);
               setPlanroomCard(null);
+              setMailroomDraft(null);
               setViewNonce((n) => n + 1);
             } else {
               setView(key);
@@ -742,12 +744,14 @@ export default function App() {
           ) : view === "system" && me?.is_admin ? (
             <SystemHealth />
           ) : view === "briefing" && me?.is_admin ? (
-            <Briefing onOpenProject={handleProjectClick} />
+            <Briefing onOpenProject={handleProjectClick}
+              onOpenDraft={(d) => { setMailroomDraft(d); setView("mailroom"); }} />
           ) : view === "mailroom" && me?.is_admin ? (
             <Mailroom
               me={me}
               onOpenProject={handleProjectClick}
               onOpenPlanroom={(cardId) => { setPlanroomCard(cardId); setView("planrooms"); }}
+              initialDraft={mailroomDraft}
             />
           ) : (
             <Clients

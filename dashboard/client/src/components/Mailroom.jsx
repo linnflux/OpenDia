@@ -159,7 +159,7 @@ function ProposedDraft({ text, onSentReport }) {
   );
 }
 
-export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
+export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDraft = null }) {
   const [threads, setThreads] = useState(null); // null = loading
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(null); // full unhandled-inbox count
@@ -181,6 +181,14 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
   const [ensureError, setEnsureError] = useState(null);
   const [selectWaiting, setSelectWaiting] = useState(null); // gate reason, or null
   const [selectError, setSelectError] = useState(null);
+
+  // The draft workspace (send pile → here): the REAL Gmail draft, editable.
+  const [draft, setDraft] = useState(null);          // getDraftFull payload
+  const [draftBody, setDraftBody] = useState("");
+  const [draftError, setDraftError] = useState(null);
+  const [draftGone, setDraftGone] = useState(false); // 404 = probably sent ★
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState(null);
 
   // undefined = no observation yet (never chime on the first poll).
   const wasWorking = useRef(undefined);
@@ -318,6 +326,98 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
     await deliverSelect(thread.threadId, thread.subject);
   }
 
+  // ── Draft workspace ───────────────────────────────────────────────────
+  // Open a real Gmail draft: load it, select its thread for context (WITHOUT
+  // the thread-select "run the roundup" delivery — the draft select below
+  // frames the session instead), and point the session at the draft.
+  async function openDraft({ draftId, threadId }) {
+    setDraft(null); setDraftError(null); setDraftGone(false); setDraftSavedAt(null);
+    let d = null;
+    try {
+      const r = await fetch(`/api/mailroom/drafts/${encodeURIComponent(draftId)}${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`);
+      if (r.status === 404) { setDraftGone(true); return; }
+      d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      setDraft(d);
+      setDraftBody(d.body);
+    } catch (e) {
+      setDraftError(e.message);
+      return;
+    }
+    // Thread context in the normal pane machinery (state/session polls hang
+    // off `selected`).
+    if (d.threadId) {
+      setSelected({ threadId: d.threadId, subject: d.headers.subject });
+      setDetail(null); setDetailError(null); setContext(null);
+      setMailState(null); setOpenMessages(new Set());
+      setSelectWaiting(null); setSelectError(null);
+      pendingSelectRef.current = null;
+      wasWorking.current = undefined;
+      fetch(`/api/mailroom/threads/${encodeURIComponent(d.threadId)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((t) => { if (t) { setDetail(t); const last = t.messages?.[t.messages.length - 1]; if (last) setOpenMessages(new Set([last.id])); } })
+        .catch((e) => setDetailError(e.message));
+      fetch(`/api/mailroom/threads/${encodeURIComponent(d.threadId)}/context`)
+        .then((r) => (r.ok ? r.json() : null)).then(setContext).catch(() => {});
+    }
+    // Ensure + frame the session around THIS draft (server waits out a cold
+    // spawn before delivering).
+    fetch(`/api/mailroom/drafts/${encodeURIComponent(d.id)}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ threadId: d.threadId, subject: d.headers.subject, to: d.headers.to }),
+    }).catch(() => {});
+  }
+
+  useEffect(() => {
+    if (initialDraft?.draftId) openDraft(initialDraft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function saveDraft() {
+    if (!draft || draftSaving) return;
+    setDraftSaving(true); setDraftError(null);
+    try {
+      const r = await fetch(`/api/mailroom/drafts/${encodeURIComponent(draft.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: draftBody }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      setDraft((prev) => (prev ? { ...prev, id: d.id || prev.id, body: draftBody } : prev));
+      setDraftSavedAt(Date.now());
+    } catch (e) {
+      setDraftError(e.message);
+    } finally {
+      setDraftSaving(false);
+    }
+  }
+
+  async function refreshDraft() {
+    if (!draft) return;
+    setDraftError(null);
+    try {
+      const r = await fetch(`/api/mailroom/drafts/${encodeURIComponent(draft.id)}${draft.threadId ? `?threadId=${encodeURIComponent(draft.threadId)}` : ""}`);
+      if (r.status === 404) { setDraftGone(true); return; }
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      setDraft(d);
+      setDraftBody(d.body);
+      setDraftSavedAt(null);
+    } catch (e) {
+      setDraftError(e.message);
+    }
+  }
+
+  function ensureSession() {
+    setEnsuring(true); setEnsureError(null);
+    fetch("/api/mailroom/session/ensure", { method: "POST" })
+      .then((r) => r.json().then((d) => { if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`); }))
+      .catch((e) => setEnsureError(e.message))
+      .finally(() => { setEnsuring(false); fetchMailState(); });
+  }
+
   function toggleMessage(id) {
     setOpenMessages((prev) => {
       const next = new Set(prev);
@@ -448,10 +548,39 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
       </aside>
 
       <main className="mailroom-main">
-        {!selected ? (
+        {draftGone ? (
+          <div className="mailroom-pane-empty">Draft's gone — probably sent ★ The send pile clears itself.</div>
+        ) : !selected && !draft ? (
           <div className="mailroom-pane-empty">Select a thread to open it.</div>
         ) : (
           <>
+            {draft && (
+              <section className="mailroom-draft">
+                <div className="mailroom-draft-head">
+                  <span className="mailroom-draft-title">✎ Draft</span>
+                  <span className="mailroom-draft-meta">to {draft.headers.to || "(no recipient)"}</span>
+                  <a className="mailroom-draft-gmail" href={draft.threadUrl} target="_blank" rel="noreferrer">Open in Gmail ↗</a>
+                  <button className="mailroom-draft-refresh" onClick={refreshDraft}
+                    title="Re-read from Gmail — picks up edits the session made">↻</button>
+                </div>
+                {draft.htmlDerived && (
+                  <div className="mailroom-draft-note">This draft was HTML — shown as text; saving converts it to plain text.</div>
+                )}
+                <textarea className="mailroom-draft-body" value={draftBody}
+                  onChange={(e) => { setDraftBody(e.target.value); setDraftSavedAt(null); }}
+                  rows={Math.min(18, Math.max(6, draftBody.split("\n").length + 1))} />
+                <div className="mailroom-draft-actions">
+                  <button className="mailroom-draft-save" onClick={saveDraft}
+                    disabled={draftSaving || draftBody === draft.body}>
+                    {draftSaving ? "Saving…" : "Save to Gmail"}
+                  </button>
+                  {draftSavedAt && <span className="mailroom-draft-saved">saved ✓</span>}
+                  {draftError && <span className="mailroom-error">{draftError}</span>}
+                  <span className="mailroom-draft-hint">Sending stays in Gmail — send it there and the pile row clears.</span>
+                </div>
+              </section>
+            )}
+            {selected && <>
             <header className="mailroom-thread-header">
               <h2>{selected.subject || "(no subject)"}</h2>
             </header>
@@ -475,7 +604,7 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
                 </div>
               )}
               {selectError && <div className="mailroom-error">Could not reach the session: {selectError}</div>}
-              {!mailState && !ensuring && !ensureError && !selectWaiting && !selectError && (
+              {!draft && !mailState && !ensuring && !ensureError && !selectWaiting && !selectError && (
                 <div className="mailroom-roundup-status">Running the roundup…</div>
               )}
               {mailState?.roundup_md && (
@@ -508,8 +637,14 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom }) {
             {session?.gate?.reason === "dialog-open" && session.gate.dialog && (
               <DialogCard key={session.gate.dialog.fingerprint} dialog={session.gate.dialog} endpoints={endpoints} />
             )}
+            {session && session.exists === false && (
+              <button className="mailroom-session-start" onClick={ensureSession} disabled={ensuring}>
+                {ensuring ? "Starting the mailroom session…" : "▶ Start the mailroom session"}
+              </button>
+            )}
             <ThinkingStrip working={session?.gate?.working} />
             <Composer gate={session?.gate} endpoints={endpoints} />
+            </>}
           </>
         )}
       </main>

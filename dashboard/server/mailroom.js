@@ -2,7 +2,7 @@ import { readFileSync, existsSync, mkdirSync, appendFileSync } from "fs";
 import { resolve } from "path";
 import { execFileSync } from "child_process";
 import { requireAdmin } from "./auth.js";
-import { listInboxThreadsPage, getThreadFull } from "./gmail.js";
+import { listInboxThreadsPage, getThreadFull, getDraftFull, updateDraftBody, listDrafts } from "./gmail.js";
 import {
   getInboxItemByThreadId, getAllClientAliases, matchProjectCandidates,
   getProjectById, getAllCompanies,
@@ -26,10 +26,12 @@ import { sessionExists, spawnSession } from "./runroom_build.js";
 // but one conversation. Every route here is admin-only: requireLinnfluxUser
 // already gates the whole app (index.js), so each route adds requireAdmin.
 //
-// Phase C (this build) is converse-only: no route here ever creates a Gmail
-// draft. `proposed_draft`/`handled` are read straight through from the state
-// file (whatever shape a future phase-D session writes) but nothing in this
-// module or the paired `/mailroom view` skill mode calls gmail_create_draft.
+// Phase C was converse-only. Phase D (2026-09-09, the Briefing send pile's
+// draft workspace) adds exactly one write: users.drafts.UPDATE on an
+// existing draft — never create-from-nothing, and NEVER send. Sending stays
+// a human act in Gmail; that act is also what clears the send pile.
+// `proposed_draft`/`handled` are still read straight through from the state
+// file.
 
 const HOME = process.env.HOME || "/home/linnflux";
 const MAILROOM_DIR = resolve(HOME, "OpenDia", "mailroom");
@@ -135,6 +137,38 @@ function companyFromDomain(fromHeader) {
 }
 
 const KEYMAP = { esc: "Escape", enter: "Enter", up: "Up", down: "Down", left: "Left", right: "Right", space: "Space" };
+
+// A reboot's tmux-resurrect restore recreates sessions as BARE SHELLS —
+// claude is not in resurrect's process whitelist — so "mailroom" can exist
+// while holding nothing but a prompt. sessionExists() alone then blocks every
+// respawn forever (found 2026-09-09: the session lane had been dead since
+// the 9/3 reboot). A zombie is: session exists, pane runs a plain shell.
+function mailroomZombie() {
+  try {
+    const cmds = execFileSync("tmux", ["list-panes", "-t", MAILROOM_SESSION, "-F", "#{pane_current_command}"],
+      { encoding: "utf8", timeout: 3000 }).trim().split("\n");
+    return cmds.length > 0 && cmds.every((c) => ["bash", "zsh", "sh"].includes(c));
+  } catch { return false; }
+}
+
+// Shared by /session/ensure and the draft select: spawn (killing a shell
+// zombie first), or report the session already live. Returns
+// { ok, spawned?, error? }.
+function ensureMailroomSession() {
+  if (sessionExists(MAILROOM_SESSION)) {
+    if (!mailroomZombie()) return { ok: true, spawned: false };
+    try { execFileSync("tmux", ["kill-session", "-t", MAILROOM_SESSION], { timeout: 3000 }); }
+    catch (e) { return { ok: false, error: `could not clear zombie session: ${e.message}` }; }
+  }
+  if (!existsSync(MAILROOM_BRIEF)) return { ok: false, error: `brief missing: ${MAILROOM_BRIEF}` };
+  let final;
+  try { final = spawnSession(MAILROOM_SESSION, MAILROOM_BRIEF, ["--yolo"]); }
+  catch (e) { return { ok: false, error: `spawn failed: ${e.message}` }; }
+  if (final !== MAILROOM_SESSION) {
+    return { ok: false, error: `spawned as "${final}", not "${MAILROOM_SESSION}" — a stray session may already hold the name` };
+  }
+  return { ok: true, spawned: true };
+}
 
 // The freshness floor sessionPlanFile needs, for a standing session that has
 // no plan.json to read `created` from. Session name prefixes truncate short
@@ -328,22 +362,85 @@ export function registerMailroomRoutes(app) {
   // acceptEdits newly exposes — it only removes a one-time approval gate
   // that had nothing to approve.
   app.post("/api/mailroom/session/ensure", requireAdmin, (_req, res) => {
-    if (sessionExists(MAILROOM_SESSION)) return res.json({ session: MAILROOM_SESSION, spawned: false });
-    if (!existsSync(MAILROOM_BRIEF)) return res.status(500).json({ error: `brief missing: ${MAILROOM_BRIEF}` });
-    let final;
+    const r = ensureMailroomSession();
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ session: MAILROOM_SESSION, spawned: !!r.spawned });
+  });
+
+  // ── Draft workspace (Phase D) — read + UPDATE an existing draft, never
+  // send. Gmail draft ids are "r" + optional "-" + digits.
+  const DRAFT_ID_RE = /^r-?\d{4,25}$/;
+
+  app.get("/api/mailroom/drafts/:draftId", requireAdmin, async (req, res) => {
+    const { draftId } = req.params;
+    if (!DRAFT_ID_RE.test(draftId)) return res.status(400).json({ error: "bad draft id" });
     try {
-      final = spawnSession(MAILROOM_SESSION, MAILROOM_BRIEF, ["--yolo"]);
-    } catch (e) {
-      return res.status(502).json({ error: `spawn failed: ${e.message}` });
+      let draft = await getDraftFull(draftId);
+      let resolvedFrom = null;
+      // The session's MCP edit pattern is delete-then-recreate, which changes
+      // the draft id — re-resolve by thread so the workspace survives a
+      // session edit (and tells the client to swap ids).
+      const qThread = String(req.query.threadId || "");
+      if (!draft.ok && draft.status === 404 && THREAD_ID_RE.test(qThread)) {
+        const pile = await listDrafts();
+        const match = pile.find((d) => d.threadId === qThread);
+        if (match) { draft = await getDraftFull(match.id); resolvedFrom = draftId; }
+      }
+      if (!draft.ok) {
+        return res.status(draft.status === 404 ? 404 : 502)
+          .json({ error: draft.status === 404 ? "draft not found — probably sent" : `gmail ${draft.status}` });
+      }
+      res.json({ ...draft, resolvedFrom });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-    // The fixed name should never collide — nothing else uses "mailroom".
-    // If dispatch_spawn.sh suffixed it anyway, something already holds the
-    // name; fail loudly rather than binding the view to a session it did
-    // not mean.
-    if (final !== MAILROOM_SESSION) {
-      return res.status(500).json({ error: `spawned as "${final}", not "${MAILROOM_SESSION}" — a stray session may already hold the name` });
+  });
+
+  app.put("/api/mailroom/drafts/:draftId", requireAdmin, async (req, res) => {
+    const { draftId } = req.params;
+    if (!DRAFT_ID_RE.test(draftId)) return res.status(400).json({ error: "bad draft id" });
+    const body = typeof req.body?.body === "string" ? req.body.body : null;
+    if (body == null) return res.status(400).json({ error: "body required" });
+    if (body.length > 50_000) return res.status(400).json({ error: "body too large" });
+    try {
+      const result = await updateDraftBody(draftId, body);
+      if (!result.ok) return res.status(502).json({ error: result.error || `gmail ${result.status}` });
+      mkdirSync(MAILROOM_DIR, { recursive: true });
+      try {
+        appendFileSync(SENDS_LOG, `${new Date().toISOString()} ${req.user?.login || "?"} [draft-edit]: updated draft ${draftId} (${body.length} chars)\n`);
+      } catch {}
+      res.json({ ok: true, id: result.id, threadId: result.threadId });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-    res.json({ session: MAILROOM_SESSION, spawned: true });
+  });
+
+  // Point the standing session at a draft: ensure it's alive (waiting out a
+  // fresh spawn's boot), then deliver the working frame. The composer takes
+  // over from there.
+  app.post("/api/mailroom/drafts/:draftId/select", requireAdmin, async (req, res) => {
+    const { draftId } = req.params;
+    if (!DRAFT_ID_RE.test(draftId)) return res.status(400).json({ error: "bad draft id" });
+    const ensured = ensureMailroomSession();
+    if (!ensured.ok) return res.status(502).json({ error: ensured.error });
+    if (ensured.spawned) {
+      // A cold spawn takes a while to grow an input box.
+      for (let i = 0; i < 30; i++) {
+        if (gateForSession(MAILROOM_SESSION).ok) break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+    const clean = (v, n) => String(v || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, n);
+    const subject = clean(req.body?.subject, 150);
+    const to = clean(req.body?.to, 100);
+    const qThread = String(req.body?.threadId || "");
+    const threadId = THREAD_ID_RE.test(qThread) ? qThread : null;
+    mkdirSync(MAILROOM_DIR, { recursive: true });
+    const text = `[mailroom] Nick is working draft ${draftId}${threadId ? ` (thread ${threadId})` : ""} — "${subject}" to ${to}. When he asks for changes: FIRST re-read the thread for anything new since the draft was written and say what you find, then apply his instructions by editing the draft itself (delete-and-recreate keeps it a draft). NEVER send it.`;
+    const { status, body } = deliver({
+      tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "draft",
+    });
+    res.status(status).json(body);
   });
 
   app.post("/api/mailroom/threads/:threadId/select", requireAdmin, (req, res) => {

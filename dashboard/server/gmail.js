@@ -428,3 +428,88 @@ export async function listDrafts(limit = 25) {
   }
   return out;
 }
+
+// ── Draft workspace (read + UPDATE, never send) ─────────────────────────────
+// The token already carries gmail.compose + gmail.modify; what was missing
+// was any write-capable helper. This one exists for exactly one call:
+// users.drafts.update. No send helper exists in this file, and none may be
+// added — sending is a human act in Gmail, always.
+
+async function gmailFetchJson(path, { method = "GET", body = null } = {}) {
+  const token = await getAccessToken();
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const json = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, json };
+}
+
+function headerMap(payload) {
+  return Object.fromEntries((payload?.headers || []).map((h) => [h.name.toLowerCase(), h.value]));
+}
+
+function payloadHasPlainText(payload) {
+  if (!payload) return false;
+  if ((payload.mimeType || "").toLowerCase() === "text/plain") return true;
+  return (payload.parts || []).some(payloadHasPlainText);
+}
+
+export async function getDraftFull(draftId) {
+  const { ok, status, json } = await gmailFetchJson(`/drafts/${encodeURIComponent(draftId)}?format=full`);
+  if (!ok) return { ok, status };
+  const msg = json?.message || {};
+  const h = headerMap(msg.payload);
+  return {
+    ok: true, status,
+    id: json.id,
+    threadId: msg.threadId || null,
+    headers: {
+      to: h.to || "", cc: h.cc || "", subject: h.subject || "",
+      inReplyTo: h["in-reply-to"] || "", references: h.references || "",
+    },
+    body: extractBody(msg.payload) || "",
+    htmlDerived: !payloadHasPlainText(msg.payload),
+    threadUrl: msg.threadId ? `https://mail.google.com/mail/u/0/#all/${msg.threadId}` : "https://mail.google.com/mail/u/0/#drafts",
+  };
+}
+
+// RFC2047 for non-ASCII subjects; addresses pass through as Gmail gave them.
+function encodeHeaderValue(v) {
+  return /^[\x20-\x7e]*$/.test(v) ? v : `=?UTF-8?B?${Buffer.from(v, "utf8").toString("base64")}?=`;
+}
+
+/**
+ * Replace a draft's body with plain text, preserving its own headers
+ * (To/Cc/Subject/In-Reply-To/References) and threadId so a reply stays a
+ * reply in its thread. users.drafts.update keeps it a DRAFT — this cannot
+ * send.
+ */
+export async function updateDraftBody(draftId, text) {
+  const current = await getDraftFull(draftId);
+  if (!current.ok) return current;
+  const h = current.headers;
+  const lines = [
+    `To: ${h.to}`,
+    ...(h.cc ? [`Cc: ${h.cc}`] : []),
+    `Subject: ${encodeHeaderValue(h.subject)}`,
+    ...(h.inReplyTo ? [`In-Reply-To: ${h.inReplyTo}`] : []),
+    ...(h.references ? [`References: ${h.references}`] : []),
+    'Content-Type: text/plain; charset="UTF-8"',
+    "MIME-Version: 1.0",
+    "",
+    String(text ?? ""),
+  ];
+  const raw = Buffer.from(lines.join("\r\n"), "utf8").toString("base64")
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const { ok, status, json } = await gmailFetchJson(`/drafts/${encodeURIComponent(draftId)}`, {
+    method: "PUT",
+    body: { message: { raw, ...(current.threadId ? { threadId: current.threadId } : {}) } },
+  });
+  if (!ok) return { ok, status, error: json?.error?.message || `drafts.update ${status}` };
+  return { ok: true, status, id: json?.id || draftId, threadId: json?.message?.threadId || current.threadId };
+}
