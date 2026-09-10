@@ -184,14 +184,26 @@ app.get("/api/me", (req, res) => res.json(req.user));
 // The dashboard deploys many times a day; a tab left open keeps its old
 // bundle and silently misses new features (observed: the plan-approval panel
 // shipped mid-evening and an open room tab never rendered it). The version is
-// the built bundle's hashed filename, read once at boot — the client compares
-// it to its own script tag and offers a reload when they diverge.
+// the built bundle's hashed filename — the client compares it to its own
+// script tag and offers a reload when they diverge. Re-read whenever
+// index.html's mtime changes: a boot-time snapshot went stale after a
+// rebuild-without-restart and pinned the reload banner on for every tab
+// (observed 9/10 — even a fresh reload "diverged" from the stale value).
+const INDEX_HTML = resolve(__dirname, "..", "client", "dist", "index.html");
 let bundleVersion = null;
-try {
-  const html = readFileSync(resolve(__dirname, "..", "client", "dist", "index.html"), "utf8");
-  bundleVersion = (html.match(/\/assets\/(index-[\w-]+\.js)/) || [])[1] || null;
-} catch {}
-app.get("/api/version", (_req, res) => res.json({ bundle: bundleVersion }));
+let bundleMtime = 0;
+function currentBundle() {
+  try {
+    const mtime = statSync(INDEX_HTML).mtimeMs;
+    if (mtime !== bundleMtime) {
+      bundleMtime = mtime;
+      const html = readFileSync(INDEX_HTML, "utf8");
+      bundleVersion = (html.match(/\/assets\/(index-[\w-]+\.js)/) || [])[1] || null;
+    }
+  } catch {}
+  return bundleVersion;
+}
+app.get("/api/version", (_req, res) => res.json({ bundle: currentBundle() }));
 
 // API routes
 app.get("/api/projects", (req, res) => {
