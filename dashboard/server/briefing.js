@@ -10,7 +10,7 @@
 // minutes. Cron hits POST /api/briefing/generate at 06:30 ET daily
 // (scripts/briefing-cron.sh); the view's per-section ↻ hits the same route.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { resolve } from "path";
 import { spawn, execFile } from "child_process";
 import { requireAdmin } from "./auth.js";
@@ -34,7 +34,7 @@ const OPERATOR_LOG_DIR = resolve(HOME, "OpenDia", "operator", "log");
 const DEADLINE_CACHE = resolve(HOME, "OpenDia", "Time", ".deadline-alerts.json");
 const CLAUDE_BIN = resolve(HOME, ".local", "bin", "claude");
 
-const HELLO_BUDGET_USD = 1.5;
+const HELLO_BUDGET_USD = 2.5;
 const HELLO_KILL_MS = 10 * 60 * 1000;
 const SECTIONS = ["hello", "supervisors", "recs"];
 
@@ -109,11 +109,16 @@ function generateHello(date) {
     inFlight.hello = false;
     let cost = null;
     try { cost = JSON.parse(stdout)?.total_cost_usd ?? null; } catch {}
+    // Judge the artifact, not the exit code: a run that wrote today's log and
+    // then died (e.g. crossing the budget cap during wrap-up) still briefed.
+    let wroteLog = false;
+    try { wroteLog = statSync(resolve(OPERATOR_LOG_DIR, `${date}.md`)).mtimeMs >= started; } catch {}
     writeMeta(date, "hello", {
       generated_at: new Date().toISOString(),
       ms: Date.now() - started,
       cost_usd: cost,
-      error: code === 0 ? null : `claude exited ${code}`,
+      error: code === 0 || wroteLog ? null : `claude exited ${code}`,
+      note: code !== 0 && wroteLog ? `claude exited ${code} after writing the log (likely budget cap)` : undefined,
     });
   });
   proc.on("error", (err) => {
@@ -238,6 +243,56 @@ function yesterdayLedger() {
   } catch { return "(no ledger yesterday)"; }
 }
 
+// Ground the model's output against the board (2026-09-10, after the first
+// cron morning produced a fire on a deliberately-parked card and a rec linked
+// to an unrelated card): a card_id survives only when the card actually
+// matches the item's text, and the fire only when its card is actionable NOW.
+// A wrong link is worse than no link; a manufactured fire is worse than none.
+function groundRecs(recs, projects, date) {
+  const index = new Map(projects.map((p) => [p.id, p]));
+  const log = [];
+  const ground = (item, label) => {
+    if (!item || item.card_id == null) return;
+    const card = index.get(item.card_id);
+    if (!card) {
+      log.push(`${label}: dropped unknown card #${item.card_id}`);
+      item.card_id = null;
+      return;
+    }
+    const text = `${item.title || ""} ${item.why || ""}`.toLowerCase();
+    const tokens = `${card.name} ${card.company_name || ""}`.toLowerCase()
+      .split(/[^a-z0-9]+/).filter((t) => t.length > 3);
+    if (!tokens.some((t) => text.includes(t))) {
+      log.push(`${label}: unlinked card #${item.card_id} (${card.name}) — item text doesn't match it`);
+      item.card_id = null;
+    }
+  };
+  ground(recs.fire, "fire");
+  (recs.recs || []).forEach((r, i) => ground(r, `rec-${i}`));
+
+  // The fire must be actionable NOW per its own card: not parked in ice, not
+  // future-dated. (Unsent drafts stay covered — the send pile carries them.)
+  const eligible = (item) => {
+    if (!item || item.card_id == null) return true;
+    const card = index.get(item.card_id);
+    if (!card) return true;
+    if (card.status === "ice") return false;
+    const m = (card.next_step || "").match(/^(\d{4}-\d{2}-\d{2})/);
+    return !(m && m[1] > date);
+  };
+  if (recs.fire && !eligible(recs.fire)) {
+    log.push(`fire demoted: card #${recs.fire.card_id} is parked (ice or future-dated) — parked work is not a fire`);
+    recs.fire = null;
+    const i = (recs.recs || []).findIndex(eligible);
+    if (i >= 0) {
+      const promoted = recs.recs.splice(i, 1)[0];
+      recs.fire = { title: promoted.title, why: promoted.why, first_move: promoted.first_move || null, card_id: promoted.card_id ?? null };
+      log.push(`promoted rec "${String(promoted.title).slice(0, 60)}" to fire`);
+    }
+  }
+  return log;
+}
+
 async function generateRecs(date) {
   if (inFlight.recs) return false;
   inFlight.recs = true;
@@ -259,6 +314,11 @@ async function generateRecs(date) {
         .filter((p) => /^\d{4}-\d{2}-\d{2}/.test(p.next_step || "") && p.next_step.slice(0, 10) <= date)
         .map((p) => ({ id: p.id, name: p.name, company: p.company_name, next_step: p.next_step })).slice(0, 40),
       yesterday_ledger: yesterdayLedger(),
+      // Authoritative card index — the ONLY legal source of card_id values.
+      cards: projects.map((p) => ({
+        id: p.id, name: p.name, company: p.company_name, status: p.status,
+        next_step: (p.next_step || "").slice(0, 80),
+      })),
     };
     const prompt = [
       "You are OpenDia, a genuine partner in running this web-services company.",
@@ -270,21 +330,37 @@ async function generateRecs(date) {
       "unblocking stuck work over internal polish. Effort is a rough size:",
       '"minutes", "an hour", "half a day".',
       "",
+      "Hard rules — violating any of these makes the whole section worthless:",
+      "- card_id must be COPIED from the `cards` index, and only onto an item",
+      "  that is actually about that card (name/company must match). If no",
+      "  card fits, OMIT card_id. Never guess, never reuse a nearby id.",
+      '- A card with status "ice" or a next_step dated after today is PARKED',
+      "  on purpose. Parked work is never the fire, and is a rec only if",
+      "  something in today's data changes its math (say what changed).",
+      "- Unsent Gmail drafts already surface in the send pile; don't make",
+      "  \"send a draft\" the fire.",
+      "- If nothing genuinely burns, return \"fire\": null. A quiet morning is",
+      "  a real answer; a manufactured fire destroys trust in this section.",
+      "",
       "Return STRICT JSON only, exactly this shape:",
       '{ "fire": { "title": "...", "why": "...", "first_move": "...", "card_id": 123 },',
       '  "recs": [ { "title": "...", "why": "...", "effort": "...", "card_id": 123 } ] }',
-      "card_id optional everywhere.",
+      "card_id optional everywhere; fire may be null.",
       "",
       JSON.stringify(blob, null, 1),
     ].join("\n");
     const out = await runClaude(prompt, { model: "sonnet", timeoutMs: 180000 });
     const recs = parseModelJson(out);
+    recs.recs = Array.isArray(recs.recs) ? recs.recs.slice(0, 5) : [];
+    recs.fire = recs.fire || null;
+    const grounding = groundRecs(recs, projects, date);
     writeFileSync(resolve(dayDir(date), "recs.json"), JSON.stringify({
       generated_at: new Date().toISOString(),
-      fire: recs.fire || null,
-      recs: Array.isArray(recs.recs) ? recs.recs.slice(0, 5) : [],
+      fire: recs.fire,
+      recs: recs.recs,
+      grounding,
     }, null, 2));
-    writeMeta(date, "recs", { generated_at: new Date().toISOString(), ms: Date.now() - started, error: null });
+    writeMeta(date, "recs", { generated_at: new Date().toISOString(), ms: Date.now() - started, error: null, grounding: grounding.length ? grounding : undefined });
   } catch (err) {
     writeMeta(date, "recs", { error: err.message, ms: Date.now() - started });
   } finally {
@@ -444,6 +520,14 @@ export function writeCheck(date, key, done) {
 // The board: resolved per-item state the client renders ✓s from. `supervisors`
 // is passed in because the route already read those artifacts; `pile` comes
 // from sendPile() (async, so gathered by the route).
+// Board item keys are content-addressed (a slug of the item's own text), not
+// positional: a regenerated recs list must never let an old check clear a
+// DIFFERENT item that happens to land on the same index. Must match slugKey
+// in Briefing.jsx.
+function slugKey(text) {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "item";
+}
+
 function boardState(date, recs, supervisors, pileDrafts) {
   const checks = readChecks(date);
   const sinceUtc = new Date(Date.now() - 48 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
@@ -456,9 +540,9 @@ function boardState(date, recs, supervisors, pileDrafts) {
     items.push({ key, value, done: auto || !!checks[key], auto });
   };
   if (recs?.fire) add("fire", VALUES.fire, recs.fire.card_id ?? null);
-  (recs?.recs || []).forEach((r, i) => add(`rec-${i}`, VALUES.rec, r.card_id ?? null));
+  (recs?.recs || []).forEach((r) => add(`rec-${slugKey(r.title)}`, VALUES.rec, r.card_id ?? null));
   for (const s of supervisors) {
-    (s.attention || []).forEach((a, i) => add(`attn-${s.company_id}-${i}`, VALUES.attn, a.card_id ?? null));
+    (s.attention || []).forEach((a) => add(`attn-${s.company_id}-${slugKey(a.item)}`, VALUES.attn, a.card_id ?? null));
   }
 
   // Operator inbox: open items are on the board; acked/resolved TODAY are the
@@ -559,7 +643,7 @@ export function registerBriefingRoutes(app) {
   // operator's own game); auto-cleared items (card completed) don't need it.
   app.post("/api/briefing/check", requireAdmin, (req, res) => {
     const key = String(req.body?.key || "");
-    if (!/^(fire|rec-\d+|attn-\d+-\d+)$/.test(key)) {
+    if (!/^(fire|rec-[a-z0-9-]{1,40}|attn-\d+-[a-z0-9-]{1,40})$/.test(key)) {
       return res.status(400).json({ error: "bad item key" });
     }
     const done = req.body?.done !== false;

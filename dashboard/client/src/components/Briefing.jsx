@@ -11,6 +11,10 @@ import { CompanyMark } from "./RoomListCard.jsx";
 
 const POLL_MS = 30_000;
 
+// Board check keys are content-addressed — must match slugKey in briefing.js.
+const slugKey = (text) =>
+  String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "item";
+
 const fmtAge = (iso) => {
   if (!iso) return null;
   const min = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -91,15 +95,19 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
   const isDone = (key) => !!itemState.get(key)?.done;
 
   // The cleared strip needs labels; resolve them from the same artifacts the
-  // sections render.
+  // sections render. Keys are content-addressed (must match slugKey in
+  // briefing.js) so a regenerated list can't remap a check onto another item.
   const clearedItems = (board?.items || []).filter((i) => i.done).map((i) => {
     let label = i.key;
     if (i.key === "fire") label = recs?.fire?.title || "the fire";
-    else if (i.key.startsWith("rec-")) label = recs?.recs?.[Number(i.key.slice(4))]?.title || i.key;
-    else if (i.key.startsWith("attn-")) {
-      const [, cid, idx] = i.key.split("-");
-      const sup = supervisors.find((s) => String(s.company_id) === cid);
-      label = sup ? `${sup.company}: ${sup.attention?.[Number(idx)]?.item || i.key}` : i.key;
+    else if (i.key.startsWith("rec-")) {
+      const slug = i.key.slice(4);
+      label = (recs?.recs || []).find((r) => slugKey(r.title) === slug)?.title || i.key;
+    } else if (i.key.startsWith("attn-")) {
+      const m = i.key.match(/^attn-(\d+)-(.+)$/);
+      const sup = m && supervisors.find((s) => String(s.company_id) === m[1]);
+      const item = sup && (sup.attention || []).find((a) => slugKey(a.item) === m[2]);
+      label = sup ? `${sup.company}: ${item?.item || i.key}` : i.key;
     }
     return { ...i, label };
   }).concat(board?.pile?.cleared_items || []);
@@ -203,8 +211,8 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
               </div>
             )}
             <ol className="briefing-reclist">
-              {(recs.recs || []).map((r, i) => ({ r, i })).filter(({ i }) => !isDone(`rec-${i}`)).map(({ r, i }) => (
-                <li key={i}>
+              {(recs.recs || []).map((r) => ({ r, k: `rec-${slugKey(r.title)}` })).filter(({ k }) => !isDone(k)).map(({ r, k }) => (
+                <li key={k}>
                   <span className="briefing-rec-title">
                     {r.title}
                     {r.card_id != null && onOpenProject && (
@@ -213,11 +221,11 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
                   </span>
                   <span className="briefing-rec-why">{r.why}</span>
                   {r.effort && <span className="briefing-effort">{r.effort}</span>}
-                  <button className="briefing-check" title="Did it — clear from the board (+5)" onClick={() => check(`rec-${i}`)}>✓</button>
+                  <button className="briefing-check" title="Did it — clear from the board (+5)" onClick={() => check(k)}>✓</button>
                 </li>
               ))}
             </ol>
-            {isDone("fire") && (recs.recs || []).every((_, i) => isDone(`rec-${i}`)) && (
+            {isDone("fire") && (recs.recs || []).every((r) => isDone(`rec-${slugKey(r.title)}`)) && (
               <div className="briefing-empty">All recommendations cleared ★</div>
             )}
           </>
@@ -285,17 +293,17 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
                 </div>
                 <div className="briefing-sup-summary">{s.summary}</div>
                 {(s.attention || []).length > 0 && (() => {
-                  const open = s.attention.map((a, i) => ({ a, i })).filter(({ i }) => !isDone(`attn-${s.company_id}-${i}`));
+                  const open = s.attention.map((a) => ({ a, k: `attn-${s.company_id}-${slugKey(a.item)}` })).filter(({ k }) => !isDone(k));
                   if (open.length === 0) return <div className="briefing-sup-cleared">attention cleared ✓</div>;
                   return (
                     <ul className="briefing-sup-attn">
-                      {open.map(({ a, i }) => (
-                        <li key={i}>
+                      {open.map(({ a, k }) => (
+                        <li key={k}>
                           <strong>{a.item}</strong> — {a.why}
                           {a.card_id != null && onOpenProject && (
                             <button className="briefing-cardlink" onClick={() => onOpenProject(a.card_id)}>#{a.card_id}</button>
                           )}
-                          <button className="briefing-check" title="Handled — clear from the board (+3)" onClick={() => check(`attn-${s.company_id}-${i}`)}>✓</button>
+                          <button className="briefing-check" title="Handled — clear from the board (+3)" onClick={() => check(k)}>✓</button>
                         </li>
                       ))}
                     </ul>
