@@ -24,27 +24,55 @@ const fmtAge = (iso) => {
   return h < 24 ? `${h}h ${min % 60}m ago` : `${Math.floor(h / 24)}d ago`;
 };
 
-function SectionHead({ title, meta, section, onRefresh, generating }) {
+// Collapse state persists per section so mobile can keep only what's needed
+// open. localStorage is a per-viewer convenience — absent or blocked, every
+// section just starts open.
+function useCollapsed() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("od-briefing-collapsed")) || {}; } catch { return {}; }
+  });
+  const toggle = useCallback((k) => setCollapsed((c) => {
+    const next = { ...c, [k]: !c[k] };
+    try { localStorage.setItem("od-briefing-collapsed", JSON.stringify(next)); } catch {}
+    return next;
+  }), []);
+  return [collapsed, toggle];
+}
+
+function Section({ id, title, meta, section, onRefresh, generating, collapsed, onToggle, summary, className, children }) {
+  const closed = !!collapsed[id];
   return (
-    <div className="briefing-sechead">
-      <h2>{title}</h2>
-      {meta?.generated_at && <span className="briefing-age">{fmtAge(meta.generated_at)}</span>}
-      {meta?.error && <span className="briefing-err" title={meta.error}>generation error</span>}
-      {onRefresh && (
-        <button className="briefing-refresh" disabled={generating} title={`Regenerate ${title.toLowerCase()}`}
-          onClick={() => onRefresh(section)}>
-          {generating ? "generating…" : "↻"}
-        </button>
-      )}
-    </div>
+    <section className={`briefing-card${className ? ` ${className}` : ""}${closed ? " collapsed" : ""}`}>
+      <div className="briefing-sechead clickable" onClick={() => onToggle(id)}>
+        <span className={`briefing-chev${closed ? "" : " open"}`}>▸</span>
+        <h2>{title}</h2>
+        {closed && summary && <span className="briefing-age">{summary}</span>}
+        {!closed && meta?.generated_at && <span className="briefing-age">{fmtAge(meta.generated_at)}</span>}
+        {meta?.error && <span className="briefing-err" title={meta.error}>generation error</span>}
+        {onRefresh && !closed && (
+          <button className="briefing-refresh" disabled={generating} title={`Regenerate ${title.toLowerCase()}`}
+            onClick={(e) => { e.stopPropagation(); onRefresh(section); }}>
+            {generating ? "generating…" : "↻"}
+          </button>
+        )}
+      </div>
+      {!closed && children}
+    </section>
   );
 }
+
+// The brief is markdown with bare #123 card references; turn each into a
+// clickable chip before rendering. Digit-only after "#" keeps headings
+// ("## Goals") and Gmail thread URLs ("#all/…") untouched.
+const linkCards = (md) =>
+  String(md || "").replace(/#(\d{1,4})\b/g, '<a class="briefing-cardref" data-card="$1">#$1</a>');
 
 export default function Briefing({ onOpenProject, onOpenDraft }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
   const [briefOpen, setBriefOpen] = useState(false);
+  const [collapsed, toggle] = useCollapsed();
   const inFlightRef = useRef(0);
 
   const fetchBriefing = useCallback(async () => {
@@ -192,8 +220,9 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
         ))}
       </div>
 
-      <section className="briefing-card briefing-recs">
-        <SectionHead title="OD Recs" meta={meta.recs} section="recs" onRefresh={refresh} generating={generating.recs} />
+      <Section id="recs" title="OD Recs" className="briefing-recs" meta={meta.recs} section="recs"
+        onRefresh={refresh} generating={generating.recs} collapsed={collapsed} onToggle={toggle}
+        summary={recs?.fire && !isDone("fire") ? `🔥 ${recs.fire.title}` : `${(recs?.recs || []).length} recs`}>
         {recs?.fire ? (
           <>
             {!isDone("fire") && (
@@ -232,13 +261,11 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
         ) : (
           <div className="briefing-empty">{generating.recs ? "Thinking about what matters most…" : "No recommendations generated yet — hit ↻."}</div>
         )}
-      </section>
+      </Section>
 
-      <section className="briefing-card">
-        <div className="briefing-sechead">
-          <h2>Send pile</h2>
-          <span className="briefing-age">{(data.sendpile || []).length} drafts waiting on you · +4 each when they leave Gmail</span>
-        </div>
+      <Section id="pile" title="Send pile" collapsed={collapsed} onToggle={toggle}
+        summary={`${(data.sendpile || []).length} drafts`}>
+        <div className="briefing-pile-note">{(data.sendpile || []).length} drafts waiting on you · +4 each when they leave Gmail</div>
         {(data.sendpile || []).length === 0 ? (
           <div className="briefing-empty">Nothing drafted and waiting — the pile is clear ★</div>
         ) : (
@@ -276,10 +303,11 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
           Nothing sends from here — open the draft, send it in Gmail, and the row clears itself.
           {data.sendpile_older > 0 && <> ({data.sendpile_older} drafts older than 60 days sit in Gmail, off the board — worth a cleanup pass someday.)</>}
         </div>
-      </section>
+      </Section>
 
-      <section className="briefing-card">
-        <SectionHead title="Hub check-ins" meta={meta.supervisors} section="supervisors" onRefresh={refresh} generating={generating.supervisors} />
+      <Section id="hubs" title="Hub check-ins" meta={meta.supervisors} section="supervisors"
+        onRefresh={refresh} generating={generating.supervisors} collapsed={collapsed} onToggle={toggle}
+        summary={`${supervisors.filter((s) => s.status === "attention").length} of ${supervisors.length || roster.length} flagged`}>
         {supervisors.length === 0 ? (
           <div className="briefing-empty">{generating.supervisors ? "Checking in with each company…" : "No check-ins yet — hit ↻."}</div>
         ) : (
@@ -321,14 +349,24 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
             ))}
           </div>
         )}
-      </section>
+      </Section>
 
-      <section className="briefing-card">
-        <SectionHead title="Morning brief" meta={meta.hello} section="hello" onRefresh={refresh} generating={generating.hello} />
+      <Section id="hello" title="Morning brief" meta={meta.hello} section="hello"
+        onRefresh={refresh} generating={generating.hello} collapsed={collapsed} onToggle={toggle}
+        summary={meta.hello?.generated_at ? fmtAge(meta.hello.generated_at) : null}>
         {hello ? (
           <>
             <div className="briefing-hello markdown-body"
-              dangerouslySetInnerHTML={{ __html: marked.parse(briefOpen ? hello : briefExcerpt) }} />
+              onClick={(e) => {
+                const ref = e.target.closest?.("[data-card]");
+                if (ref && onOpenProject) { e.preventDefault(); onOpenProject(Number(ref.dataset.card)); }
+              }}
+              dangerouslySetInnerHTML={{
+                // breaks:false here — CardModal sets breaks:true globally for
+                // card notes, but the brief is hard-wrapped markdown that must
+                // reflow to the card width, not break at the source's 76 cols.
+                __html: marked.parse(linkCards(briefOpen ? hello : briefExcerpt), { breaks: false }),
+              }} />
             <button className="briefing-expand" onClick={() => setBriefOpen((v) => !v)}>
               {briefOpen ? "Collapse" : "Show the full brief"}
             </button>
@@ -339,11 +377,11 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
               : "No brief for this date yet — the 6:30 cron writes it, /hello in the operator session writes it, or hit ↻."}
           </div>
         )}
-      </section>
+      </Section>
 
       {clearedItems.length > 0 && (
-        <section className="briefing-card briefing-clearedwrap">
-          <div className="briefing-sechead"><h2>Cleared today ({clearedItems.length})</h2></div>
+        <Section id="cleared" title="Cleared today" className="briefing-clearedwrap"
+          collapsed={collapsed} onToggle={toggle} summary={`${clearedItems.length} items`}>
           <ul className="briefing-clearedlist">
             {clearedItems.map((c) => (
               <li key={c.key}>
@@ -355,12 +393,13 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
               </li>
             ))}
           </ul>
-        </section>
+        </Section>
       )}
 
-      <section className="briefing-card briefing-opinbox">
+      <Section id="inbox" title="Operator inbox" className="briefing-opinbox"
+        collapsed={collapsed} onToggle={toggle}>
         <OperatorInbox onOpenProject={onOpenProject} />
-      </section>
+      </Section>
     </div>
   );
 }
