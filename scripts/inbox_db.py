@@ -142,6 +142,28 @@ def create_inbox_item(gmail_id, thread_id, from_addr, subject,
         con.close()
 
 
+def get_open_project_for_thread(thread_id: str):
+    """
+    Most recent open project already linked to this Gmail thread via a prior
+    inbox item. "Open" is any status but completed — a reply on a finished
+    job is new work and may mint a new card. Returns project id or None.
+    """
+    con = _con()
+    try:
+        row = con.execute(
+            """
+            SELECT p.id FROM inbox_items i
+            JOIN projects p ON p.id = i.project_id
+            WHERE i.thread_id = ? AND p.status != 'completed'
+            ORDER BY i.id DESC LIMIT 1
+            """,
+            (thread_id,),
+        ).fetchone()
+        return row["id"] if row else None
+    finally:
+        con.close()
+
+
 def get_inbox_item_by_gmail_id(gmail_id: str):
     """Fetch a single inbox item by gmail_id. Returns dict or None."""
     con = _con()

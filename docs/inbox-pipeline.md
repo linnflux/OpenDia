@@ -34,9 +34,13 @@ below.
   client mappings) is checked before classification; corrections saved from
   the Inbox modal as "Save as alias" apply to all future mail from that
   sender without touching the model.
-- **No match → auto-create.** If Stage A can't match an existing dashboard
-  project, it creates one in `wfhuman` status ("Auto-created from inbox: …")
-  and links the new `inbox_items` row to it.
+- **No match → thread first, then auto-create.** If Stage A can't match an
+  existing dashboard project, it first checks whether a prior `inbox_items`
+  row on the same `thread_id` links to a still-open (non-`completed`)
+  project — a new reply attaches to that card instead of minting a sibling.
+  Only a genuinely new thread (or a reply on a completed job) creates a
+  card in `wfhuman` status ("Auto-created from inbox: …") and links the new
+  `inbox_items` row to it.
 - **Dedup before side effects.** Stage A checks `inbox_items` by the latest
   inbound message's `gmail_id` BEFORE classifying, creating a project, or
   inserting a queue message. A re-applied label on an already-ingested

@@ -31,6 +31,7 @@ from inbox_db import (
     get_inbox_item_by_gmail_id,
     update_inbox_item,
     ensure_project_for_inbox,
+    get_open_project_for_thread,
     lookup_alias,
 )
 from gmail_helper import (
@@ -278,8 +279,17 @@ def _process_thread(
             log.warning("  refusing requires_server_access on the changes@ path")
         result["requires_server_access"] = False
 
-    # Ensure a project exists — auto-create in wfhuman if no match found
+    # Ensure a project exists — auto-create in wfhuman if no match found.
+    # Thread continuity beats auto-create: gmail_id dedup above only catches a
+    # re-label of the same message, so each new reply on a thread reaches this
+    # point with a fresh gmail_id. If a prior message on this thread already
+    # spawned a card that is still open, attach to it instead of minting a
+    # sibling card.
     project_id = result.get("project_id")
+    if project_id is None:
+        project_id = get_open_project_for_thread(thread_id)
+        if project_id is not None:
+            log.info(f"  Thread already maps to open project id={project_id} — attaching")
     if project_id is None:
         project_id = ensure_project_for_inbox(
             client_hint=result["client_hint"],
