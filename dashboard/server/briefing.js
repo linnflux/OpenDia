@@ -90,6 +90,13 @@ function generateHello(date) {
     "  no questions. End your run right after the log file is written.",
     "- Never send email or write to Notion; this run is read-and-summarize only",
     "  (the log file is the one artifact).",
+    "- LANES: the Briefing view renders this log NEXT TO the operator inbox",
+    "  (decision briefs, agent actions), the send pile (unsent Gmail drafts),",
+    "  the hub check-ins (per-client attention items), and OD Recs. Those",
+    "  queues itemize their own contents — do NOT re-list their items here.",
+    "  Reference each queue in at most one line with a count, and spend this",
+    "  log on what the queues can't show: what changed overnight, anomalies,",
+    "  cross-client connections, and carryover goals that live in no queue.",
   ].join("\n");
 
   const proc = spawn(CLAUDE_BIN, [
