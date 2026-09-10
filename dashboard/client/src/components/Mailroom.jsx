@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { marked } from "marked";
 import {
-  DialogCard, Composer, ThinkingStrip, decorateMarkdown, primeAudio, playDoneChime, copyText,
+  DialogCard, Composer, ThinkingStrip, LiveOutput, decorateMarkdown, primeAudio, playDoneChime, copyText,
   GATE_REASONS,
 } from "./runroom/shared.jsx";
 
@@ -189,6 +189,10 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
   const [draftGone, setDraftGone] = useState(false); // 404 = probably sent ★
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState(null);
+  // Refs mirror the draft + its refresher for the poll closure (fetchMailState
+  // is memoized on `selected` and must not go stale on draft state).
+  const draftRef = useRef(null);
+  const refreshDraftRef = useRef(null);
 
   // undefined = no observation yet (never chime on the first poll).
   const wasWorking = useRef(undefined);
@@ -197,6 +201,9 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
   // dropped so the poll loop can redeliver it the moment the gate reopens —
   // the operator's click must not silently go nowhere.
   const pendingSelectRef = useRef(null); // { threadId, subject } | null
+  // A draft select the gate refused (session busy) — redelivered the moment
+  // the gate opens, same contract as pendingSelectRef.
+  const pendingDraftRef = useRef(null); // { draftId, threadId, subject, to } | null
 
   // Prime the completion chime on the first real gesture, same pattern as
   // Runroom.jsx's default export — this view has its own audio context since
@@ -361,12 +368,16 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
         .then((r) => (r.ok ? r.json() : null)).then(setContext).catch(() => {});
     }
     // Ensure + frame the session around THIS draft (server waits out a cold
-    // spawn before delivering).
+    // spawn before delivering). A busy-gate refusal is held and redelivered
+    // when the gate opens — the click must not silently go nowhere.
+    const framePayload = { draftId: d.id, threadId: d.threadId, subject: d.headers.subject, to: d.headers.to };
     fetch(`/api/mailroom/drafts/${encodeURIComponent(d.id)}/select`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ threadId: d.threadId, subject: d.headers.subject, to: d.headers.to }),
-    }).catch(() => {});
+      body: JSON.stringify(framePayload),
+    }).then(async (r) => {
+      if (!r.ok) pendingDraftRef.current = framePayload;
+    }).catch(() => { pendingDraftRef.current = framePayload; });
   }
 
   useEffect(() => {
@@ -410,6 +421,9 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
     }
   }
 
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+  refreshDraftRef.current = refreshDraft;
+
   function ensureSession() {
     setEnsuring(true); setEnsureError(null);
     fetch("/api/mailroom/session/ensure", { method: "POST" })
@@ -440,7 +454,13 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => {
         const nowWorking = !!s?.gate?.working;
-        if (wasWorking.current === true && !nowWorking) playDoneChime();
+        if (wasWorking.current === true && !nowWorking) {
+          playDoneChime();
+          // The session just finished a turn — if a draft is open, it may
+          // have edited it (delete-and-recreate). Re-read from Gmail so the
+          // pane shows the session's changes without a manual ↻.
+          if (draftRef.current) refreshDraftRef.current?.();
+        }
         wasWorking.current = nowWorking;
         setSession(s);
         // The gate just opened and a select is still waiting to go out —
@@ -450,6 +470,16 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
         if (pending && s?.gate?.ok && selected?.threadId === pending.threadId) {
           pendingSelectRef.current = null;
           deliverSelect(pending.threadId, pending.subject);
+        }
+        const pendingDraft = pendingDraftRef.current;
+        if (pendingDraft && s?.gate?.ok) {
+          pendingDraftRef.current = null;
+          fetch(`/api/mailroom/drafts/${encodeURIComponent(pendingDraft.draftId)}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(pendingDraft),
+          }).then((r) => { if (!r.ok) pendingDraftRef.current = pendingDraft; })
+            .catch(() => { pendingDraftRef.current = pendingDraft; });
         }
       })
       .catch(() => {});
@@ -634,6 +664,9 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
               )}
             </div>
 
+            {session?.live_output?.lines?.length > 0 && (
+              <LiveOutput live={session.live_output} />
+            )}
             {session?.gate?.reason === "dialog-open" && session.gate.dialog && (
               <DialogCard key={session.gate.dialog.fingerprint} dialog={session.gate.dialog} endpoints={endpoints} />
             )}

@@ -151,6 +151,46 @@ function mailroomZombie() {
   } catch { return false; }
 }
 
+// deliver() types the text then Enter; when the session is just finishing a
+// turn, the Enter can be swallowed and the text left STUCK in the input box —
+// which also closes the gate for every later message (found live twice on
+// 2026-09-09: first a draft preamble, then a composer prompt, each wedging
+// the whole lane). Verify after every successful delivery and nudge: idle +
+// no-input-box means stuck text; one extra Enter submits it, and is harmless
+// on an empty box.
+async function deliverNudged(args) {
+  const result = deliver(args);
+  if (result.status === 200) {
+    // Fire-and-forget watchdog: text delivered mid-turn sits in the input
+    // box until the turn ends, and the queued Enter is sometimes eaten (three
+    // live variants on 2026-09-09). Wait out a working turn (up to ~45s),
+    // then if our text is still visibly stuck, one corrective Enter submits
+    // it — harmless on an empty box. Detached so the HTTP response isn't
+    // held hostage to a long turn.
+    (async () => {
+      try {
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const g = gateForSession(MAILROOM_SESSION);
+          if (g.working) continue;
+          const closedStuck = !g.ok && g.reason === "no-input-box";
+          const pane = execFileSync("tmux", ["capture-pane", "-t", MAILROOM_SESSION, "-p"],
+            { encoding: "utf8", timeout: 3000 });
+          const head = String(args.text || "").slice(0, 25);
+          const openStuck = head.length > 5
+            && pane.split("\n").some((l) => l.trimStart().startsWith("❯") && l.includes(head));
+          if (closedStuck || openStuck) {
+            execFileSync("tmux", ["send-keys", "-t", MAILROOM_SESSION, "Enter"], { timeout: 3000 });
+            continue; // re-verify on the next pass
+          }
+          break; // idle and not stuck — delivered
+        }
+      } catch {}
+    })();
+  }
+  return result;
+}
+
 // Shared by /session/ensure and the draft select: spawn (killing a shell
 // zombie first), or report the session already live. Returns
 // { ok, spawned?, error? }.
@@ -437,13 +477,13 @@ export function registerMailroomRoutes(app) {
     const threadId = THREAD_ID_RE.test(qThread) ? qThread : null;
     mkdirSync(MAILROOM_DIR, { recursive: true });
     const text = `[mailroom] Nick is working draft ${draftId}${threadId ? ` (thread ${threadId})` : ""} — "${subject}" to ${to}. When he asks for changes: FIRST re-read the thread for anything new since the draft was written and say what you find, then apply his instructions by editing the draft itself (delete-and-recreate keeps it a draft). NEVER send it.`;
-    const { status, body } = deliver({
+    const { status, body } = await deliverNudged({
       tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "draft",
     });
     res.status(status).json(body);
   });
 
-  app.post("/api/mailroom/threads/:threadId/select", requireAdmin, (req, res) => {
+  app.post("/api/mailroom/threads/:threadId/select", requireAdmin, async (req, res) => {
     const { threadId } = req.params;
     if (!THREAD_ID_RE.test(threadId)) return res.status(400).json({ error: "bad thread id" });
     // Same control-char stripping the image route applies to captions — the
@@ -453,7 +493,7 @@ export function registerMailroomRoutes(app) {
     subject = subject.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200);
     mkdirSync(MAILROOM_DIR, { recursive: true });
     const text = `[mailroom] selected thread ${threadId} "${subject}" — run the roundup`;
-    const { status, body } = deliver({
+    const { status, body } = await deliverNudged({
       tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "select",
     });
     res.status(status).json(body);
@@ -463,14 +503,14 @@ export function registerMailroomRoutes(app) {
   // file); the canned message text for accepting one lives HERE, not in the
   // client, so the button/session contract has exactly one author — the same
   // rule runrooms.js's ACTIONS registry follows.
-  app.post("/api/mailroom/threads/:threadId/suggestion", requireAdmin, (req, res) => {
+  app.post("/api/mailroom/threads/:threadId/suggestion", requireAdmin, async (req, res) => {
     const { threadId } = req.params;
     if (!THREAD_ID_RE.test(threadId)) return res.status(400).json({ error: "bad thread id" });
     const id = typeof req.body?.id === "string" ? req.body.id.slice(0, 100) : "";
     if (!id) return res.status(400).json({ error: "missing suggestion id" });
     mkdirSync(MAILROOM_DIR, { recursive: true });
     const text = `[mailroom] suggestion ${id} accepted for thread ${threadId}`;
-    const { status, body } = deliver({
+    const { status, body } = await deliverNudged({
       tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "suggestion",
     });
     res.status(status).json(body);
@@ -480,7 +520,7 @@ export function registerMailroomRoutes(app) {
   // text lives HERE (ACTIONS-registry rule) and restates the verification
   // obligation the skill's sent-report contract spells out: believe a send
   // only when a search actually finds it — never on the report alone.
-  app.post("/api/mailroom/threads/:threadId/sent-report", requireAdmin, (req, res) => {
+  app.post("/api/mailroom/threads/:threadId/sent-report", requireAdmin, async (req, res) => {
     const { threadId } = req.params;
     if (!THREAD_ID_RE.test(threadId)) return res.status(400).json({ error: "bad thread id" });
     let subject = typeof req.body?.subject === "string" ? req.body.subject : "";
@@ -488,13 +528,13 @@ export function registerMailroomRoutes(app) {
     mkdirSync(MAILROOM_DIR, { recursive: true });
     const name = firstNameOf(req.user);
     const text = `[mailroom] ${name} reports the reply for thread ${threadId}${subject ? ` ("${subject}")` : ""} as sent or scheduled from Gmail. Verify before believing it — narrow in:sent search, subject:"…" fallback if that misses. Verified: write handled {state:"sent-verified", verified_at} into the thread state file and update the matched card (dated next_step, echo-compared). Search empty but ${name} says scheduled: handled {state:"scheduled-attested"} with a re-verify note. Neither: refuse, naming exactly what was searched.`;
-    const { status, body } = deliver({
+    const { status, body } = await deliverNudged({
       tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: "sent-report",
     });
     res.status(status).json(body);
   });
 
-  app.post("/api/mailroom/send", requireAdmin, (req, res) => {
+  app.post("/api/mailroom/send", requireAdmin, async (req, res) => {
     let text = typeof req.body?.text === "string" ? req.body.text : "";
     // Same literal-text discipline as runrooms.js's send route: keep
     // newlines (they insert, not submit, in the TUI input box), strip every
@@ -503,7 +543,7 @@ export function registerMailroomRoutes(app) {
     if (!text) return res.status(400).json({ error: "empty message" });
     if (text.length > MAX_SEND_CHARS) return res.status(400).json({ error: `over ${MAX_SEND_CHARS} chars` });
     mkdirSync(MAILROOM_DIR, { recursive: true });
-    const { status, body } = deliver({
+    const { status, body } = await deliverNudged({
       tmuxSession: MAILROOM_SESSION, logPath: SENDS_LOG, text, user: req.user, tag: null,
     });
     res.status(status).json(body);
