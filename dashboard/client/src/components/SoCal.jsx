@@ -348,6 +348,11 @@ export default function SoCal() {
         <h2 className="socal-h2">{selected.name}</h2>
         <div className="socal-facts">
           {cal?.config?.post_weekday && <span>{cal.config.post_weekday}s · {cal.config.posts_per_month}/mo</span>}
+          {cal?.config?.timezone && cal.config.timezone !== "America/New_York" && (
+            <span className="socal-tz" title={cal.config.timezone}>
+              ⏰ Times are client-local: {cal.config.timezone.split("/").pop().replace("_", " ")}
+            </span>
+          )}
           {an?.page?.followers != null && <span>FB {an.page.followers} followers</span>}
           {an?.page?.ig_followers != null && <span>IG {an.page.ig_followers} followers</span>}
         </div>

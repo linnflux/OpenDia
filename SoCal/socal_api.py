@@ -106,7 +106,8 @@ def cmd_calendar(a):
     rows = [{k: v for k, v in r.items() if k != "_row"} for r in rows if r.get("ID")]
     return {"rows": rows, "statuses": STATUSES,
             "config": {k: cfg.get(k, "") for k in
-                       ("client_name", "post_weekday", "posts_per_month", "footer_line", "image_style")}}
+                       ("client_name", "post_weekday", "posts_per_month", "footer_line",
+                        "image_style", "timezone")}}
 
 
 def cmd_analytics(a):
