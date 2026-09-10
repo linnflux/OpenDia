@@ -8094,9 +8094,10 @@ html.vt-no-target::view-transition-old(card-morph) {
 .briefing-pile-age.warn { color: var(--warning); }
 .briefing-pile-age.crit { color: var(--danger); }
 .briefing-pile-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.briefing-pile-titlerow { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; flex-wrap: wrap; }
 .briefing-pile-subject {
   font-size: 0.86rem; color: var(--text-primary); text-decoration: none;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .briefing-pile-subject:hover { color: var(--accent); text-decoration: underline; }
 .briefing-pile-to { font-size: 0.72rem; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

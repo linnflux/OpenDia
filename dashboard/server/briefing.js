@@ -433,6 +433,13 @@ async function sendPile() {
   // maps from it (domain only when unambiguous — one client per domain).
   const byAddr = new Map();
   const byDomain = new Map();
+  // Freemail domains identify a person, never a client — a lone yahoo.com
+  // sender in inbox history must not claim every yahoo.com recipient.
+  const FREEMAIL = new Set([
+    "gmail.com", "yahoo.com", "ymail.com", "aol.com", "hotmail.com", "outlook.com",
+    "live.com", "msn.com", "icloud.com", "me.com", "mac.com", "comcast.net",
+    "att.net", "verizon.net", "protonmail.com", "proton.me",
+  ]);
   try {
     for (const i of getAllInboxItems()) {
       if (!i.client_hint || !i.from_addr) continue;
@@ -440,22 +447,34 @@ async function sendPile() {
       if (!em) continue;
       if (!byAddr.has(em)) byAddr.set(em, i.client_hint);
       const dom = em.split("@")[1];
+      if (FREEMAIL.has(dom)) continue;
       if (byDomain.has(dom) && byDomain.get(dom) !== i.client_hint) byDomain.set(dom, null); // ambiguous
       else if (!byDomain.has(dom)) byDomain.set(dom, i.client_hint);
     }
   } catch {}
+  // Learned hints are often slugs ("central-alabama-wellness"); canonicalize
+  // to the company's real name so the label reads right AND card matching
+  // (which searches by company name) actually works.
+  const bySlug = new Map();
+  for (const c of companies) {
+    bySlug.set(slugKey(c.name), c.name);
+    if (c.short_name) bySlug.set(slugKey(c.short_name), c.name);
+  }
+  const canon = (hint) => (hint ? bySlug.get(slugKey(hint)) || hint : null);
   const value = drafts.map((d) => {
     const email = (String(d.to).match(/[\w.+-]+@[\w.-]+/) || [null])[0]?.toLowerCase() || null;
     let client = null;
     if (email) {
       const domain = email.split("@")[1];
-      const a = aliases.find((x) => x.match_type === "email" && String(x.match_value).toLowerCase() === email);
+      const a = aliases.find((x) => x.match_type === "email" && String(x.match_value).toLowerCase() === email)
+        || aliases.find((x) => x.match_type === "domain" && String(x.match_value).toLowerCase() === domain);
       if (a) client = a.client_hint;
       if (!client) client = byAddr.get(email) || byDomain.get(domain) || null;
-      if (!client) {
+      if (!client && !FREEMAIL.has(domain)) {
         const c = companies.find((c) => c.website && String(c.website).toLowerCase().includes(domain));
         if (c) client = c.name;
       }
+      client = canon(client);
     }
     // Card link: a strong subject match wins; otherwise fall back to the
     // client's supervisor card, then its best-ranked open card. A guessed
@@ -466,7 +485,7 @@ async function sendPile() {
       const cands = (matchProjectCandidates(client, "", d.subject, 5) || [])
         .filter((c) => c.status !== "completed");
       const strong = cands.find((c) => (c.score || 0) >= 4);
-      const sup = cands.find((c) => (c.tags || "").split(",").map((t) => t.trim()).includes("supervisor"));
+      const sup = cands.find((c) => (c.tags || "").split(",").map((t) => t.trim()).includes("hub"));
       const pick = strong || sup || cands[0] || null;
       if (pick) card = { id: pick.id, name: pick.name, guess: !strong };
     }

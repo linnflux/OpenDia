@@ -249,23 +249,25 @@ export default function Briefing({ onOpenProject, onOpenDraft }) {
                   {d.age_days == null ? "—" : d.age_days === 0 ? "today" : `${d.age_days}d`}
                 </span>
                 <span className="briefing-pile-main">
-                  <a href={d.threadUrl} target="_blank" rel="noreferrer" className="briefing-pile-subject">{d.subject}</a>
+                  <span className="briefing-pile-titlerow">
+                    <a href={d.threadUrl} target="_blank" rel="noreferrer" className="briefing-pile-subject">{d.subject}</a>
+                    {onOpenDraft && (
+                      <button className="briefing-cardlink" title="Work this draft in the Mailroom — edit it directly or ask the session for changes"
+                        onClick={() => onOpenDraft({ draftId: d.id, threadId: d.threadId })}>
+                        ✎ Mailroom
+                      </button>
+                    )}
+                    {d.card && onOpenProject && (
+                      <button className={`briefing-cardlink${d.card.guess ? " guess" : ""}`}
+                        title={d.card.guess ? `best guess for ${d.client}: ${d.card.name}` : d.card.name}
+                        onClick={() => onOpenProject(d.card.id)}>
+                        {d.card.guess ? "≈" : ""}#{d.card.id}
+                      </button>
+                    )}
+                    {!d.card && d.client && <span className="briefing-pile-client">{d.client}</span>}
+                  </span>
                   <span className="briefing-pile-to">to {d.to}</span>
                 </span>
-                {onOpenDraft && (
-                  <button className="briefing-cardlink" title="Work this draft in the Mailroom — edit it directly or ask the session for changes"
-                    onClick={() => onOpenDraft({ draftId: d.id, threadId: d.threadId })}>
-                    ✎ Mailroom
-                  </button>
-                )}
-                {d.card && onOpenProject && (
-                  <button className={`briefing-cardlink${d.card.guess ? " guess" : ""}`}
-                    title={d.card.guess ? `best guess for ${d.client}: ${d.card.name}` : d.card.name}
-                    onClick={() => onOpenProject(d.card.id)}>
-                    {d.card.guess ? "≈" : ""}#{d.card.id}
-                  </button>
-                )}
-                {!d.card && d.client && <span className="briefing-pile-client">{d.client}</span>}
               </li>
             ))}
           </ul>
