@@ -189,6 +189,7 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
   const [draftGone, setDraftGone] = useState(false); // 404 = probably sent ★
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState(null);
+  const [draftSig, setDraftSig] = useState(""); // stripped from the editor, reattached on save
   // Refs mirror the draft + its refresher for the poll closure (fetchMailState
   // is memoized on `selected` and must not go stale on draft state).
   const draftRef = useRef(null);
@@ -334,6 +335,27 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
   }
 
   // ── Draft workspace ───────────────────────────────────────────────────
+  // The Gmail signature (and its confidentiality boilerplate) is noise in an
+  // editor — strip it from the textarea, keep it, reattach on save. Markers
+  // are the house signature's own stable first lines.
+  const SIG_MARKERS = ["AI was used in the drafting of this message", "\n-- "];
+  function splitSignature(body) {
+    let idx = -1;
+    for (const m of SIG_MARKERS) {
+      const i = (body || "").indexOf(m);
+      if (i > 0 && (idx < 0 || i < idx)) idx = i;
+    }
+    if (idx <= 0) return { text: body || "", sig: "" };
+    return { text: body.slice(0, idx).replace(/[\s.]*$/, "").trimEnd(), sig: body.slice(idx).trim() };
+  }
+
+  function adoptDraft(d) {
+    const { text, sig } = splitSignature(d.body);
+    setDraft(d);
+    setDraftBody(text);
+    setDraftSig(sig);
+  }
+
   // Open a real Gmail draft: load it, select its thread for context (WITHOUT
   // the thread-select "run the roundup" delivery — the draft select below
   // frames the session instead), and point the session at the draft.
@@ -345,8 +367,7 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
       if (r.status === 404) { setDraftGone(true); return; }
       d = await r.json();
       if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
-      setDraft(d);
-      setDraftBody(d.body);
+      adoptDraft(d);
     } catch (e) {
       setDraftError(e.message);
       return;
@@ -392,11 +413,11 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
       const r = await fetch(`/api/mailroom/drafts/${encodeURIComponent(draft.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: draftBody }),
+        body: JSON.stringify({ body: draftSig ? `${draftBody.trimEnd()}\n\n${draftSig}` : draftBody }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
-      setDraft((prev) => (prev ? { ...prev, id: d.id || prev.id, body: draftBody } : prev));
+      setDraft((prev) => (prev ? { ...prev, id: d.id || prev.id, body: draftSig ? `${draftBody.trimEnd()}\n\n${draftSig}` : draftBody } : prev));
       setDraftSavedAt(Date.now());
     } catch (e) {
       setDraftError(e.message);
@@ -413,8 +434,7 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
       if (r.status === 404) { setDraftGone(true); return; }
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
-      setDraft(d);
-      setDraftBody(d.body);
+      adoptDraft(d);
       setDraftSavedAt(null);
     } catch (e) {
       setDraftError(e.message);
@@ -584,38 +604,17 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
           <div className="mailroom-pane-empty">Select a thread to open it.</div>
         ) : (
           <>
-            {draft && (
-              <section className="mailroom-draft">
-                <div className="mailroom-draft-head">
-                  <span className="mailroom-draft-title">✎ Draft</span>
-                  <span className="mailroom-draft-meta">to {draft.headers.to || "(no recipient)"}</span>
-                  <a className="mailroom-draft-gmail" href={draft.threadUrl} target="_blank" rel="noreferrer">Open in Gmail ↗</a>
-                  <button className="mailroom-draft-refresh" onClick={refreshDraft}
-                    title="Re-read from Gmail — picks up edits the session made">↻</button>
-                </div>
-                {draft.htmlDerived && (
-                  <div className="mailroom-draft-note">This draft was HTML — shown as text; saving converts it to plain text.</div>
-                )}
-                <textarea className="mailroom-draft-body" value={draftBody}
-                  onChange={(e) => { setDraftBody(e.target.value); setDraftSavedAt(null); }}
-                  rows={Math.min(18, Math.max(6, draftBody.split("\n").length + 1))} />
-                <div className="mailroom-draft-actions">
-                  <button className="mailroom-draft-save" onClick={saveDraft}
-                    disabled={draftSaving || draftBody === draft.body}>
-                    {draftSaving ? "Saving…" : "Save to Gmail"}
-                  </button>
-                  {draftSavedAt && <span className="mailroom-draft-saved">saved ✓</span>}
-                  {draftError && <span className="mailroom-error">{draftError}</span>}
-                  <span className="mailroom-draft-hint">Sending stays in Gmail — send it there and the pile row clears.</span>
-                </div>
-              </section>
-            )}
+            {/* Reading order (Nick's 2026-09-09 review): thread title first,
+                then the thread itself (context you read), THEN the editable
+                draft (the thing you're working on), then the session lane.
+                FactsStrip is thread-flow only — in draft mode its match is
+                often wrong and the pile already carried the right card. */}
             {selected && <>
             <header className="mailroom-thread-header">
               <h2>{selected.subject || "(no subject)"}</h2>
             </header>
 
-            <FactsStrip context={context} onOpenProject={onOpenProject} />
+            {!draft && <FactsStrip context={context} onOpenProject={onOpenProject} />}
 
             {detailError && <div className="mailroom-error">Could not load thread: {detailError}</div>}
             <div className="mailroom-thread-body">
@@ -624,7 +623,41 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
               ))}
               {!detail && !detailError && <div className="loading">Loading thread…</div>}
             </div>
+            </>}
+            {draft && (
+              <section className="mailroom-dw">
+                <div className="mailroom-dw-head">
+                  <span className="mailroom-dw-title">✎ Your draft</span>
+                  <span className="mailroom-dw-meta">to {draft.headers.to || "(no recipient)"}</span>
+                  <a className="mailroom-dw-gmail" href={draft.threadUrl} target="_blank" rel="noreferrer">Open in Gmail ↗</a>
+                  <button className="mailroom-dw-refresh" onClick={refreshDraft}
+                    title="Re-read from Gmail — picks up edits the session made">↻</button>
+                </div>
+                {draft.htmlDerived && (
+                  <div className="mailroom-dw-note">This draft was HTML — shown as text; saving converts it to plain text.</div>
+                )}
+                <textarea className="mailroom-dw-body" value={draftBody}
+                  onChange={(e) => { setDraftBody(e.target.value); setDraftSavedAt(null); }}
+                  rows={Math.min(18, Math.max(6, draftBody.split("\n").length + 1))} />
+                <div className="mailroom-dw-actions">
+                  <button className="mailroom-dw-save" onClick={saveDraft}
+                    disabled={draftSaving || draftBody === splitSignature(draft.body).text}>
+                    {draftSaving ? "Saving…" : "Save to Gmail"}
+                  </button>
+                  {draftSavedAt && <span className="mailroom-dw-saved">saved ✓</span>}
+                  {draftError && <span className="mailroom-error">{draftError}</span>}
+                  {draftSig && <span className="mailroom-dw-sig" title={draftSig}>signature hidden — kept on save</span>}
+                  <span className="mailroom-dw-hint">Sending stays in Gmail — send it there and the pile row clears.</span>
+                </div>
+              </section>
+            )}
+            {selected && <>
 
+            {/* In draft mode the roundup box only appears when it has
+                something to say — an empty dark shell (Nick: "a black bar
+                I'm not sure what it is") helps nobody. */}
+            {(!draft || ensuring || ensureError || selectWaiting || selectError || mailState?.roundup_md
+              || mailState?.proposed_draft || mailState?.handled?.state || mailState?.suggestions?.length > 0) && (
             <div className="mailroom-roundup">
               {ensuring && <div className="mailroom-roundup-status">Starting the mailroom session…</div>}
               {ensureError && <div className="mailroom-error">{ensureError}</div>}
@@ -663,6 +696,7 @@ export default function Mailroom({ me, onOpenProject, onOpenPlanroom, initialDra
                 </div>
               )}
             </div>
+            )}
 
             {session?.live_output?.lines?.length > 0 && (
               <LiveOutput live={session.live_output} />
