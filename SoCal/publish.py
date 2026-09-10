@@ -116,6 +116,10 @@ def schedule(svc, sid, cfg, batch, dry):
             sys.exit(f"{r['ID']}: {when} is inside Facebook's 10-minute scheduling floor")
         if when > now + dt.timedelta(days=75):
             sys.exit(f"{r['ID']}: {when} is past Facebook's 75-day scheduling ceiling")
+        if cfg.get("meta_ig_user_id"):
+            # fail HERE, not at publish time: a missing JPEG twin once stalled an
+            # IG publish at the scheduled moment with nobody watching
+            jpeg_twin_url(drive_id(r["Image"]), cfg)
         if dry:
             print(f"DRY {r['ID']}: would schedule FB for {when}")
             continue
