@@ -1147,18 +1147,25 @@ export async function startScan(project, startedBy, opts = {}) {
           `${HOME}/OpenDia/duties/${run.duty.slug}/duty.md FIRST and follow it — agent.md is your ` +
           `identity, duty.md is your task and its rules take precedence for this run.\n\n`
         : "") +
-      // Off-scope discipline (Nick's rule, 2026-08-23): a scan that surfaces
-      // work OUTSIDE the scanned card's scope must not hijack that card's
-      // next step with it — the next_step/card_next_step you write stay about
-      // THIS card. Genuinely separate work gets its own card.
+      // Off-scope discipline (Nick's rule, 2026-08-23; creation gate added
+      // 2026-09-17 after nine nights showed unreviewed agent card-minting):
+      // a scan that surfaces work OUTSIDE the scanned card's scope must not
+      // hijack that card's next step with it — and agents never create cards
+      // directly. Match an existing card first; otherwise a one-click
+      // card_create action lets the operator decide the card into existence.
       `Scope rule: everything you write to this card (next_step, card_next_step) must be about ` +
       `THIS card's own scope. If the sweep surfaces genuinely separate work (a different ` +
-      `deliverable, system, or client concern), do NOT overwrite this card's next step with it: ` +
-      `create a new card instead — POST http://localhost:8038/api/projects with ` +
-      `{"name","companyName","divisionName","status":"in_progress"}, then PATCH its next_step ` +
-      `(dated, per the calendar contract) — and mention the new card number in your result. ` +
-      `If the card creation fails, record the finding in your result text instead; never ` +
-      `misfile it on the scanned card.\n\n`
+      `deliverable, system, or client concern), do NOT overwrite this card's next step with it, ` +
+      `and do NOT create a card yourself. Instead: (1) FIRST check for an existing home — ` +
+      `GET http://localhost:8038/api/projects/match-candidates?client=...&division=...&task=... ` +
+      `— and on a real match, name that card in your result as where the finding belongs. ` +
+      `(2) No match: file a one-click creation for the operator — POST ` +
+      `http://localhost:8038/api/operator-actions with {"kind":"card_create",` +
+      `"source":"agent:<your-slug>","finding_key":"card:<short-slug-of-the-work>",` +
+      `"title":"New card: <name>","body":"<the dated evidence>",` +
+      `"action":{"name","companyName","divisionName","goal","next_step"}} — never POST ` +
+      `/api/projects from an agent run. (3) If even that fails, record the finding in your ` +
+      `result text; never misfile it on the scanned card.\n\n`
     : "";
 
   const recheckPreamble = run.mode === "recheck"

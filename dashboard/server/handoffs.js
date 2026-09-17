@@ -6,7 +6,8 @@ import { deliver, MAX_SEND_CHARS } from "./session_gate.js";
 import {
   createHandoff, getPendingHandoffs, recordHandoffAttempt,
   createOperatorAction, getOperatorActionById, listOpenOperatorActions,
-  resolveOperatorAction, getProjectById, updateProject,
+  resolveOperatorAction, getProjectById, updateProject, createProject,
+  countOpenOperatorActionsBySource, hasOpenOperatorActionForKey,
 } from "./db.js";
 import { updateNotionTaskStatus } from "./notion.js";
 
@@ -206,7 +207,44 @@ function runCardPatch(action) {
   return `#${pid} ${project.name}: ${changes.join("; ")}`;
 }
 
-const ACTION_KINDS = new Set(["git_push", "card_patch", "brief", "notice"]);
+// ── The card_create executor ───────────────────────────────────────────────
+// The card-creation gate: agent runs no longer POST /api/projects directly —
+// an off-scope finding that matches no existing card becomes a one-click
+// "create this card?" item, and the click creates it. Humans and the inbox
+// pipeline keep creating cards directly; this path binds agents only.
+function validateCardCreate(a) {
+  if (!a) return "action required";
+  if (!String(a.name || "").trim()) return "action needs name";
+  if (!String(a.companyName || "").trim()) return "action needs companyName";
+  if (!String(a.divisionName || "").trim()) return "action needs divisionName";
+  if (a.next_step !== undefined &&
+      (typeof a.next_step !== "string" || a.next_step.length > 200)) {
+    return "next_step must be a string ≤200 chars";
+  }
+  return null;
+}
+
+function runCardCreate(action) {
+  const project = createProject({
+    name: String(action.name).trim().slice(0, 120),
+    companyName: String(action.companyName).trim(),
+    divisionName: String(action.divisionName).trim(),
+    status: "in_progress",
+    goal: typeof action.goal === "string" ? action.goal.slice(0, 300) : null,
+  });
+  if (action.next_step) updateProject(project.id, { next_step: String(action.next_step) });
+  return `created #${project.id} ${project.name}`;
+}
+
+const ACTION_KINDS = new Set(["git_push", "card_patch", "card_create", "brief", "notice"]);
+const EXECUTABLE_KINDS = new Set(["git_push", "card_patch", "card_create"]);
+
+// Backpressure: a filing lane may hold at most this many OPEN items per
+// source — queues without backpressure feel like the machine working against
+// the operator (live lesson, 9/8-9/17: 27 of 44 filed items sat unconsumed).
+// Dedupe updates of an existing open item pass through; only NEW filings
+// defer. Handoff-escalation notices are failures, not filings — exempt.
+const MAX_OPEN_PER_SOURCE = 8;
 
 export function registerHandoffRoutes(app) {
   // Loopback callers (agent scan sessions) arrive as an admin user via
@@ -239,7 +277,9 @@ export function registerHandoffRoutes(app) {
 
   app.post("/api/operator-actions", requireAdmin, (req, res) => {
     const b = req.body || {};
-    if (!ACTION_KINDS.has(b.kind)) return res.status(400).json({ error: "kind must be git_push or notice" });
+    if (!ACTION_KINDS.has(b.kind)) {
+      return res.status(400).json({ error: `kind must be one of: ${[...ACTION_KINDS].join(", ")}` });
+    }
     const title = String(b.title || "").trim().slice(0, 200);
     if (!title) return res.status(400).json({ error: "title required" });
     if (b.kind === "git_push") {
@@ -252,13 +292,31 @@ export function registerHandoffRoutes(app) {
       const bad = validateCardPatch(b.action);
       if (bad) return res.status(400).json({ error: bad });
     }
+    if (b.kind === "card_create") {
+      const bad = validateCardCreate(b.action);
+      if (bad) return res.status(400).json({ error: bad });
+    }
     try {
+      // Backpressure — only NEW filings count against the cap: an update of
+      // an existing open finding_key passes through, and handoff-escalation
+      // notices are failures, not filings.
+      const source = typeof b.source === "string" ? b.source.slice(0, 100) : null;
+      const findingKey = typeof b.finding_key === "string" ? b.finding_key.slice(0, 300) : null;
+      if (source && !(findingKey || "").startsWith("handoff-esc:") &&
+          !(findingKey && hasOpenOperatorActionForKey(findingKey))) {
+        const open = countOpenOperatorActionsBySource(source);
+        if (open >= MAX_OPEN_PER_SOURCE) {
+          return res.json({
+            status: "deferred", open,
+            detail: `${open} items from ${source} already open — the operator hasn't caught up; refresh existing findings instead of filing new ones`,
+          });
+        }
+      }
       const row = createOperatorAction({
         kind: b.kind, title,
         body: typeof b.body === "string" ? b.body.slice(0, 8000) : null,
         action: b.kind === "notice" ? null : b.action,
-        source: typeof b.source === "string" ? b.source.slice(0, 100) : null,
-        findingKey: typeof b.finding_key === "string" ? b.finding_key.slice(0, 300) : null,
+        source, findingKey,
       });
       if (row.deduped === "recently-dismissed") {
         return res.json({ id: row.id, status: "deduped", detail: "operator dismissed this finding within 14 days" });
@@ -274,14 +332,16 @@ export function registerHandoffRoutes(app) {
     const row = getOperatorActionById(Number(req.params.id));
     if (!row) return res.status(404).json({ error: "not found" });
     if (row.status !== "open") return res.status(409).json({ error: `already ${row.status}` });
-    if (row.kind !== "git_push" && row.kind !== "card_patch") {
+    if (!EXECUTABLE_KINDS.has(row.kind)) {
       return res.status(400).json({ error: "nothing to execute for this kind" });
     }
     let action;
     try { action = JSON.parse(row.action || "null"); } catch { action = null; }
     if (!action) return res.status(500).json({ error: "malformed action payload" });
     try {
-      const result = row.kind === "card_patch" ? runCardPatch(action) : runGitPush(action);
+      const result = row.kind === "card_patch" ? runCardPatch(action)
+        : row.kind === "card_create" ? runCardCreate(action)
+        : runGitPush(action);
       resolveOperatorAction(row.id, "done", result);
       res.json({ id: row.id, status: "done", result });
     } catch (err) {

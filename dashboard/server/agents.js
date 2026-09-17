@@ -30,7 +30,7 @@ import {
   getOperatorAckKeys, ackOperatorItems,
   getAllDuties, getDutyById, createDuty, updateDuty, deleteDuty,
   getAgentDuties, assignDuty, unassignDuty, markDutyRun, bumpDutyCursor,
-  listOpenOperatorActions, updateProject,
+  listOpenOperatorActions, updateProject, getRecentlyCompletedProjects,
 } from "./db.js";
 import { updateNotionTaskStatus } from "./notion.js";
 import { drainPendingHandoffs } from "./handoffs.js";
@@ -1134,6 +1134,9 @@ async function runSupervisorHeartbeat(agent, state) {
   for (const h of held) {
     lines.push(`⏸ ${link(h.project_id, h.name)} — held${h.reclass ? `, re-classed ${h.reclass}` : ""}`);
   }
+  try {
+    lines.push(`Closed this week with agent help: ${completionsScoreboard().week_closed}`);
+  } catch {}
   await notifyChat(agent.chat_webhook_url, lines.join("\n"));
 
   finishHeartbeat(agent, state, finalStatus, summary);
@@ -1169,10 +1172,14 @@ function sendDigest(agent) {
     base ? `<${base}/?project=${c.id}&tab=spark|${c.name}>${c.route ? ` (${c.route})` : ""}` : c.name
   ).join(", ");
   const more = cardLines.length > 10 ? ` +${cardLines.length - 10} more` : "";
+  let closedLine = "";
+  try {
+    closedLine = `\nClosed this week with agent help: ${completionsScoreboard().week_closed}`;
+  } catch {}
   notifyChat(agent.chat_webhook_url,
     `${agent.name} — window digest: ${swept} card(s) swept across ${runs.length} heartbeat(s), ` +
     `${awaiting} next step(s) awaiting a decision.` +
-    (cardLines.length ? `\nReviewed: ${links}${more}` : "")
+    (cardLines.length ? `\nReviewed: ${links}${more}` : "") + closedLine
   ).catch(() => {});
 }
 
@@ -1276,12 +1283,39 @@ function shapeOperatorAction(a) {
   };
 }
 
+// The scoreboard the whole system is aimed at (Nick, 2026-09-17: "agents
+// exist to get cards completed accurately"): cards that reached completed in
+// the last 7 days AND appear in any agent run's detail from the 21 days
+// before — the metric that makes drift toward busywork visible.
+export function completionsScoreboard() {
+  const day = 24 * 3600 * 1000;
+  const fmt = (ms) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+  const touched = new Set();
+  for (const agent of getAllAgents()) {
+    for (const run of getAgentRunsSince(agent.id, fmt(Date.now() - 21 * day))) {
+      let d; try { d = JSON.parse(run.detail || "null"); } catch { continue; }
+      if (Array.isArray(d)) {
+        for (const e of d) if (e?.project_id) touched.add(Number(e.project_id));
+      } else if (d && typeof d === "object") {
+        for (const k of ["approved", "escalated", "held", "reviewed_runs"]) {
+          for (const e of d[k] || []) if (e?.project_id) touched.add(Number(e.project_id));
+        }
+      }
+    }
+  }
+  const cards = getRecentlyCompletedProjects(fmt(Date.now() - 7 * day))
+    .filter((p) => touched.has(p.id))
+    .map((p) => ({ id: p.id, name: p.name }));
+  return { week_closed: cards.length, cards };
+}
+
 // The operator-inbox composition, shared by its route and the Briefing view's
 // day score (which prices these items into the board total).
 export function buildOperatorInbox(showAll = false) {
   const actions = listOpenOperatorActions().map(shapeOperatorAction);
+  const scoreboard = completionsScoreboard();
   const supervisor = getAllAgents().find((a) => a.role === "supervisor") || null;
-  if (!supervisor) return { items: [], actions };
+  if (!supervisor) return { items: [], actions, scoreboard };
   const since = new Date(Date.now() - 7 * 24 * 3600 * 1000)
     .toISOString().slice(0, 19).replace("T", " ");
   const runs = getAgentRunsSince(supervisor.id, since)
@@ -1326,7 +1360,7 @@ export function buildOperatorInbox(showAll = false) {
   // One-click actions ride alongside the derived verdict items: these are
   // first-class rows (see handoffs.js), resolved by their own approve/dismiss
   // routes rather than the ack overlay.
-  return { items: out, actions };
+  return { items: out, actions, scoreboard };
 }
 
 export function mountAgents(app) {

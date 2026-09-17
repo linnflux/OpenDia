@@ -1204,6 +1204,24 @@ export function listOpenOperatorActions() {
   ).all();
 }
 
+export function countOpenOperatorActionsBySource(source) {
+  return getDb().prepare(
+    "SELECT COUNT(*) n FROM operator_actions WHERE status = 'open' AND source = ?"
+  ).get(source).n;
+}
+
+export function hasOpenOperatorActionForKey(findingKey) {
+  return !!getDb().prepare(
+    "SELECT id FROM operator_actions WHERE finding_key = ? AND status = 'open'"
+  ).get(findingKey);
+}
+
+export function getRecentlyCompletedProjects(sinceUtc) {
+  return getDb().prepare(
+    "SELECT id, name, updated_at FROM projects WHERE status = 'completed' AND updated_at >= ?"
+  ).all(sinceUtc);
+}
+
 export function resolveOperatorAction(id, status, result) {
   return getDb().prepare(`
     UPDATE operator_actions SET status = ?, result = ?, resolved_at = datetime('now')

@@ -31,6 +31,7 @@ const QUEUE_STATUS_LABEL = {
 export function OperatorInbox({ onOpenProject }) {
   const [items, setItems] = useState(null);
   const [actions, setActions] = useState([]);
+  const [scoreboard, setScoreboard] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [busyAction, setBusyAction] = useState(null);
   const [actionResults, setActionResults] = useState({});
@@ -38,7 +39,7 @@ export function OperatorInbox({ onOpenProject }) {
   const fetchInbox = useCallback(() => {
     fetch("/api/agents/operator-inbox")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d) => { setItems(d.items || []); setActions(d.actions || []); })
+      .then((d) => { setItems(d.items || []); setActions(d.actions || []); setScoreboard(d.scoreboard || null); })
       .catch(() => {});
   }, []);
 
@@ -114,13 +115,16 @@ export function OperatorInbox({ onOpenProject }) {
             <span className={`agents-queue-status action-result-${res.status}`}>{res.status}</span>
           ) : (
             <>
-              {(a.kind === "git_push" || a.kind === "card_patch") && (
+              {(a.kind === "git_push" || a.kind === "card_patch" || a.kind === "card_create") && (
                 <button
                   className="agents-inbox-approve"
                   disabled={busyAction === a.id}
                   onClick={(e) => { e.stopPropagation(); runAction(a, "approve"); }}
                 >
-                  {busyAction === a.id ? "Applying…" : a.kind === "git_push" ? "Approve & push" : "Approve & apply"}
+                  {busyAction === a.id ? "Applying…"
+                    : a.kind === "git_push" ? "Approve & push"
+                    : a.kind === "card_create" ? "Approve & create"
+                    : "Approve & apply"}
                 </button>
               )}
               <button
@@ -223,6 +227,14 @@ export function OperatorInbox({ onOpenProject }) {
             ? `${needs.length + actions.length} need${needs.length + actions.length === 1 ? "s" : ""} you`
             : "all caught up"}
           {done.length > 0 && ` · ${done.length} done`}
+          {scoreboard != null && (
+            <span
+              className="agents-inbox-scoreboard"
+              title={(scoreboard.cards || []).map((c) => `#${c.id} ${c.name}`).join("\n") || "none yet"}
+            >
+              {" "}· {scoreboard.week_closed} closed this wk w/ agent help
+            </span>
+          )}
         </span>
       </div>
       {needs.length === 0 && done.length === 0 && actions.length === 0 ? (
