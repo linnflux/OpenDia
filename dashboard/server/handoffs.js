@@ -312,11 +312,19 @@ export function registerHandoffRoutes(app) {
           });
         }
       }
+      // Material-change override for the dismissal cooldown: when the
+      // action names a card, its updated_at rides along so a finding whose
+      // card moved after the operator's "no" may re-file (card #270).
+      let cardUpdatedAt = null;
+      const actionPid = Number(b.action?.project_id);
+      if (Number.isInteger(actionPid) && actionPid > 0) {
+        cardUpdatedAt = getProjectById(actionPid)?.updated_at || null;
+      }
       const row = createOperatorAction({
         kind: b.kind, title,
         body: typeof b.body === "string" ? b.body.slice(0, 8000) : null,
         action: b.kind === "notice" ? null : b.action,
-        source, findingKey,
+        source, findingKey, cardUpdatedAt,
       });
       if (row.deduped === "recently-dismissed") {
         return res.json({ id: row.id, status: "deduped", detail: "operator dismissed this finding within 14 days" });

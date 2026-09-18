@@ -47,6 +47,7 @@ export function getAllProjects({ includeCompleted = false } = {}) {
 export function getProjectById(id) {
   return getDb().prepare(`
     SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.tags, p.goal,
+           p.updated_at,
            p.company_id, c.name AS company_name, c.short_name AS company_short,
            c.notion_id AS company_notion_id,
            d.name AS division
@@ -1167,7 +1168,7 @@ export function recordHandoffAttempt(id, { status, error }) {
   `).run(status, error || null, status, id);
 }
 
-export function createOperatorAction({ kind, title, body, action, source, findingKey }) {
+export function createOperatorAction({ kind, title, body, action, source, findingKey, cardUpdatedAt }) {
   const db = getDb();
   if (findingKey) {
     const open = db.prepare(
@@ -1180,12 +1181,19 @@ export function createOperatorAction({ kind, title, body, action, source, findin
     }
     // A dismissal is an answer, not a miss: don't re-file the same finding
     // for two weeks — recurring sweeps would otherwise nag about every
-    // suggestion the operator already said no to.
+    // suggestion the operator already said no to. EXCEPT when the finding's
+    // card observably changed after the dismissal (cardUpdatedAt, naive-UTC
+    // like resolved_at): the operator said no to the OLD situation, and a
+    // moved card is a new one. (Card #270 — the tee-ups agent hit this wall
+    // its first realigned night and filed the fix as a card_create.)
     const dismissed = db.prepare(`
-      SELECT id FROM operator_actions WHERE finding_key = ? AND status = 'dismissed'
+      SELECT id, resolved_at FROM operator_actions WHERE finding_key = ? AND status = 'dismissed'
         AND resolved_at > datetime('now', '-14 days')
+      ORDER BY resolved_at DESC LIMIT 1
     `).get(findingKey);
-    if (dismissed) return { id: dismissed.id, deduped: "recently-dismissed" };
+    if (dismissed && !(cardUpdatedAt && dismissed.resolved_at && String(cardUpdatedAt) > dismissed.resolved_at)) {
+      return { id: dismissed.id, deduped: "recently-dismissed" };
+    }
   }
   const info = db.prepare(`
     INSERT INTO operator_actions (kind, title, body, action, source, finding_key)
