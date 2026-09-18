@@ -1007,8 +1007,11 @@ ensureAgentsTables();
 //   1. Running timer → in_progress (promote + top of column + Notion). A timer
 //      left running on an Ice/WFHuman/Completed card is otherwise invisible,
 //      and this is also the standing-card escape: working on it forces it up.
-//   2. `standing` tag, no timer → ice. Missions aren't deadlines; they don't
-//      squat in In Progress.
+//   2. `standing` tag, no timer → ice — UNLESS the next_step date is today
+//      or past: a standing card's dated step is an appointment, it surfaces
+//      on the day, and a missed one STAYS up until handled (Nick,
+//      2026-09-18: deliberate — a stale date squatting in In Progress is
+//      the prompt to fix the date, not something to hide).
 //   3. ice/in_progress cards with a dated next_step bounce on the date:
 //      within DUE_SOON_DAYS (or overdue) → in_progress; further out → ice.
 //   Never touched: wfhuman (waiting on a person is not parked), completed,
@@ -1047,8 +1050,14 @@ async function reconcileStatuses() {
       const standing = (p.tags || "").split(",").map((s) => s.trim()).includes("standing");
       let target = null, why = null;
       if (standing) {
-        target = "ice";
-        why = "standing, no timer";
+        const m = (p.next_step || "").match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m && m[1] <= today) {
+          target = "in_progress";
+          why = `standing, due ${m[1]}`;
+        } else {
+          target = "ice";
+          why = "standing, no timer";
+        }
       } else if (p.status === "ice" || p.status === "in_progress") {
         const m = (p.next_step || "").match(/^(\d{4}-\d{2}-\d{2})/);
         if (m) {
