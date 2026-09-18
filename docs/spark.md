@@ -132,13 +132,35 @@ planroom for free (`sparked_by: "agent:<slug>"`).
   Planroom", "Spark now". All decisions happen in the Planroom. `?tab=spark`
   still lands there; `?planroom=<id>` lands on the view directly.
 
-Routes (`dashboard/server/planrooms.js`, read-only like `runrooms.js`):
-`GET /api/planrooms` (the working set — live cards sparked within 7 days;
-`?all=1` for everything), `GET /api/planrooms/:cardId` (plan + live run +
-runroom read-through), `POST /api/planrooms/:cardId/adopt` (open a runroom
-from the standing plan with nothing live), `POST /api/planrooms/:cardId/park`
-(dismiss until a date). The only writer is `planroom_build.js`, mirroring
-`runroom_build.js`.
+Routes (`dashboard/server/planrooms.js`, read-only like `runrooms.js` except
+the auto-park below): `GET /api/planrooms` (the decision queue — see next
+paragraph; `?all=1` adds plans on completed cards), `GET
+/api/planrooms/:cardId` (plan + live run + runroom read-through), `POST
+/api/planrooms/:cardId/adopt` (open a runroom from the standing plan with
+nothing live), `POST /api/planrooms/:cardId/park` (dismiss until a date). The
+only writer is `planroom_build.js`, mirroring `runroom_build.js`.
+
+### The list is a decision queue, not an inventory (2026-09-18)
+
+ODA sweeps re-spark cards often enough that "sparked within 7 days" converged
+on *every* plan, so the list stopped filtering by freshness and started
+answering "what's waiting on a person?". Each item carries a `bucket`:
+
+- **`needs_you`** — live runs, plus active plans on actionable cards
+  (next_step date today/past, or undated). Sorted **oldest recommendation
+  first** with a `waiting Nd` age pill (amber ≥3d, red ≥7d) — the age of this
+  bucket is the operator's decision latency, made visible on purpose.
+- **`scheduled`** — parked plans whose date hasn't arrived. The list route
+  **auto-parks** any active plan whose card next_step date is in the future
+  (`parked.by: "auto"`, until that date): scheduled work is not a pending
+  decision. Planroom Wake unparks it when the date arrives, exactly as with a
+  manual park.
+- **`running`** — adopted, reading through to their runrooms.
+- **`stale`** — plan older than 7 days, or the card is no longer
+  in_progress/wfhuman. Out of the way, re-sparkable from the card.
+
+The view renders `needs_you` open and the other three folded behind counts;
+the Planrooms nav badge is the `needs_you` count.
 
 ### Recheck mode — a scheduled card is not re-litigated
 

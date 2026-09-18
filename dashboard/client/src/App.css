@@ -7083,6 +7083,15 @@ html.vt-no-target::view-transition-old(card-morph) {
   border: 1px solid var(--warning);
 }
 .room-card-state.gone { color: var(--danger); border: 1px solid var(--danger); }
+.room-card-state.wait-warn { color: var(--warning); border: 1px solid var(--warning); }
+.room-card-state.wait-crit { color: var(--danger); border: 1px solid var(--danger); }
+.planroom-fold {
+  display: flex; align-items: center; gap: 0.4rem; width: 100%;
+  background: none; border: none; cursor: pointer; font-family: inherit; text-align: left;
+}
+.planroom-fold-chev { font-size: 0.65rem; color: var(--text-faint); transition: transform 0.15s ease; }
+.planroom-fold-chev.open { transform: rotate(90deg); }
+.planroom-queue-clear { font-size: 0.88rem; color: var(--text-secondary); padding: 0.4rem 0.2rem; }
 .room-card-state.adopted { color: var(--accent); border: 1px solid var(--accent); }
 .room-card-state.finished { color: var(--text-secondary); border: 1px solid var(--border); }
 .room-card-meta { color: var(--text-secondary); font-size: 0.72rem; }

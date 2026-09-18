@@ -213,6 +213,19 @@ export default function App() {
     window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
   }, [projects]);
 
+  // Planrooms sidebar badge: decisions waiting in the queue. The poll also
+  // keeps the list route's auto-park sweep running even with the view closed.
+  const [planroomNeeds, setPlanroomNeeds] = useState(0);
+  useEffect(() => {
+    const load = () => fetch("/api/planrooms")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPlanroomNeeds(Array.isArray(d) ? d.filter((x) => x.bucket === "needs_you").length : 0))
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, []);
+
   // Attention count for the Sweep sidebar badge: active cards past their
   // next_step date or missing a next step entirely (deduped by card).
   const sweepAttention = useMemo(() => {
@@ -664,7 +677,7 @@ export default function App() {
           }}
           collapsed={sidebarCollapsed && !sidebarOpen}
           isAdmin={!!me?.is_admin}
-          badges={{ inbox: pendingInbox, sweep: sweepAttention }}
+          badges={{ inbox: pendingInbox, sweep: sweepAttention, planrooms: planroomNeeds }}
           mobileOpen={sidebarOpen}
           onMobileClose={() => setSidebarOpen(false)}
         />

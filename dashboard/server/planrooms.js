@@ -58,29 +58,50 @@ function visibleTo(req, project) {
 }
 
 export function registerPlanroomRoutes(app) {
-  // One item per card that has a plan. Default view is the working set:
-  // live cards, sparked within a week. ODA sweeps will populate dozens of
-  // cards, so the list filters rather than the reader.
+  // One item per card that has a plan, bucketed as a DECISION QUEUE rather
+  // than an inventory (2026-09-18 — ODA sweeps kept every plan perpetually
+  // fresh, so the old sparked-within-a-week working set converged on "all of
+  // them"). Buckets: needs_you (live runs + active plans on actionable
+  // cards, oldest recommendation first — the age IS the decision latency),
+  // scheduled (parked until a date), running (adopted), stale (old plan or
+  // non-live card). Plans on completed cards stay out unless ?all=1.
   app.get("/api/planrooms", (req, res) => {
     const all = req.query.all === "1";
     const cutoff = Date.now() - STALE_DAYS * 86400000;
     const items = [];
-    for (const { cardId, plan, mtime } of listPlanrooms()) {
+    for (const entry of listPlanrooms()) {
+      const { cardId, mtime } = entry;
+      let plan = entry.plan;
       const project = getProjectById(cardId);
       if (!visibleTo(req, project)) continue;
+      if (!all && project.status === "completed") continue;
       const live = getSparkRun(cardId);
       const isLive = !!live && !live.finishedAt;
-      const stale = mtime < cutoff;
       const today = etNow().iso.slice(0, 10);
-      // A parked plan is out of the working set by request until its date
-      // arrives; once due it comes back (exempt from the stale drop — parked
-      // plans are deliberately old) and the ODA wake duty rechecks it.
-      const parkedQuiet = plan.status === "parked" && plan.parked?.until > today;
-      if (!all) {
-        if (!LIVE_STATUSES.has(project.status)) continue;
-        if (parkedQuiet && !isLive) continue;
-        if (stale && !isLive && plan.status !== "adopted" && plan.status !== "parked") continue;
+
+      // Auto-park: an active plan on a card scheduled for a future date has
+      // nothing to decide before then — park it to that date (the status
+      // reconciler's philosophy applied here). Planroom Wake unparks when the
+      // date arrives, and a recheck that finds real movement escalates anyway.
+      const cardDate = nextStepDate(project.next_step);
+      if (plan.status !== "parked" && plan.status !== "adopted" && !isLive && cardDate && cardDate > today) {
+        const parked = markPlanroomParked(cardId, { until: cardDate, by: "auto" });
+        if (parked) plan = parked;
       }
+
+      const stale = mtime < cutoff && plan.status !== "adopted" && plan.status !== "parked";
+      // A parked plan is scheduled until its date arrives; once due it comes
+      // back into the queue (the ODA wake duty rechecks it).
+      const parkedQuiet = plan.status === "parked" && plan.parked?.until > today;
+      let bucket;
+      if (isLive) bucket = "needs_you";
+      else if (plan.status === "adopted") bucket = "running";
+      else if (parkedQuiet) bucket = "scheduled";
+      else if (stale || !LIVE_STATUSES.has(project.status)) bucket = "stale";
+      else bucket = "needs_you";
+
+      const sparkedAt = plan.planroom?.sparked_at || plan.created;
+      const sparkedMs = sparkedAt ? new Date(sparkedAt.length === 16 ? `${sparkedAt}:00` : sparkedAt).getTime() : NaN;
       const steps = plan.steps || [];
       const rr = plan.status === "adopted" ? readThrough(plan) : null;
       items.push({
@@ -91,9 +112,11 @@ export function registerPlanroomRoutes(app) {
         project_status: project.status,
         title: plan.title,
         status: plan.status,
+        bucket,
+        age_days: Number.isNaN(sparkedMs) ? null : Math.max(0, Math.floor((Date.now() - sparkedMs) / 86400000)),
         certitude: plan.planroom?.certitude?.pct ?? null,
         route: plan.planroom?.route || null,
-        sparked_at: plan.planroom?.sparked_at || plan.created,
+        sparked_at: sparkedAt,
         sparked_by: plan.planroom?.sparked_by || "",
         parked_until: plan.parked?.until || null,
         checked_at: plan.planroom?.checked?.at || null,
@@ -106,9 +129,17 @@ export function registerPlanroomRoutes(app) {
         stale,
       });
     }
-    // Needs a decision first, then freshest active, then adopted.
-    const rank = (x) => (x.live?.status === "proposing" ? 0 : x.live ? 1 : x.status === "adopted" ? 3 : 2);
-    items.sort((a, b) => rank(a) - rank(b) || String(b.sparked_at).localeCompare(String(a.sparked_at)));
+    // Queue order: live proposals, live scans, then waiting decisions OLDEST
+    // first (the whole point); scheduled by wake date; running; stale newest.
+    const BUCKET_RANK = { needs_you: 0, scheduled: 1, running: 2, stale: 3 };
+    const rank = (x) => (x.live?.status === "proposing" ? -2 : x.live ? -1 : BUCKET_RANK[x.bucket]);
+    items.sort((a, b) => {
+      const r = rank(a) - rank(b);
+      if (r !== 0) return r;
+      if (a.bucket === "needs_you" && b.bucket === "needs_you") return String(a.sparked_at).localeCompare(String(b.sparked_at));
+      if (a.bucket === "scheduled" && b.bucket === "scheduled") return String(a.parked_until).localeCompare(String(b.parked_until));
+      return String(b.sparked_at).localeCompare(String(a.sparked_at));
+    });
     res.json(items);
   });
 

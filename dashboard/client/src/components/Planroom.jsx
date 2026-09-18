@@ -34,7 +34,13 @@ function stateLabel(r) {
   if (r.live?.status === "proposing") return ["decision waiting", "needs"];
   if (r.live) return ["scanning…", "working"];
   if (r.status === "adopted") return [`in runroom ${r.adopted_by?.tmux_session || ""}`, "adopted"];
-  if (r.stale) return ["stale", "finished"];
+  if (r.status === "parked") return [`until ${r.parked_until || "?"}`, "input"];
+  if (r.bucket === "stale") return ["stale", "finished"];
+  // A waiting decision wears its age — that age is the decision latency.
+  if (r.bucket === "needs_you" && r.age_days != null) {
+    const cls = r.age_days >= 7 ? "wait-crit" : r.age_days >= 3 ? "wait-warn" : "input";
+    return [r.age_days === 0 ? "waiting today" : `waiting ${r.age_days}d`, cls];
+  }
   return ["ready", ""];
 }
 
@@ -151,6 +157,7 @@ export default function Planroom({ activeTimerIds, me, onOpenProject, initialCar
   const [rooms, setRooms] = useState(null);
   const [selected, setSelected] = useState(initialCardId);
   const [showAll, setShowAll] = useState(false);
+  const [openFolds, setOpenFolds] = useState({});
 
   useEffect(() => {
     let stop = false;
@@ -183,14 +190,19 @@ export default function Planroom({ activeTimerIds, me, onOpenProject, initialCar
 
   if (rooms === null) return <div className="loading">Loading planrooms...</div>;
 
+  const needs = rooms.filter((r) => r.bucket === "needs_you");
+  const scheduled = rooms.filter((r) => r.bucket === "scheduled");
+  const running = rooms.filter((r) => r.bucket === "running");
+  const stale = rooms.filter((r) => r.bucket === "stale");
+
   const heading = (
     <header className="runroom-list-header">
       <h1 className="runroom-list-heading">Planrooms</h1>
       <span className="runroom-list-count">
-        {rooms.length} {showAll ? "total" : "in play"}
+        {needs.length} need you
         {" "}&middot;{" "}
         <button className="planroom-all-toggle" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? "working set" : "show all"}
+          {showAll ? "hide completed" : "show all"}
         </button>
       </span>
       {onNewTask && (
@@ -215,7 +227,7 @@ export default function Planroom({ activeTimerIds, me, onOpenProject, initialCar
   // working = scanning, needs = a decision is waiting, finished = adopted/stale.
   const item = (r) => {
     const [label, cls] = stateLabel(r);
-    const ring = r.live ? (r.live.status === "proposing" ? " needs" : " working") : (r.status === "adopted" || r.stale ? " finished" : "");
+    const ring = r.live ? (r.live.status === "proposing" ? " needs" : " working") : (r.status === "adopted" || r.bucket === "stale" ? " finished" : "");
     return (
       <RoomListCard
         key={r.card_id}
@@ -237,18 +249,32 @@ export default function Planroom({ activeTimerIds, me, onOpenProject, initialCar
     );
   };
 
-  const needs = rooms.filter((r) => r.live?.status === "proposing");
-  const rest = rooms.filter((r) => r.live?.status !== "proposing");
+  // The queue: waiting decisions always open; everything else collapsed
+  // behind its count until asked for.
+  const foldable = (id, title, list) => list.length > 0 && (
+    <>
+      <button className="runroom-list-section planroom-fold" onClick={() => setOpenFolds((f) => ({ ...f, [id]: !f[id] }))}>
+        <span className={`planroom-fold-chev${openFolds[id] ? " open" : ""}`}>▸</span>
+        {title} ({list.length})
+      </button>
+      {openFolds[id] && list.map(item)}
+    </>
+  );
+
   return (
     <div className="runroom-list">
       {heading}
-      {needs.length > 0 && (
+      {needs.length > 0 ? (
         <>
-          <div className="runroom-list-section">Decision waiting</div>
+          <div className="runroom-list-section">Needs you ({needs.length})</div>
           {needs.map(item)}
         </>
+      ) : (
+        <div className="planroom-queue-clear">Nothing waiting on you ★</div>
       )}
-      {rest.map(item)}
+      {foldable("scheduled", "Scheduled", scheduled)}
+      {foldable("running", "Running", running)}
+      {foldable("stale", "Stale", stale)}
     </div>
   );
 }
