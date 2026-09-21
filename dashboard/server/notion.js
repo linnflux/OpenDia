@@ -95,7 +95,11 @@ function titleMatchesQuery(title, query) {
   const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 3 && !NOISE.has(w));
   if (queryWords.length === 0) return false;
   const matches = queryWords.filter((w) => titleLower.includes(w)).length;
-  const threshold = Math.max(1, Math.ceil(queryWords.length / 2));
+  // Short queries need ALL their words: at half-match, "Git Hygiene" happily
+  // took a 2020 task called "Git issue" (live mislink, 2026-09-02).
+  const threshold = queryWords.length <= 2
+    ? queryWords.length
+    : Math.ceil(queryWords.length / 2);
   return matches >= threshold;
 }
 
@@ -126,8 +130,19 @@ export async function searchNotionForProject(projectName, companyName) {
     });
     if (!data?.results?.length) continue;
 
-    // Validate: the page title must actually contain query terms
+    // Validate hard — this id gets PERSISTED onto the card and every status
+    // sync then writes to it (card #259: five cards pointed at Clients-DB
+    // company pages, whose multi_select Status made every sync 400 silently):
+    //   1. Tasks DB only. /search spans the whole workspace, and a company
+    //      page titled exactly the company name always "matches".
+    //   2. Never a Completed/Cancelled task — a dead 2020 task is not this
+    //      card's home (card #223's "Git issue" mislink).
+    //   3. The title must actually match (titleMatchesQuery).
+    const norm = (s) => (s || "").replace(/-/g, "");
     for (const page of data.results) {
+      if (norm(page?.parent?.database_id) !== norm(NOTION_TASKS_DB)) continue;
+      const status = page?.properties?.Status?.select?.name;
+      if (page?.archived || status === "Completed" || status === "Cancelled") continue;
       const title = extractTitle(page);
       if (titleMatchesQuery(title, query)) {
         return page.id;

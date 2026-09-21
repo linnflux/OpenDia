@@ -31,12 +31,13 @@ import {
   getAllDuties, getDutyById, createDuty, updateDuty, deleteDuty,
   getAgentDuties, assignDuty, unassignDuty, markDutyRun, bumpDutyCursor,
   listOpenOperatorActions, updateProject, getRecentlyCompletedProjects,
+  createOperatorAction,
 } from "./db.js";
 import { updateNotionTaskStatus } from "./notion.js";
 import { drainPendingHandoffs } from "./handoffs.js";
 import {
   startScan, activeSparkCount, getSparkRun, SPARK_MAX_CONCURRENT,
-  listAgentSparkRuns, superviseDecide,
+  listAgentSparkRuns, superviseDecide, runsOnDisk, readRunResult,
 } from "./spark.js";
 import { spawn } from "child_process";
 import { createInterface } from "readline";
@@ -675,6 +676,34 @@ async function runSweep(agent, state, duty, fixedCards = null) {
     pushLog(state, "info",
       `${card.name}: ${sparkRun.error ? "error" : "scanned"} — ${tokens} tokens` +
       (step ? `, next step awaiting a decision (${step.route}).` : ", no next step."));
+
+    // A closer that isn't closing must say so (duty rule the recheck
+    // shortcut was bypassing — #120 sat no-change five runs at ~$0.60 each
+    // with nothing surfaced): two consecutive no-change results on a focus
+    // card file ONE deduped inbox notice naming the blocker.
+    if (duty?.slug === "closer" && sparkRun.result?.no_change) {
+      try {
+        const prior = runsOnDisk(card.id)
+          .filter((e) => e.runId !== sparkRun.id && e.status === "done")
+          .sort((a, b) => b.at.localeCompare(a.at));
+        const prev = prior.length ? readRunResult(prior[0]) : null;
+        if (prev?.no_change) {
+          createOperatorAction({
+            kind: "notice",
+            source: `agent:${agent.slug}`,
+            findingKey: `closer-stall:${card.id}`,
+            title: `Closer stalled on #${card.id} ${card.name} — no movement across runs`,
+            body: (`Consecutive closer runs found nothing moved. Latest check: ` +
+              `${sparkRun.result.note || "(no note)"}\n\nEither clear the human gate ` +
+              `or swap this card off the closer roster.`).slice(0, 2000),
+            cardUpdatedAt: getProjectById(card.id)?.updated_at || null,
+          });
+          pushLog(state, "warn", `Closer stalled on ${card.name} — inbox notice filed.`);
+        }
+      } catch (e) {
+        console.error("closer stall notice failed:", e.message);
+      }
+    }
     state.currentProject = null;
     emit(state, "progress", publicLive(state));
 
@@ -1353,7 +1382,21 @@ export function buildOperatorInbox(showAll = false) {
     }
   }
   const acked = new Set(getOperatorAckKeys());
-  const out = items
+  // One row per card: the same decision re-escalated across passes was
+  // piling up (34 rows for ~15 real decisions, 2026-09-21). Runs iterate
+  // newest-first, so the first item seen per card is the latest verdict and
+  // it supersedes the rest — acked or not. The all=1 history view stays
+  // uncollapsed.
+  let visible = items;
+  if (!showAll) {
+    const seenCards = new Set();
+    visible = items.filter((i) => {
+      if (seenCards.has(i.project_id)) return false;
+      seenCards.add(i.project_id);
+      return true;
+    });
+  }
+  const out = visible
     .filter((i) => showAll || !acked.has(i.key))
     .map((i) => (showAll ? { ...i, acked: acked.has(i.key) } : i))
     .slice(0, 100);
