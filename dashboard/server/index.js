@@ -276,11 +276,11 @@ app.patch("/api/projects/:id", (req, res) => {
       moveProjectToTop(id, fields.status);
       const { status: _s, ...rest } = fields;
       if (Object.keys(rest).length > 0) {
-        const updated = updateProject(id, rest);
+        const updated = updateProject(id, rest, req.user?.login || "dashboard");
         if (!updated) return res.status(404).json({ error: "project not found" });
       }
     } else {
-      const updated = updateProject(id, fields);
+      const updated = updateProject(id, fields, req.user?.login || "dashboard");
       if (!updated) return res.status(404).json({ error: "project not found" });
     }
 

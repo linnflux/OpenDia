@@ -1116,6 +1116,34 @@ async function runSupervisorHeartbeat(agent, state) {
     }
   }
 
+  // Incident #117 D4: a "must go out before Monday" escalation lived only
+  // in agent_runs.detail all weekend and reached Nick Monday, by accident.
+  // A time-boxed escalation (step by_when within 72h, or already past) now
+  // ALSO files a deduped inbox notice carrying the deadline in its title —
+  // a first-class row that survives ack/collapse until dismissed.
+  {
+    const stepFor = new Map(reviewables.map((r) => [Number(r.projectId), r.result?.next_step]));
+    for (const e of escalated) {
+      const byWhen = stepFor.get(Number(e.project_id))?.by_when || null;
+      if (!byWhen) continue;
+      const t = Date.parse(byWhen);
+      if (!Number.isFinite(t) || t - Date.now() > 72 * 3600 * 1000) continue;
+      try {
+        createOperatorAction({
+          kind: "notice",
+          source: `agent:${agent.slug}`,
+          findingKey: `urgent-esc:${e.project_id}`,
+          title: `URGENT by ${byWhen}: #${e.project_id} ${e.name} needs your decision`,
+          body: (e.note || e.reason || "").slice(0, 2000),
+          cardUpdatedAt: getProjectById(e.project_id)?.updated_at || null,
+        });
+        pushLog(state, "warn", `Time-boxed escalation on ${e.name} (by ${byWhen}) — urgent inbox notice filed.`);
+      } catch (err) {
+        console.error("urgent escalation notice failed:", err.message);
+      }
+    }
+  }
+
   // ── Record + report ──
   const wouldApprove = escalated.filter((e) => e.wouldApprove).length;
   const finalStatus = "done";

@@ -862,16 +862,25 @@ function validateResult(raw) {
     if (!Array.isArray(raw.fronts) || raw.fronts.length === 0) {
       return { ok: false, problems: ["no_change result has no fronts"] };
     }
+    // Degrade, don't discard (incident #117 D5): a stray front name the
+    // model invented ("inbox") used to throw away a finished, correct
+    // result — the last chance to surface a time-boxed send. Unknown
+    // fronts are dropped with a note; only zero KNOWN fronts rejects.
+    const known = raw.fronts.filter((f) => FRONTS.includes(f.front));
     const unknown = raw.fronts.map((f) => f.front).filter((f) => !FRONTS.includes(f));
-    if (unknown.length) return { ok: false, problems: [`unknown front(s): ${unknown.join(", ")}`] };
+    if (known.length === 0) {
+      return { ok: false, problems: [`no recognized fronts (got: ${unknown.join(", ")})`] };
+    }
     return {
       ok: true,
       result: {
         schema: 2,
         no_change: true,
         note: typeof raw.note === "string" ? raw.note.slice(0, 300) : "",
-        generated_at: raw.generated_at || null,
-        fronts: raw.fronts,
+        // Server clock, not the model's guess (incident #117 D6).
+        generated_at: new Date().toISOString(),
+        fronts: known,
+        ...(unknown.length ? { dropped_fronts: unknown } : {}),
       },
     };
   }
@@ -883,10 +892,13 @@ function validateResult(raw) {
   if (!Number.isInteger(pct) || pct < 0 || pct > 100) problems.push("certitude.pct must be an integer 0-100");
   if (!r?.next_step?.text) problems.push("next_step.text is empty");
   if (!r?.where_it_stands) problems.push("where_it_stands is empty");
+  let droppedFronts = [];
   if (!Array.isArray(r.fronts) || r.fronts.length === 0) problems.push("fronts is empty");
   else {
-    const unknown = r.fronts.map((f) => f.front).filter((f) => !FRONTS.includes(f));
-    if (unknown.length) problems.push(`unknown front(s): ${unknown.join(", ")}`);
+    // Same degrade-don't-discard as the no_change branch (incident #117 D5).
+    droppedFronts = r.fronts.map((f) => f.front).filter((f) => !FRONTS.includes(f));
+    r.fronts = r.fronts.filter((f) => FRONTS.includes(f.front));
+    if (r.fronts.length === 0) problems.push(`no recognized fronts (got: ${droppedFronts.join(", ")})`);
   }
   if (r.recent && !Array.isArray(r.recent)) problems.push("recent must be an array");
 
@@ -901,10 +913,14 @@ function validateResult(raw) {
   if ((r.certitude?.reason || "").length < 20) warnings.push("certitude reason is thin");
   if ((r.card_next_step || "").length > 100) warnings.push("card next step exceeds 100 chars");
 
+  if (droppedFronts.length) warnings.push(`dropped unknown front(s): ${droppedFronts.join(", ")}`);
+
   return {
     ok: true,
     result: {
       ...r,
+      // Server clock, not the model's guess (incident #117 D6).
+      generated_at: new Date().toISOString(),
       next_step: normaliseStep(r.next_step),
       recent: normaliseRecent(r.recent),
       style_warnings: warnings,
@@ -1273,7 +1289,7 @@ function applyCardNextStep(run, project) {
   if (!value || typeof value !== "string") return;      // null means "leave the card alone"
   if (value === project.next_step) return;
   try {
-    updateProject(project.id, { next_step: value });
+    updateProject(project.id, { next_step: value }, run.startedBy || "spark");
     project.next_step = value;
     pushLedger(run, "done", `Card next step set to "${value}".`);
     // The calendar trigger lives on the Express PATCH route; this raw
@@ -1509,6 +1525,17 @@ function applyRoundResult(run, data) {
   // of play, and that sentence is the update. It used to be carried as its own
   // field as well, which put the same sentence on screen twice and printed it
   // twice in the handoff brief. One fact, one place.
+  // Incident #117 D3: a done round that produced a draft but carried no
+  // card_next_step left the card on its pre-round text (there, a false
+  // "Meet Nathan" outcome). After a draft lands, the card's next undone
+  // action IS the send decision — synthesize it rather than let the card
+  // keep asserting a future that hasn't happened.
+  let cardStep = data.card_next_step ?? null;
+  if (!cardStep && o?.status === "done" && run.drafts.length) {
+    const d = run.drafts[run.drafts.length - 1];
+    const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    cardStep = `${day}: Send or decline the drafted reply to ${d.to}`.slice(0, 100);
+  }
   if (run.result) {
     run.result = {
       ...run.result,
@@ -1519,7 +1546,7 @@ function applyRoundResult(run, data) {
       next_step: data.next_step,
       certitude: data.certitude || run.result.certitude,
       recent: [...(data.recent_add || []), ...(run.result.recent || [])].slice(0, 20),
-      card_next_step: data.card_next_step ?? null,
+      card_next_step: cardStep,
     };
     applyCardNextStep(run, run.project);
     persistResult(run);

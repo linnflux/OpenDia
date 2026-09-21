@@ -81,7 +81,22 @@ export function ensureProjectsColumns() {
   `);
 }
 
-export function updateProject(id, fields) {
+export function updateProject(id, fields, author = null) {
+  // next_step edits leave a trail (incident #117 D2: a scanner overwrote a
+  // session-authored step and silently dropped a clause — no history, no
+  // attribution, no way to notice or revert). Best-effort: history must
+  // never block the write.
+  if (fields.next_step !== undefined) {
+    try {
+      const cur = getDb().prepare("SELECT next_step FROM projects WHERE id = ?").get(id);
+      if (cur && (cur.next_step || "") !== (fields.next_step || "")) {
+        getDb().prepare(`
+          INSERT INTO next_step_history (project_id, old_value, new_value, author)
+          VALUES (?, ?, ?, ?)
+        `).run(id, cur.next_step || null, fields.next_step || null, author || "unknown");
+      }
+    } catch {}
+  }
   const sets = [];
   const vals = [];
   for (const [key, val] of Object.entries(fields)) {
@@ -845,6 +860,16 @@ export function ensureAgentsTables() {
     -- concrete executable action ('git_push') or an FYI ('notice') with full
     -- evidence, and the Operator inbox renders an Approve/Dismiss button.
     -- action is JSON ({repo, remote, branch, head_sha} for git_push).
+    -- 2026-09-21 (incident #117): every next_step change, with author.
+    CREATE TABLE IF NOT EXISTS next_step_history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      old_value  TEXT,
+      new_value  TEXT,
+      author     TEXT NOT NULL DEFAULT 'unknown',
+      at         TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_next_step_history_project ON next_step_history(project_id, at DESC);
     CREATE TABLE IF NOT EXISTS operator_actions (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       kind        TEXT NOT NULL,
