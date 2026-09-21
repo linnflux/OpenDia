@@ -68,7 +68,13 @@ approval — goes through one of two `requireAdmin` dashboard routes:
   `status=classified`, or **↺ Re-dispatch** afterward. Both hit the same
   route, `POST /api/inbox/:id/redispatch` → `inbox_stage_b.py --redispatch
   <gmail_id>`. This kills any existing session, stub-closes a stale timer if
-  one is open, and spawns fresh.
+  one is open, and spawns fresh — **unless** the item has operator `notes`
+  and isn't already flagged `requires_server_access`. Notes get prepended to
+  the session prompt as an authoritative `## Operator Correction`, which can
+  redirect a low item straight into a live-site change (2026-09-21 PART
+  sender-sync incident), so redispatch instead flips `requires_server_access`
+  to 1 and returns without spawning — the item now shows the SERVER badge and
+  only Approve & Dispatch (below) can proceed.
 - **Server-work item:** flagged `requires_server_access` at classification
   time; the card shows an amber **SERVER** badge and never appears in the
   auto-dispatch path even if it existed. The Operator enters the target

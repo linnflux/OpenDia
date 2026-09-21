@@ -634,12 +634,36 @@ def redispatch(gmail_id: str):
     """
     Re-dispatch an inbox item by gmail_id. Reads corrected fields from inbox_items,
     kills any existing session, spawns a fresh one with operator notes prepended.
+
+    Operator notes are a live steering signal, not just a classifier correction —
+    they can direct real changes to a client's site (2026-09-21 PART sender-sync
+    incident: a 5-min-ack item got notes saying "build this feature", redispatch
+    honored them as an authoritative Operator Correction, and the resulting
+    deploy never went through the server-work snapshot/review gate because
+    requires_server_access was still 0). So notes present + requires_server_access
+    still 0 elevates the item instead of soft-redispatching: the safety gate
+    applies to what the notes ask for, not just to what Stage A classified.
     """
     log.info(f"Re-dispatching gmail_id={gmail_id}")
 
     item = get_inbox_item_by_gmail_id(gmail_id)
     if not item:
         raise ValueError(f"No inbox item found for gmail_id={gmail_id}")
+
+    if item.get("notes") and item.get("notes").strip() and not item.get("requires_server_access"):
+        log.info(f"  Operator notes present on non-server item — elevating to server-work review: {gmail_id}")
+        ts = datetime.now()
+        update_inbox_item(
+            gmail_id,
+            requires_server_access=1,
+            notes=(item.get("notes") or "")
+            + f"\n[elevated to server-work review {ts:%H:%M} — operator notes present; use Approve & Dispatch]",
+        )
+        log_line = f"{ts.isoformat()} | (no session) | {gmail_id} | {item.get('client_hint')} [elevated-to-server-review]\n"
+        with (LOG_DIR / f"inbox-{ts:%Y-%m-%d}.log").open("a") as f:
+            f.write(log_line)
+        log.info(f"  Logged: {log_line.strip()}")
+        return
 
     # Kill the old session if it still exists
     old_session = item.get("session_name")
