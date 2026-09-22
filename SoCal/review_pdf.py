@@ -327,8 +327,16 @@ def main():
     pdf_path = os.path.join(a.out, f"{stem}-v{version}.pdf")
     with open(html_path, "w") as fh:
         fh.write(build_html(rows, cfg, a.batch, version, images))
+    # file:// needs an ABSOLUTE path. --out is normally relative (the wrapper
+    # passes "$(dirname "$0")/out", "." when invoked as ./review.sh), and a
+    # relative file:// URL silently truncates every large data-URI image to
+    # a broken-image icon while the rest of the page still renders fine.
+    # First hit on FCB's five-photo October batch (2 icons embedded, not 5
+    # photos, no chromium error). Sept's three-photo batch happened to be
+    # invoked with an absolute --out, which is why it never surfaced there.
     subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--virtual-time-budget=8000",
-                    "--no-pdf-header-footer", f"--print-to-pdf={pdf_path}", "file://" + html_path],
+                    "--no-pdf-header-footer", f"--print-to-pdf={pdf_path}",
+                    "file://" + os.path.abspath(html_path)],
                    check=True, capture_output=True)
     os.remove(html_path)
     size = os.path.getsize(pdf_path)
