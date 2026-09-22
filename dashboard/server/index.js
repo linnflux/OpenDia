@@ -18,7 +18,7 @@ import { getAllProjects, updateProject, getProjectById, getProjectByTmuxSession,
 import { runDispatch } from "./dispatch.js";
 import { spawn, execFile } from "child_process";
 import { timingSafeEqual, randomUUID } from "crypto";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, realpathSync } from "fs";
 import { getTimerEntriesForProject, getActiveTimers, getAllTimerEntries, getWeekDetail, currentWeekKey } from "./timers.js";
 import { fetchNotionPage, fetchNotionTitle, appendToggleBlocks, searchNotionForProject, appendTimerLog, getTimerMarkers, updateNotionTaskStatus, updateNotionTaskDueDate } from "./notion.js";
 import { searchRecentEmails, listPrimaryInboxTop } from "./gmail.js";
@@ -967,20 +967,38 @@ app.get("/api/projects/:id/notion-title", async (req, res) => {
   }
 });
 
-// Serve OpenDia files (images/attachments) — scoped to ~/OpenDia/
+// Serve OpenDia files (images/attachments) — scoped to ~/OpenDia/.
+// Stays user-level (not requireAdmin): AgentAvatar and card attachment
+// previews load through here for every dashboard user, Tara included.
+// Secrets that live in the tree are denied by name instead.
+const OPENDIA_ROOT = resolve(process.env.HOME, "OpenDia");
+const FILE_DENY_SEGMENT = /^(\.env(\..*)?|.*\.env|.*\.conf|.*token.*|.*credential.*|.*secret.*|.*\.pem|.*\.key|\.labor-rates.*|\.claude|\.wrangler|\.git)$/i;
+
+function fileDenied(rel) {
+  return rel.split(sep).some((seg) => FILE_DENY_SEGMENT.test(seg));
+}
+
 app.get("/api/file", (req, res) => {
   const filePath = req.query.path;
-  if (!filePath) return res.status(400).json({ error: "path required" });
+  if (typeof filePath !== "string" || !filePath) return res.status(400).json({ error: "path required" });
 
-  // Resolve ~ to home dir, then ensure it's under ~/OpenDia/
-  const resolved = resolve(filePath.replace(/^~/, process.env.HOME));
-  const openDiaRoot = resolve(process.env.HOME, "OpenDia");
-  if (resolved !== openDiaRoot && !resolved.startsWith(openDiaRoot + sep)) {
+  // Resolve ~ then follow symlinks: a link inside ~/OpenDia pointing outside
+  // it must not read through. realpathSync throws when the target is missing.
+  let real;
+  try {
+    real = realpathSync(resolve(filePath.replace(/^~/, process.env.HOME)));
+  } catch {
+    return res.status(404).json({ error: "file not found" });
+  }
+  if (!real.startsWith(OPENDIA_ROOT + sep)) {
     return res.status(403).json({ error: "path must be under ~/OpenDia/" });
   }
+  const rel = real.slice(OPENDIA_ROOT.length + 1);
+  if (fileDenied(rel)) return res.status(403).json({ error: "forbidden" });
+  if (!statSync(real).isFile()) return res.status(404).json({ error: "file not found" });
 
-  res.sendFile(resolved, (err) => {
-    if (err) res.status(404).json({ error: "file not found" });
+  res.sendFile(real, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: "file not found" });
   });
 });
 

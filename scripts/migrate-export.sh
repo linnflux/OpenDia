@@ -173,11 +173,19 @@ cat > "$OPENDIA_FILTER" <<'FILTER'
 - opendia.db
 - opendia.db-shm
 - opendia.db-wal
+- logs/*.log
+- **/tick.log
 + **
 FILTER
 
+# --local-no-check-updated: cron rewrites files in this tree every 5 minutes
+# (.opendia-calendar-state.json, social tick.log, ...). By default rclone
+# refuses any file whose mtime/size moves during its own upload, and under
+# `set -euo pipefail` that single refusal aborted the whole run before the
+# FluxCC sync (9/10, 9/12, 9/18). Upload churning files as-read instead.
 rclone sync "$OPENDIA_DIR/" "gdrive:OpenDia/" \
     --filter-from "$OPENDIA_FILTER" \
+    --local-no-check-updated \
     --tpslimit 8 --tpslimit-burst 8 \
     --retries 5 --low-level-retries 20 \
     -v 2>&1 | tail -5
