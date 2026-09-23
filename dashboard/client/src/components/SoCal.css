@@ -70,6 +70,10 @@
 .socal-noart { display: grid; place-items: center; aspect-ratio: 1; border: 1px dashed var(--border, #3a4353);
   border-radius: 8px; opacity: .5; font-size: 13px; }
 .small-note { font-size: 11px; margin-top: 4px; text-transform: uppercase; letter-spacing: .6px; }
+.socal-imgstate { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.socal-imgstate .small-note { margin-top: 0; }
+.socal-imgstate-approve { font-size: 12px; padding: 4px 10px; }
+.socal-imgstate-undo { font-size: 11px; padding: 2px 8px; opacity: .6; }
 .socal-post-fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .socal-field { font-size: 13.5px; line-height: 1.5; }
 .socal-field label { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; opacity: .55; margin-right: 8px; }

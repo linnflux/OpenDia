@@ -327,6 +327,33 @@ export default function SoCal() {
     );
   };
 
+  // Generated art lands Placeholder; a human looking at it is the gate to Final.
+  const setImageState = (row, value) => fetch(`/api/socal/${selected.slug}/rows/${row.ID}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field: "Image state", value }),
+  }).then((r) => r.json()).then((out) => {
+    say(out.error || out.warning || `${row.ID} graphic → ${value}`);
+    if (!out.error) refreshCal(selected);
+  });
+
+  const imageState = (row) => {
+    if (!row.Image) return null;
+    if (row["Image state"] === "Final") {
+      return (
+        <div className="socal-imgstate">
+          <span className="muted small-note">Final</span>
+          <button className="ghost socal-imgstate-undo" onClick={() => setImageState(row, "Placeholder")}>undo</button>
+        </div>
+      );
+    }
+    return (
+      <div className="socal-imgstate">
+        <span className="muted small-note">Placeholder</span>
+        <button className="socal-imgstate-approve" onClick={() => setImageState(row, "Final")}>Approve graphic</button>
+      </div>
+    );
+  };
+
   const statusPicker = (row) => (
     <select className="socal-status-select" value={row.Status}
       style={{ borderColor: STATUS_COLORS[row.Status] }}
@@ -385,7 +412,7 @@ export default function SoCal() {
                               className="socal-zoomable" title="Click to enlarge"
                               onClick={() => setLightbox(thumb(r, 1600))} />
                           : <div className="socal-noart">no graphic yet</div>}
-                        {r["Image state"] && <div className="muted small-note">{r["Image state"]}</div>}
+                        {imageState(r)}
                       </div>
                       <div className="socal-post-fields">
                         <div className="socal-field"><label>Date</label> {editable(r, "Post date", "date")}
