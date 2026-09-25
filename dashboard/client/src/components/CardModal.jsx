@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { marked } from "marked";
 import TerminalPanel from "./TerminalPanel.jsx";
 import SparkDoorway from "./SparkDoorway.jsx";
@@ -58,6 +59,46 @@ function extractImagePaths(...fields) {
   return paths;
 }
 
+const ASSET_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
+const ASSET_DOC_EXTS = new Set(["md", "markdown", "txt"]);
+
+// Reading lightbox for a card asset. Portaled to <body> so the card modal's
+// backdrop-filter can't become the containing block for its fixed positioning,
+// and stacked above the card (z-index 1100 vs 1000).
+function AssetViewer({ viewer, onClose }) {
+  const fileUrl = viewer.url;
+  return createPortal(
+    <div className="asset-viewer-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="asset-viewer" role="dialog" aria-modal="true" aria-label={viewer.label}>
+        <div className="asset-viewer-head">
+          <div className="asset-viewer-title">
+            <span className="asset-viewer-label">{viewer.label}</span>
+            <span className="asset-viewer-file">{viewer.name}</span>
+          </div>
+          <button className="modal-close asset-viewer-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
+            &times;
+          </button>
+        </div>
+        <div className="asset-viewer-body">
+          {viewer.kind === "loading" && <div className="modal-empty">Loading...</div>}
+          {viewer.kind === "error" && <div className="modal-empty">Could not load {viewer.name}.</div>}
+          {viewer.kind === "doc" && (
+            <div className="modal-notes-rendered asset-viewer-doc" dangerouslySetInnerHTML={{ __html: viewer.html }} />
+          )}
+          {viewer.kind === "text" && <pre className="asset-viewer-pre">{viewer.text}</pre>}
+          {viewer.kind === "image" && <img className="asset-viewer-img" src={fileUrl} alt={viewer.name} />}
+          {viewer.kind === "link" && (
+            <a className="modal-child-link" href={fileUrl} target="_blank" rel="noopener noreferrer">
+              Open {viewer.name} in a new tab
+            </a>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function relativeTime(iso) {
   if (!iso) return "";
   const diff = Date.now() - new Date(iso + "Z").getTime();
@@ -99,6 +140,7 @@ export default function CardModal({ project, projects, onOpenProject, onClose, o
   const [notionTitle, setNotionTitle] = useState(null);
   const [divisionOpen, setDivisionOpen] = useState(false);
   const [tab, setTab] = useState(initialTab || "details");
+  const [viewer, setViewer] = useState(null);
   // Owned here, not in the doorway: panels unmount on every tab switch, and a
   // run has to survive a glance at Details.
   const spark = useSparkRun(project.id);
@@ -107,11 +149,34 @@ export default function CardModal({ project, projects, onOpenProject, onClose, o
 
   useEffect(() => {
     function onKey(e) {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // The asset viewer sits on top of the card: Escape peels it first.
+      if (viewer) setViewer(null);
+      else onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, viewer]);
+
+  async function openAsset(asset) {
+    const url = `/api/file?path=${encodeURIComponent(asset.path)}`;
+    const base = { label: asset.label, name: asset.path.split("/").pop(), url };
+    const ext = base.name.includes(".") ? base.name.split(".").pop().toLowerCase() : "";
+    if (ASSET_IMAGE_EXTS.has(ext)) return setViewer({ ...base, kind: "image" });
+    if (!ASSET_DOC_EXTS.has(ext)) return setViewer({ ...base, kind: "link" });
+    setViewer({ ...base, kind: "loading" });
+    // Functional updates so a viewer closed mid-fetch is not resurrected.
+    const settle = (next) => setViewer((v) => (v && v.url === url ? { ...v, ...next } : v));
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      settle(ext === "txt" ? { kind: "text", text } : { kind: "doc", html: marked.parse(text) });
+    } catch (err) {
+      console.error("asset fetch error:", err);
+      settle({ kind: "error" });
+    }
+  }
 
   useEffect(() => {
     if (editingNotes && notesRef.current) notesRef.current.focus();
@@ -800,6 +865,19 @@ export default function CardModal({ project, projects, onOpenProject, onClose, o
           );
         })()}
 
+        {project.assets?.length > 0 && (
+          <div className="modal-section">
+            <label className="modal-label">Assets</label>
+            <div className="modal-value modal-assets">
+              {project.assets.map((a) => (
+                <button key={a.path} className="modal-child-link" title={a.path} onClick={() => openAsset(a)}>
+                  ▤ {a.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {extractImagePaths(project.notes, project.next_step).length > 0 && (
           <div className="modal-section">
             <label className="modal-label">Attachments</label>
@@ -908,6 +986,7 @@ export default function CardModal({ project, projects, onOpenProject, onClose, o
           )}
         </div>
         {toast && <div className="modal-toast">{toast}</div>}
+        {viewer && <AssetViewer viewer={viewer} onClose={() => setViewer(null)} />}
       </div>
     </div>
   );

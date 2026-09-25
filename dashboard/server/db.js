@@ -13,7 +13,7 @@ function getDb() {
 }
 
 const GET_ALL_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags, p.goal,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags, p.goal, p.assets,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
@@ -27,7 +27,7 @@ const GET_ALL_PROJECTS = `
 const VALID_STATUSES = new Set(["in_progress", "wfhuman", "completed", "ice"]);
 
 const GET_ACTIVE_PROJECTS = `
-  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags, p.goal,
+  SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.updated_at, p.tags, p.goal, p.assets,
          c.name AS company_name, c.short_name AS company_short,
          c.notion_id AS company_notion_id, c.website AS company_website,
          d.name AS division,
@@ -39,14 +39,25 @@ const GET_ACTIVE_PROJECTS = `
   ORDER BY p.sort_order ASC, p.updated_at DESC
 `;
 
+// assets is stored as a JSON text column; the API speaks arrays both ways.
+function withAssets(row) {
+  if (!row) return row;
+  let assets = [];
+  try {
+    const parsed = JSON.parse(row.assets || "[]");
+    if (Array.isArray(parsed)) assets = parsed;
+  } catch {}
+  return { ...row, assets };
+}
+
 export function getAllProjects({ includeCompleted = false } = {}) {
   const query = includeCompleted ? GET_ALL_PROJECTS : GET_ACTIVE_PROJECTS;
-  return getDb().prepare(query).all();
+  return getDb().prepare(query).all().map(withAssets);
 }
 
 export function getProjectById(id) {
-  return getDb().prepare(`
-    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.tags, p.goal,
+  return withAssets(getDb().prepare(`
+    SELECT p.id, p.name, p.status, p.tmux_session, p.notes, p.notion_id, p.next_step, p.tags, p.goal, p.assets,
            p.updated_at,
            p.company_id, c.name AS company_name, c.short_name AS company_short,
            c.notion_id AS company_notion_id,
@@ -55,10 +66,29 @@ export function getProjectById(id) {
     LEFT JOIN companies c ON p.company_id = c.id
     LEFT JOIN divisions d ON p.division_id = d.id
     WHERE p.id = ?
-  `).get(id);
+  `).get(id));
 }
 
-const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id", "tags", "goal"]);
+const UPDATABLE_FIELDS = new Set(["name", "status", "notes", "tmux_session", "next_step", "notion_id", "tags", "goal", "assets"]);
+
+// Card assets: [{label, path}] where path is a file under ~/OpenDia/ (the
+// scope GET /api/file serves). null or [] clears the list. Throws on bad
+// input so the PATCH route answers 400 instead of silently dropping it.
+function serializeAssets(val) {
+  if (val === null) return null;
+  if (!Array.isArray(val)) throw new Error("assets must be an array of {label, path}");
+  if (val.length > 20) throw new Error("assets: 20 max");
+  const clean = val.map((a) => {
+    const label = typeof a?.label === "string" ? a.label.trim() : "";
+    const path = typeof a?.path === "string" ? a.path.trim() : "";
+    if (!label || label.length > 40) throw new Error("asset label must be 1-40 characters");
+    if (!path.startsWith("~/OpenDia/") || path.split("/").includes("..")) {
+      throw new Error("asset path must be under ~/OpenDia/");
+    }
+    return { label, path };
+  });
+  return clean.length ? JSON.stringify(clean) : null;
+}
 
 // Migration guard: add columns introduced after the original schema.
 // Safe to call on every startup — no-ops once the column exists.
@@ -69,6 +99,9 @@ export function ensureProjectsColumns() {
   }
   if (!cols.includes("goal")) {
     getDb().exec("ALTER TABLE projects ADD COLUMN goal TEXT");
+  }
+  if (!cols.includes("assets")) {
+    getDb().exec("ALTER TABLE projects ADD COLUMN assets TEXT");
   }
   // SQLite sorts NULLs FIRST, so a project with no sort_order pins itself to
   // the top of its column and cannot be dragged off it — drag writes 0..n-1
@@ -108,6 +141,11 @@ export function updateProject(id, fields, author = null) {
       continue;
     }
     if (!UPDATABLE_FIELDS.has(key)) continue;
+    if (key === "assets") {
+      sets.push("assets = ?");
+      vals.push(serializeAssets(val));
+      continue;
+    }
     if (key === "status" && !VALID_STATUSES.has(val)) {
       throw new Error(`Invalid status: ${val}`);
     }
