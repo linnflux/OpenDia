@@ -46,6 +46,7 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
     division_hint: item.division_hint || "unknown",
     priority: item.priority || "normal",
     notes: item.notes || "",
+    requires_server_access: item.requires_server_access ? 1 : 0,
   });
   const [saving, setSaving] = useState(false);
   const [redispatching, setRedispatching] = useState(false);
@@ -70,6 +71,7 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
       division_hint: item.division_hint || "unknown",
       priority: item.priority || "normal",
       notes: item.notes || "",
+      requires_server_access: item.requires_server_access ? 1 : 0,
     });
     setAliasPrompt(null);
     setAliasSaved(false);
@@ -114,7 +116,8 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
       draft.client_hint !== (item.client_hint || "") ||
       draft.division_hint !== (item.division_hint || "unknown") ||
       draft.priority !== (item.priority || "normal") ||
-      draft.notes !== (item.notes || "")
+      draft.notes !== (item.notes || "") ||
+      draft.requires_server_access !== (item.requires_server_access ? 1 : 0)
     );
   }
 
@@ -314,6 +317,17 @@ export default function InboxModal({ item, onClose, onDismiss, onUpdate, onRedis
                 <option value="normal">Normal</option>
                 <option value="low">Low</option>
               </select>
+            </div>
+            <div className="inbox-edit-field">
+              <label className="inbox-edit-label" title="Server work gates the dispatch behind the orange snapshot-first warning. Set it yourself when the classifier missed it.">Server work</label>
+              <label className="inbox-server-toggle">
+                <input
+                  type="checkbox"
+                  checked={!!draft.requires_server_access}
+                  onChange={(e) => setDraft((d) => ({ ...d, requires_server_access: e.target.checked ? 1 : 0 }))}
+                />
+                <span>{draft.requires_server_access ? "SSH / site changes" : "no"}</span>
+              </label>
             </div>
           </div>
         </div>

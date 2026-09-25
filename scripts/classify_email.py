@@ -68,6 +68,14 @@ Rules:
 - requires_server_access should be true ONLY if responding to this email will require
   SSH, server, or website changes. A simple reply to a client on a web project does
   NOT require server access just because the project involves a website.
+- The flip side is just as binding: if the task IS a change to the client's live
+  site or server — posting or updating a job listing, changing hours or menus,
+  adding/removing pages, banners, images, plugins, or DNS — then
+  requires_server_access is true. Test your own prompt_text: if it tells the
+  session to create, update, publish, or remove something ON the site, the flag
+  must be true. When the flag is true, division_hint should almost never be
+  'unknown' — a WordPress site change is WordFlux, an Astro/static build is
+  FluxCC.
 - If an <attachments> line is present, factor those files into the directive.
   Reference the attachment filenames in prompt_text when the task involves processing them
   (e.g. "Download the attached budget-update.xlsx and update the product prices accordingly.").

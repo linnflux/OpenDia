@@ -17,6 +17,7 @@ Designed to be called by inbox-tick.sh. Exits 0 even on per-thread failures.
 import json
 import logging
 import os
+import re
 import sys
 import traceback
 from datetime import datetime
@@ -26,6 +27,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from classify_email import classify_email
+
+# A directive that changes something ON the client's site/server: an action
+# verb within reach of a site-surface noun. Deliberately narrow — plain
+# replies, questions, and research must not trip it.
+_SITE_CHANGE_RE = re.compile(
+    r"\b(post|publish|create|update|add|remove|delete|change|edit|upload|install|swap|replace)\b"
+    r".{0,60}?\b(web ?site|site|page|job (posting|listing|board)|careers?|banner|menu|hours|"
+    r"plugin|theme|dns|homepage|listing)\b",
+    re.IGNORECASE | re.DOTALL,
+)
 from inbox_db import (
     create_inbox_item,
     get_inbox_item_by_gmail_id,
@@ -267,6 +278,17 @@ def _process_thread(
         attachments_line=attachments_line,
     )
     log.info(f"  Classified: {result}")
+
+    # Backstop the model's own contradiction (seen live 9/25: a prompt_text
+    # saying "create or update the job posting on their careers page" came back
+    # requires_server_access=False, so the dispatch modal never showed the
+    # server warning). If the directive describes changing something ON the
+    # site, the flag must be true — a false positive costs one harmless
+    # approval gate, a false negative dispatches server work unguarded.
+    # The changes@ refusal below still wins by design.
+    if not result.get("requires_server_access") and _SITE_CHANGE_RE.search(result.get("prompt_text") or ""):
+        log.info("  server-access backstop: prompt_text describes a site change — flagging")
+        result["requires_server_access"] = True
 
     if is_changes_intake:
         # The alias table is authoritative for who the client is — not the

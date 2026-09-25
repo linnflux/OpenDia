@@ -8260,3 +8260,11 @@ html.vt-no-target::view-transition-old(card-morph) {
 }
 .mailroom-session-start:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .mailroom-dw-sig { font-size: 0.72rem; color: var(--text-faint); border-bottom: 1px dotted var(--text-faint); cursor: help; }
+
+/* Operator override for the classifier's server-work flag (InboxModal). */
+.inbox-server-toggle {
+  display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem;
+  color: var(--text-secondary); cursor: pointer; padding: 0.3rem 0;
+}
+.inbox-server-toggle input { accent-color: var(--warning); }
+.inbox-server-toggle input:checked + span { color: var(--warning); font-weight: 600; }
