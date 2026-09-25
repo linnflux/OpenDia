@@ -271,7 +271,9 @@ def cmd_instruct(a):
         config=json.dumps({k: cfg.get(k, "") for k in
                            ("client_name", "post_weekday", "footer_line")}, indent=1),
         text=a.text)
-    out = _sp.run(["claude", "-p", prompt], capture_output=True, text=True, timeout=300)
+    # pinned: an unpinned `claude -p` inherits whatever settings.json defaults to
+    out = _sp.run(["claude", "-p", "--model", "opus", prompt],
+                  capture_output=True, text=True, timeout=300)
     body = _re.sub(r"^```(json)?|```$", "", out.stdout.strip(), flags=_re.M).strip()
     start, end = body.find("{"), body.rfind("}")
     try:
