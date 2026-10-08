@@ -1,170 +1,153 @@
 # OpenDia
 
-![Active](https://img.shields.io/badge/status-active-brightgreen) ![CLI-First](https://img.shields.io/badge/CLI--first-blue) ![AI-Orchestrated](https://img.shields.io/badge/AI--orchestrated-purple)
+<img src="opendia_mark.svg" alt="OpenDia mark" width="120">
 
-OpenDia is [Linnflux's](https://linnflux.com) internal operations platform — a CLI-first system built around [Claude Code](https://docs.anthropic.com/en/docs/claude-code) running on a dedicated Linux server. It bridges local tooling with external services to create a unified workflow for managing clients, projects, tasks, and time across all Linnflux divisions. This information was published in its initial state on March 12, 2026.
+OpenDia is a business orchestration framework that connects your existing tools into a unified, AI-driven workflow. Your email, calendars, task management, billing, and time tracking all working together. It doesn't replace your systems. It makes them work together.
 
-> The system is designed so that Claude Code acts as the orchestration layer — reading from and writing to multiple services — while humans continue using Notion, Gmail, and Toggl through their native interfaces. Neither side is the sole source of truth; they complement each other.
+OpenDia is designed to be run by an **Operator**: a trained professional inside your organization who understands your processes, your clients, and your goals. The Operator directs OpenDia, not the other way around. This information was published in its initial state on March 12, 2026.
 
-## Architecture
+## What OpenDia says about itself
 
-### Remote Server + tmux
+- **Not a SaaS product you hand logins to.** OpenDia runs on your infrastructure, with your data, under your control. No third-party dashboards where your business lives on someone else's server.
+- **No rip-and-replace.** You keep your existing email, project management, time tracking, and invoicing tools. OpenDia is the layer that ties them together.
+- **Human-in-the-loop by design.** AI handles the tedious coordination. The Operator makes the decisions. This isn't "set it and forget it" automation. It's augmented operations.
+- **Built for service businesses.** Agencies, consultancies, MSPs, and anyone juggling multiple clients, tools, and workflows.
 
-Claude Code runs on a persistent Linux Mint server (`opendia`) on a [Tailscale](https://tailscale.com) mesh network. The Operator SSHs in from any machine — desktop, laptop, or mobile — and attaches to long-running `tmux` sessions, one per project or client context. Sessions survive disconnects, sleep, and machine switches. The server is the single point of execution; client machines are just terminals.
+## The open source engine
 
-```
-laptop ~$ ssh linnflux@opendia
-opendia ~$ tmux attach -t acme
-```
+**Deterministic, self-hosted workflows for business operations. AI does the drafting; the Operator approves; every side effect happens exactly once.**
 
-> **Note:** The server and tmux layer is the foundation. Everything below it — the database, time tracking, MCP integrations — is flexible and designed to adapt to your current tools. Swap in a different project manager, time tracker, or email provider and the architecture still holds. The goal is to meet you where you already are, not force a migration.
+Hosted agent products like Meta Muse and OpenAI Dots take a goal and decide on their own what to do next. That is useful, and it is also the problem: you cannot replay what happened, you cannot prove it will not happen twice, and your data lives on someone else's computer.
 
-### SQLite Database
+OpenDia takes the other side. You decide the steps. The model fills in the parts that need judgment (classify this email, draft that reply) inside steps that are recorded. A person approves anything that leaves the building. If the machine dies halfway through, OpenDia resumes exactly where it stopped, without calling the model again and without sending anything twice.
 
-A local SQLite database stores the canonical list of companies, people, projects, tasks, and Linnflux divisions. Each record can carry a `notion_id` and `toggl_client_id`, creating a lightweight bridge between external services without depending on any single one. Foreign keys are enforced. The schema is initialized idempotently, and all CRUD is handled through a CLI helper that doubles as an importable Python module.
+> Muse and Dots decide what to do. OpenDia runs what you decided, on your box, with a receipt.
 
-| Table | Purpose | Key Fields |
-|-------|---------|------------|
-| `divisions` | Linnflux business units | name, description |
-| `companies` | Client companies | name, short_name, notion_id, toggl_client_id |
-| `people` | Contacts at companies | name, email, role, company_id |
-| `projects` | Work projects per company | name, company_id, division_id, toggl_project_id |
-| `tasks` | Tasks per project | title, project_id, status, notion_url |
+Status: **v0.1 alpha.** One workflow ships (email triage). The engine underneath is general.
 
-### Internal Time Tracking
+## Quickstart (no API keys needed)
 
-Time entries live in daily markdown files with YAML frontmatter. Each running timer has a companion `.json` state file that persists until the work is complete — timers represent open engagements, not stopwatch sessions. A timer might stay open for hours, days, or weeks as work progresses across multiple sessions.
-
-Every entry records: client, project, division, task, estimated minutes, start/end, duration, billable flag, and notes. The `estimated_minutes` field drives billing — it captures how long the task *should* take a professional developer, not the wall-clock time. Actual elapsed time is tracked for internal reference. If a second timer is started for the same client, Claude flags it as a potential duplicate. This runs alongside Toggl, not instead of it — it's Linnflux's own internal record with fields Toggl doesn't track.
-
-```yaml
-~/OpenDia/Time/2026/03/2026-03-12.md
-
----
-<!-- entry:2026-03-12T09:15 -->
-client: ACME Corp
-project: ACME Website
-division: WordFlux
-task: WooCommerce product updates
-estimated_minutes: 60
-start: 2026-03-12T09:15
-end: 2026-03-12T09:22
-duration: 7m
-billable: true
-notes: Updated variable product attributes via WP-CLI
----
+```bash
+pip install opendia            # Python 3.11+
+mkdir ops && cd ops
+opendia init --demo            # config + three sample emails
+opendia serve                  # worker + approval inbox at http://127.0.0.1:8765
 ```
 
-### MCP Servers
+Open the inbox. The newsletter was filed without a reply. The two emails that need an answer are waiting with drafted replies. Edit one, approve it, and it lands in `outbox/` exactly once. Then:
 
-Claude Code connects to external services via [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers — lightweight API bridges that expose tool functions Claude can call directly:
-
-- **Notion** — Task management, company pages, meeting notes. Claude reads, creates, and updates tasks and appends content to pages.
-- **Toggl Track** — Client-facing time tracking. Start/stop timers, list entries, cross-reference with internal time data.
-- **Google Workspace** — Gmail (inbox scanning, email review), Drive (file sync, backups), Calendar, and Sheets.
-- **Square** — Read-only access to payments, invoices, and customer data for billing context.
-
-The key principle: humans keep using Notion, Gmail, and Toggl through their normal UIs. Claude participates in those same systems via MCP without replacing them.
-
-## Custom Commands
-
-Custom commands are markdown prompt files that define repeatable workflows. The Operator types a slash command, and Claude executes the full routine.
-
-| Command | What it does |
-|---------|-------------|
-| `/hello` | Morning routine. Creates daily log, carries over unchecked items from the prior day. |
-| `/checkin` | Hourly check-in. Loads today's log, scans recent Gmail, numbers tasks for quick selection. |
-| `/zero` | Inbox Zero. Scans primary inbox, groups by thread, extracts action items. |
-| `/start-timer` | Start an internal time entry with client, task, division, and billable prompts. |
-| `/stop-timer` | Stop a running timer, prompt for notes, calculate duration, finalize the entry. |
-| `/pause-timer` | Pause with auto-generated notes and project summary. |
-| `/timer-status` | Show all active timers across all sessions. |
-| `/od-go` | Unified work start. Resolves client via fuzzy match, searches Notion for related tasks, starts internal timer. |
-| `/run` | Client workflow launcher. Searches Notion, opens browser, starts Toggl timer. |
-| `/newtask` | Creates a Notion task and starts a Toggl timer in one flow. |
-| `/od-sync` | Sync all Claude Code configs and settings to Google Drive for backup. |
-
-## Data Flow
-
-The SQLite database acts as the local index that ties external systems together. A company record might have:
-
-- A `notion_id` linking to its Notion company page
-- A `toggl_client_id` linking to its Toggl client entry
-- Internal time entries referencing it by name in the markdown files
-
-When Claude resolves a client context — from an email sender, a task description, or a spoken name — it looks up the company in SQLite, finds related Notion tasks, checks Toggl for active timers, and starts an internal time entry. All in one flow. No single service owns the data; SQLite is the glue.
-
-```
-Email from client
-      |
-      v
-  SQLite lookup (fuzzy match company name)
-      |
-      +---> Notion: find open tasks for this client
-      +---> Toggl: check for running timers
-      +---> Internal: start time entry
-      |
-      v
-  Ready to work
+```bash
+opendia runs                                   # every run and its outcome
+opendia audit 'email:<demo-001@example.org>'   # plain-language report for one run
 ```
 
-## Infrastructure
+The demo uses a built-in fake model so it runs offline. To use a real one, edit `opendia.toml`.
 
-The system is designed to be portable. Two scripts handle migration:
+## What it guarantees
 
-- `migrate-export.sh` — Backs up `~/.claude/` configs and `~/OpenDia/` (scripts, time entries, database, static site) to Google Drive via rclone. Runs automatically every night via cron.
-- `migrate-setup.sh` — Bootstraps a fresh machine: installs packages, pulls configs from Drive, builds MCP servers, creates the Python environment, and runs 8 verification phases.
-- `cron` — Runs `migrate-export.sh` daily at 2:00 AM ET, automatically backing up all configs, time entries, the database, and site files to Google Drive. Logs to `~/OpenDia/logs/backup.log`.
+Each guarantee has a test that kills the worker at the worst possible moment (`tests/test_durability.py`):
 
-The entire OpenDia environment can be rebuilt on a new server from a single script. The database, time entries, commands, memory files, and all configs travel with it.
+| Guarantee | How |
+|---|---|
+| The same email never starts two runs | Run id = the email's Message-ID |
+| A recovered run never calls the model again | Step outputs are checkpointed; replays read them back |
+| An approved reply is sent once, even if the process dies mid-send | Side-effect ledger plus a deterministic Message-ID checked before any retry |
+| Approvals survive restarts, and you can decide while the worker is down | Decisions are durable messages, delivered on the next start |
+| A decision is recorded once; late or duplicate clicks fail | Conditional state transitions (`pending` to one final state) |
+| Unanswered approvals expire on a durable deadline | The deadline is stored, not held in memory |
 
-### Hosting
+The engine is [DBOS Transact](https://github.com/dbos-inc/dbos-transact-py) (MIT): durable execution in a library, on SQLite or Postgres, with no cluster to run.
 
-This page is hosted on [Cloudflare Pages](https://pages.cloudflare.com/) and deployed from the OpenDia server with a single command:
+## Models
+
+OpenDia is model-agnostic. Pick one in `opendia.toml`:
+
+```toml
+[provider]
+kind = "anthropic"                      # pip install 'opendia[anthropic]'
+model = "claude-haiku-4-5-20251001"     # uses ANTHROPIC_API_KEY; platform = "bedrock" | "vertex" also work
+
+# kind = "openai", model = "gpt-4o-mini"                                        # OPENAI_API_KEY
+# kind = "openai", model = "llama3.1", base_url = "http://localhost:11434/v1"   # Ollama, fully local
+# kind = "mypackage.module:MyProvider"                                          # your own
+```
+
+OpenDia authenticates with API keys or cloud credentials only. It does not use, store, or forward consumer chat subscriptions or their login tokens; model providers' terms generally do not allow third-party apps to do that.
+
+Email content is always passed to the model as data inside delimiters, with instructions to ignore anything in it that looks like a command. That lowers the risk of prompt injection but does not remove it, which is why nothing is sent without a person approving it. Approval cannot be turned off in v0.1.
+
+## Real mail
+
+```toml
+[mail]
+source = "imap"
+sink = "smtp"
+from_address = "you@yourcompany.com"
+# disclosure_footer = "Drafted with AI assistance and reviewed by a person before sending."
+
+[mail.imap]
+host = "imap.gmail.com"
+username = "you@yourcompany.com"
+password_env = "OPENDIA_IMAP_PASSWORD"   # an app password, never your main password
+sent_folder = "[Gmail]/Sent Mail"
+
+[mail.smtp]
+host = "smtp.gmail.com"
+username = "you@yourcompany.com"
+password_env = "OPENDIA_SMTP_PASSWORD"
+append_to_sent = false                   # Gmail saves to Sent itself; most other servers need true
+```
+
+IMAP is read with `BODY.PEEK`, so OpenDia never marks your mail as read. Before any send or retry, it searches the Sent folder for the reply's Message-ID. One gap remains: a crash after the SMTP server accepts a message but before the message appears in Sent. Providers that file to Sent on submit make that window very small.
+
+## How it works
 
 ```
-npx wrangler pages deploy ~/OpenDia/www --project-name=opendia
+email ──> classify (LLM step) ──> draft (LLM step) ──> approval inbox ──> send (ledger step)
+             recorded                 recorded           durable wait         exactly once
 ```
 
-## Persistent Memory
+A workflow is plain Python. The rule that makes it deterministic: anything that can differ between runs (model calls, network, clock, randomness) goes inside a `@DBOS.step`. The workflow body only orchestrates. See `opendia/workflows.py`.
 
-Claude Code maintains a memory directory that persists across conversations. It stores learned patterns, client-specific knowledge, operational rules, and corrections from the Operator. A core memory file is loaded into every conversation, with topic-specific files holding deeper notes.
+```
+opendia/
+  workflows.py     the email triage workflow
+  providers/       fake, anthropic, openai-compatible
+  connectors/      maildir + file (demo), IMAP + SMTP
+  store.py         approval inbox and side-effect ledger tables
+  web/             the one-page approval inbox
+  audit.py         plain-language run reports
+```
 
-This gives Claude institutional knowledge that accumulates over time rather than resetting each session. When a mistake is corrected, the correction is saved so it never happens again.
+## Security notes for v0.1
 
-## Divisions
+- The web inbox has no login. It binds to `127.0.0.1` by default; keep it there or put it behind your own auth (SSH tunnel, Tailscale, a reverse proxy with SSO).
+- SQLite is fine for one operator on one box. DBOS recommends Postgres for production: set `database_url` and install `opendia[postgres]`.
+- Secrets come from environment variables named in the config, never from the config file itself.
 
-| Division | Focus |
-|----------|-------|
-| **WordFlux** | WordPress Design, Development & Hosting |
-| **WatchThreat** | Security, Backups & Hardware |
-| **AmPen** | Penetration Testing |
-| **Bedford AI** | AI & Automation |
-| **ADA Web Work** | Accessibility Compliance |
+## Roadmap
 
-## Design Principles
+- Workflow definitions beyond email (time entries to invoice drafts, ticket triage)
+- Approval routing: assignees, escalation, approvals by email or chat
+- Per-client workspaces and cost ledgers for agencies and MSPs
+- Auth for the web inbox
 
-1. **CLI-first, human-optional.** Claude handles orchestration; humans interact through familiar UIs or drop into the terminal when needed.
-2. **No single source of truth.** SQLite bridges services but doesn't replace them. Each system holds its own authoritative data; SQLite holds the cross-references.
-3. **Portable and rebuildable.** Everything syncs to Google Drive. A new server can be fully provisioned from a single bootstrap script.
-4. **Concurrent by default.** Multiple tmux sessions, multiple timers, multiple client contexts — all running simultaneously on one server.
-5. **Safety guardrails.** No emails sent without explicit confirmation. No destructive AWS operations. No force pushes. Claude asks before acting on anything irreversible.
-6. **Accumulating intelligence.** Memory files capture corrections, patterns, and client-specific knowledge. Claude gets smarter about Linnflux operations with every session.
+## Development
 
-## The Mark
+```bash
+git clone https://github.com/linnflux/OpenDia && cd OpenDia
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest
+```
 
-The mark was designed through a reverse-AI process: Claude described the concept, and a human drew it by hand on a [reMarkable 2](https://remarkable.com) tablet. Through 14 sketches, the form evolved from a rigid geometric diamond into something more organic — a single continuous shape that reads as a horizon at dawn, an eye opening, or a lens looking forward.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The name OpenDia means "Open Day" — your day is open because OpenDia handles the work. The outer shape opens at the top, echoing the "open" in the name. The sunrise inside stays open too. Everything is open.
+## History
 
-<p align="center">
-  <img src="opendia_mark.svg" alt="OpenDia Mark" width="240">
-  <br>
-  <sub><b>Open</b>Dia — Set in <a href="https://fonts.google.com/specimen/Space+Grotesk">Space Grotesk</a> Light 300 / Bold 700</sub>
-</p>
+- **March 12, 2026:** OpenDia first published, as documentation of the Operator model Linnflux runs its own business on.
+- **March 14, 2026:** this repository's first commits. They are kept at the root of the history as the launch record, and were released under the MIT license.
+- **October 2026:** relaunched as an open source, single-operator engine (v0.1), under Apache-2.0 from that commit forward.
 
-Claude selected [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) for the wordmark — a geometric typeface with just enough humanist character to feel approachable without losing its technical edge. "Open" is set in Light (300) and "Dia" in Bold (700), letting the weight contrast carry the emphasis rather than color or size. The typeface's distinctive letterforms — particularly the "O" and "D" — complement the organic geometry of the mark.
+## License
 
----
-
-*Built by [Linnflux](https://linnflux.com) — a [Bedford AI](https://bedford.ai) project.*
+Apache-2.0. Copyright 2026 Linnflux, Inc. OpenDia is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Meta, or DBOS.
