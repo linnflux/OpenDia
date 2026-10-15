@@ -119,6 +119,20 @@ opendia/
   audit.py         plain-language run reports
 ```
 
+## Sparks, plans, and runs
+
+The engine above executes workflows. The Operator model around it moves work through three primitives, and the distinction is worth learning early: **a spark is an event, a plan is the artifact it leaves behind, and a run is where the work actually happens.**
+
+- **Spark.** A read-only scan of one project: every message front (email, tasks, chat, time entries) is swept to establish what actually changed since the last touch. A spark produces exactly one next step, a confidence number, a route (machine or human), and an evidence trail. It never acts; recommending an action is not performing it.
+- **Plan.** The standing document a spark writes. A new scan replaces the plan wholesale, because a step from last week's scan was not re-verified by this one and would be stale weight. Once the Operator approves a plan, rechecks are gated to a single question: did anything change since the plan was made? Only new communication earns a replacement; an approaching date or a stale feeling does not. An Operator correction always outranks the standing plan.
+- **Run.** When the work becomes real, a session adopts the plan and executes it step by step, with the Operator approving anything that leaves the building.
+
+> [!IMPORTANT]
+> **Timer status differs by primitive, and billing integrity depends on it.**
+> A **spark** is timed but never billable: it opens a short internal entry (a scheduled scan that finds nothing logs zero minutes; a run that fails to produce a recommendation also logs zero, since it delivered nothing). If a timer is already running on the project, the spark accrues to that entry rather than opening a second one.
+> A **plan** has no timer at all. It is a document, not work.
+> Time becomes **billable only when a plan graduates into a run**, where it logs against the project's normal working timer like any other session. Monitoring is overhead; only execution bills.
+
 ## Security notes for v0.1
 
 - The web inbox has no login. It binds to `127.0.0.1` by default; keep it there or put it behind your own auth (SSH tunnel, Tailscale, a reverse proxy with SSO).
